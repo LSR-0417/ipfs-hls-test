@@ -1,0 +1,25 @@
+{
+  // 啟用儲存時自動排版
+  "editor.formatOnSave": true,
+  // 將 Prettier 設為全域預設排版工具
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  // 針對 JavaScript 的專屬設定
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+
+  // 針對 HTML 的專屬設定
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    // 讓 HTML 標籤屬性排版更易讀
+    "html.format.wrapLineLength": 120,
+    "html.format.wrapAttributes": "auto"
+  },
+
+  // Prettier 的內建細部設定 (若專案根目錄沒有 .prettierrc 時會生效)
+  "prettier.singleQuote": true, // 使用單引號 (JS 常用)
+  "prettier.trailingComma": "es5", // 在物件或陣列結尾加上逗號
+  "prettier.tabWidth": 2, // 縮排使用 2 個空格
+  "prettier.printWidth": 80 // 每行最多 80 個字元後換行
+}
