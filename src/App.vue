@@ -9,7 +9,7 @@ const currentIpfsBaseUrl = ref('');
 const currentStartTime = ref(0);
 const playerRef = ref(null);
 
-function onPlay({ ipfsBaseUrl, m3u8Url, startTime }) {
+function onLoad({ ipfsBaseUrl, m3u8Url, startTime }) {
   currentIpfsBaseUrl.value = ipfsBaseUrl;
   currentM3u8Url.value = m3u8Url;
   currentStartTime.value = startTime;
@@ -26,7 +26,7 @@ function onLevelsLoaded(levels) {}
   <div class="container">
     <h2>🚀 IPFS 串流播放器</h2>
 
-    <ControlPanel @play="onPlay" @play-status="onStatusUpdate" />
+    <ControlPanel @load="onLoad" @play-status="onStatusUpdate" />
 
     <VideoPlayer
       ref="playerRef"

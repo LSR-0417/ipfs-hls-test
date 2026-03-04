@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 
-const emit = defineEmits(['play', 'play-status']);
+const emit = defineEmits(['load', 'play-status']);
 
 const cid = ref('');
 const gateway = ref('/ipfs/');
@@ -13,7 +13,7 @@ const gateways = [
   { url: 'https://ipfs.io/ipfs/', label: 'IPFS.io (標準網關)' },
 ];
 
-function playVideo(eventOrStartTime) {
+function loadVideo(eventOrStartTime) {
   const startTime = typeof eventOrStartTime === 'number' ? eventOrStartTime : 0;
   const trimmed = cid.value.trim();
   if (!trimmed) {
@@ -32,7 +32,7 @@ function playVideo(eventOrStartTime) {
   const m3u8Url = `${ipfsBaseUrl}output.m3u8`;
 
   emit('play-status', '正在連線至網關...');
-  emit('play', { ipfsBaseUrl, m3u8Url, startTime });
+  emit('load', { ipfsBaseUrl, m3u8Url, startTime });
 
   const currentUrl = new URL(window.location.href);
   currentUrl.searchParams.set('cid', trimmed);
@@ -94,7 +94,7 @@ onMounted(() => {
 
   if (cidFromUrl) {
     cid.value = cidFromUrl;
-    playVideo(timeFromUrl);
+    loadVideo(timeFromUrl);
   }
 });
 </script>
@@ -116,9 +116,9 @@ onMounted(() => {
         id="cidInput"
         placeholder="請輸入資料夾 CID (例如: Qm...)"
         v-model="cid"
-        @keyup.enter="playVideo"
+        @keyup.enter="loadVideo"
       />
-      <button @click="playVideo" class="action-btn">
+      <button @click="loadVideo" class="action-btn">
         <span class="btn-text">▶️ 載入影片</span>
         <span class="btn-icon">▶️</span>
       </button>

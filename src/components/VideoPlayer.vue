@@ -18,6 +18,7 @@ const props = defineProps({
 const emit = defineEmits(['status-update', 'levels-loaded']);
 
 const videoElement = ref(null);
+const videoKey = ref(0);
 const status = ref('準備就緒');
 const subtitles = ref([]); // 加入響應式字幕陣列
 const loadState = ref('idle'); // 'idle', 'loading', 'buffering', 'ready', 'error'
@@ -96,6 +97,20 @@ const loadVideo = async () => {
   status.value = '正在嘗試載入…';
   emit('status-update', status.value);
 
+  // === 網關切換/載入新影片時的生命週期：清理舊資源 ===
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+  if (plyr) {
+    plyr.destroy();
+    plyr = null;
+  }
+
+  // 更新 key 來觸發 Vue 完整銷毀舊的 <video> 元素並產生一個乾淨的
+  videoKey.value += 1;
+  // =================================================
+
   // Pre-check if m3u8 URL is accessible
   try {
     const headResponse = await fetch(props.m3u8Url, {
@@ -115,13 +130,6 @@ const loadVideo = async () => {
     return;
   }
 
-  if (hlsInstance) {
-    hlsInstance.destroy();
-    hlsInstance = null;
-  }
-
-  const videoEl = videoElement.value;
-
   // subtitles should already have been populated when the base URL changed
   // (see ipfsBaseUrl watcher in setup).  If somehow we still lack subtitles,
   // perform a detection now and remember the base so we don't repeat later.
@@ -133,7 +141,9 @@ const loadVideo = async () => {
     lastSubtitleBase = props.ipfsBaseUrl;
   }
 
-  await nextTick(); // 等待 Vue 響應式地將 <track> 標籤渲染到 DOM 中
+  await nextTick(); // 等待 Vue 響應式地將 <track> 標籤和全新的 <video> 渲染到 DOM 中
+
+  const videoEl = videoElement.value;
 
   // Initialize HLS
   if (Hls.isSupported()) {
@@ -196,10 +206,8 @@ const loadVideo = async () => {
       };
       videoEl.addEventListener('playing', onPlaying);
 
-      videoEl.play().catch(() => {
-        status.value = '影片已準備好，請點擊播放按鈕開始。';
-        emit('status-update', status.value);
-      });
+      status.value = '影片已準備好，請點擊播放按鈕開始。';
+      emit('status-update', status.value);
     });
 
     hlsInstance.on(Hls.Events.ERROR, (event, data) => {
@@ -255,10 +263,8 @@ const loadVideo = async () => {
     };
     videoEl.addEventListener('playing', onPlayingNative);
 
-    videoEl.play().catch(() => {
-      status.value = '影片已準備好，請點擊播放按鈕開始。';
-      emit('status-update', status.value);
-    });
+    status.value = '影片已準備好，請點擊播放按鈕開始。';
+    emit('status-update', status.value);
   }
 };
 
@@ -300,6 +306,7 @@ defineExpose({
     <div style="width: 100%; height: 100%">
       <video
         ref="videoElement"
+        :key="videoKey"
         controls
         crossorigin="anonymous"
         playsinline
