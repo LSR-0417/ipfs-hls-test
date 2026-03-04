@@ -1,0 +1,33 @@
+.video-player-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 10px;
+  /* 修正 Safari/Chrome 上的倒角/邊角溢出 */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
+  mask-image: radial-gradient(white, black);
+}
+
+/* ===== Plyr 樣式 ===== */
+:deep(.plyr) {
+  --plyr-color-main: #007bff;
+  border-radius: 8px;
+  height: 100%;
+}
+
+:deep(.plyr__video-wrapper) {
+  border-radius: 8px;
+  overflow: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+:deep(.plyr--fullscreen-active),
+:deep(.plyr--fullscreen-active .plyr__video-wrapper) {
+  border-radius: 0;
+}

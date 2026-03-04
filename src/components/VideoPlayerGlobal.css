@@ -1,0 +1,10 @@
+::cue {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: clamp(16px, 5vh, 40px);
+  font-family: sans-serif;
+}
+
+video:fullscreen ::cue {
+  font-size: 5vh !important;
+}

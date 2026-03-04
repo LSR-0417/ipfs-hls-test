@@ -1,0 +1,35 @@
+/* Completely disable all Plyr button animations and effects */
+
+/* Remove transitions from all controls */
+.plyr__controls button {
+  transition: none !important;
+}
+
+/* Remove all hover and focus effects */
+.plyr__controls button:hover,
+.plyr__controls button:focus,
+.plyr__controls button:focus-visible {
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* Specifically target play-large button */
+.plyr__control.plyr__play-large:hover,
+.plyr__control.plyr__play-large:focus {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove scale transforms from menus */
+.plyr__menu__container .plyr__control[role='menuitemradio']:hover:before,
+.plyr__menu__container
+  .plyr__control[role='menuitemradio']:focus-visible:before {
+  transform: none !important;
+}
+
+/* Remove tooltip animations */
+.plyr .plyr__control:hover .plyr__tooltip,
+.plyr .plyr__control:focus-visible .plyr__tooltip {
+  transform: translate(-50%, 0) !important;
+}
