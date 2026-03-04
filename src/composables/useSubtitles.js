@@ -12,9 +12,19 @@ export function useSubtitles() {
 
     const detectionPromises = possibleSubtitles.map(async (sub, index) => {
       try {
-        const url = `${baseUrl}${sub.filename}`;
-        const res = await fetch(url, { method: 'HEAD', mode: 'cors' });
+        const finalBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+        const url = `${finalBase}${sub.filename}`;
+
+        // 改用 GET 避免部分網關對 HEAD 請求的 CORS 問題，並直接利用瀏覽器快取
+        const res = await fetch(url, { method: 'GET', mode: 'cors' });
+
         if (res.ok) {
+          // 檢查 Content-Type，確保不是代理伺服器或 Vite dev server 返回的 index.html
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) {
+            return null; // 若是 HTML，表示這不是字幕檔
+          }
+
           return {
             lang: sub.lang,
             label: sub.label,
@@ -22,7 +32,9 @@ export function useSubtitles() {
             orderIdx: index,
           };
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn(`[useSubtitles] Failed to fetch ${sub.filename}:`, e);
+      }
       return null;
     });
 
