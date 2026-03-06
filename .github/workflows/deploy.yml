@@ -39,7 +39,7 @@ jobs:
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3wi
+        uses: actions/upload-pages-artifact@v3
         with:
           # 指向打包後的產物目錄（Vite 預設是 dist，Vue CLI 預設是 dist）
           path: './dist'
