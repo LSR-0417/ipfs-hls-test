@@ -12,6 +12,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+import { useSubtitles } from '../composables/useSubtitles';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 window.videojs = videojs;
@@ -38,7 +39,9 @@ const emit = defineEmits(['status-update', 'levels-loaded']);
 const videoRef = ref(null);
 let player = null;
 
-function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
+const { detectSubtitles } = useSubtitles();
+
+async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
   if (!player) return;
 
   // 清除舊字幕軌道
@@ -50,39 +53,39 @@ function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
     }
   }
 
+  // 先偵測真正存在的字幕
+  emit('status-update', '正在檢查可用字幕...');
+  const availableSubtitles = await detectSubtitles(ipfsBaseUrl);
+  emit('status-update', '播放器已就緒');
+
   // 先掛載影片來源
   player.src({
     src: m3u8Url,
     type: 'application/x-mpegURL',
   });
 
-  // 動態新增字幕 (必須放在設完 src 之後，才不會在一開始因為來源變更而被清空)
-  if (ipfsBaseUrl) {
-    const twTrack = player.addRemoteTextTrack(
-      {
-        kind: 'captions',
-        label: '繁體中文',
-        srclang: 'zh-TW',
-        src: `${ipfsBaseUrl}zh-TW.vtt`,
-        default: true,
-      },
-      false
-    );
+  // 動態新增字幕 (依據 useSubtitles 偵測結果)
+  if (availableSubtitles && availableSubtitles.length > 0) {
+    availableSubtitles.forEach((sub) => {
+      // 若為繁中，預設開啟
+      const isDefault = sub.lang === 'zh-TW';
 
-    // 確保新增後這條字幕軌道會自動顯示
-    if (twTrack && twTrack.track) {
-      twTrack.track.mode = 'showing';
-    }
+      const trackEl = player.addRemoteTextTrack(
+        {
+          kind: 'captions',
+          label: sub.label,
+          srclang: sub.lang,
+          src: sub.src,
+          default: isDefault,
+        },
+        false
+      );
 
-    player.addRemoteTextTrack(
-      {
-        kind: 'captions',
-        label: 'English',
-        srclang: 'en',
-        src: `${ipfsBaseUrl}en.vtt`,
-      },
-      false
-    );
+      // 確保該字幕自動顯示
+      if (isDefault && trackEl && trackEl.track) {
+        trackEl.track.mode = 'showing';
+      }
+    });
   }
 
   if (props.startTime > 0) {
