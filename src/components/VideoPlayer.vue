@@ -27,30 +27,41 @@ onMounted(() => {
       controls: true,
       responsive: true,
       fluid: true,
-      sources: [
-        {
-          src: 'http://127.0.0.1:8080/ipfs/QmX6BxaepGscMHoUz4KKbGBAhAyhWrJUNRjQJzKW7AxAHx/index.m3u8',
-          type: 'application/x-mpegURL',
+      html5: {
+        vhs: {
+          overrideNative: true,
         },
-      ],
+        nativeAudioTracks: false,
+        nativeVideoTracks: false,
+      },
+      plugins: {
+        hlsQualitySelector: {
+          displayCurrentQuality: true,
+        },
+      },
       tracks: [
         {
           kind: 'captions',
           label: '繁體中文',
           srclang: 'zh-TW',
-          src: 'http://127.0.0.1:8080/ipfs/QmX6BxaepGscMHoUz4KKbGBAhAyhWrJUNRjQJzKW7AxAHx/zh-TW.vtt',
+          src: 'http://127.0.0.1:8080/ipfs/QmXD3mqDcBpFn51c6wDgKPVMCDMYNxA8W94aCpw5TuRLuQ/zh-TW.vtt',
           default: true,
         },
         {
           kind: 'captions',
           label: 'English',
           srclang: 'en',
-          src: 'http://127.0.0.1:8080/ipfs/QmX6BxaepGscMHoUz4KKbGBAhAyhWrJUNRjQJzKW7AxAHx/en.vtt',
+          src: 'http://127.0.0.1:8080/ipfs/QmXD3mqDcBpFn51c6wDgKPVMCDMYNxA8W94aCpw5TuRLuQ/en.vtt',
         },
       ],
     },
     () => {
-      player.hlsQualitySelector({ displayCurrentQuality: true });
+      // 確保播放器與外掛套件完全就緒後，再掛載影片來源
+      // 這樣套件才能順利捕捉到 'addqualitylevel' 事件來產生解析度選單
+      player.src({
+        src: 'http://127.0.0.1:8080/ipfs/Qmd19GKkJy4cchnpFcLnZJZ7QsqL1z8fbuEsXygfVpDrbk/index.m3u8',
+        type: 'application/x-mpegURL',
+      });
     }
   );
 });
