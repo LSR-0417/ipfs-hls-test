@@ -13,6 +13,7 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import { useSubtitles } from '../composables/useSubtitles';
+import { formatTime } from '../utils/time';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 window.videojs = videojs;
@@ -56,7 +57,17 @@ async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
   // 先偵測真正存在的字幕
   emit('status-update', '正在檢查可用字幕...');
   const availableSubtitles = await detectSubtitles(ipfsBaseUrl);
-  emit('status-update', '播放器已就緒');
+
+  // 根據 startTime 設定狀態文字
+  if (props.startTime > 0) {
+    const formattedTime = formatTime(props.startTime);
+    emit(
+      'status-update',
+      `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`
+    );
+  } else {
+    emit('status-update', '播放器已就緒');
+  }
 
   // 先掛載影片來源
   player.src({
@@ -89,7 +100,9 @@ async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
   }
 
   if (props.startTime > 0) {
-    player.currentTime(props.startTime);
+    player.one('loadedmetadata', () => {
+      player.currentTime(props.startTime);
+    });
   }
 }
 
