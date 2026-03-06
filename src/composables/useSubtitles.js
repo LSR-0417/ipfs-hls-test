@@ -6,8 +6,16 @@ export function useSubtitles() {
       { lang: 'en', label: 'English', filename: 'en.vtt' },
       { lang: 'zh-TW', label: '繁體中文', filename: 'zh-TW.vtt' },
       { lang: 'zh-CN', label: '簡體中文', filename: 'zh-CN.vtt' },
-      { lang: 'ko', label: '韓文', filename: 'ko.vtt' },
       { lang: 'ja', label: '日本語', filename: 'ja.vtt' },
+      { lang: 'ko', label: '한국어', filename: 'ko.vtt' },
+      { lang: 'es', label: 'Español', filename: 'es.vtt' },
+      { lang: 'fr', label: 'Français', filename: 'fr.vtt' },
+      { lang: 'de', label: 'Deutsch', filename: 'de.vtt' },
+      { lang: 'pt', label: 'Português', filename: 'pt.vtt' },
+      { lang: 'ru', label: 'Русский', filename: 'ru.vtt' },
+      { lang: 'vi', label: 'Tiếng Việt', filename: 'vi.vtt' },
+      { lang: 'th', label: 'ไทย', filename: 'th.vtt' },
+      { lang: 'id', label: 'Bahasa Indonesia', filename: 'id.vtt' },
     ];
 
     const detectionPromises = possibleSubtitles.map(async (sub, index) => {
