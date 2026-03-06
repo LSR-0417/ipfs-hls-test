@@ -46,40 +46,92 @@ function shareCurrentTime() {
     return;
   }
 
-  const video = document.querySelector('video');
-  if (!video) return;
+  // 取得當前時間，優先透過 videojs api 來取得，如果沒有則嘗試透過 DOM
+  let currentTime = 0;
+  if (window.videojs && window.videojs.getAllPlayers().length > 0) {
+    currentTime = Math.floor(window.videojs.getAllPlayers()[0].currentTime());
+  } else {
+    const video = document.querySelector('video');
+    if (video) {
+      currentTime = Math.floor(video.currentTime);
+    } else {
+      alert('找不到影片播放器');
+      return;
+    }
+  }
 
-  const currentTime = Math.floor(video.currentTime);
-  const shareUrl = new URL(window.location.href);
+  // 組合包含當下時間的 URL，取得乾淨的 base url 來重新構建
+  const shareUrl = new URL(window.location.origin + window.location.pathname);
   shareUrl.searchParams.set('cid', trimmed);
-  if (currentTime > 0) shareUrl.searchParams.set('t', currentTime);
+  if (currentTime > 0) {
+    shareUrl.searchParams.set('t', currentTime);
+  }
 
-  navigator.clipboard
-    .writeText(shareUrl.toString())
-    .then(() => {
-      const btnText = document.querySelector('#shareBtn .btn-text');
-      const btnIcon = document.querySelector('#shareBtn .btn-icon');
-      if (btnText && btnIcon) {
-        btnText.textContent = '✅ 已複製！';
-        btnIcon.textContent = '✅';
+  const urlStr = shareUrl.toString();
+
+  // UI 更新成功回饋
+  const handleSuccess = () => {
+    const btnText = document.querySelector('#shareBtn .btn-text');
+    const btnIcon = document.querySelector('#shareBtn .btn-icon');
+    if (btnText && btnIcon) {
+      btnText.textContent = '✅ 已複製！';
+      btnIcon.textContent = '✅';
+      setTimeout(() => {
+        if (btnText) btnText.textContent = '🔗 分享片段';
+        if (btnIcon) btnIcon.textContent = '🔗';
+      }, 2000);
+    } else {
+      const btn = document.getElementById('shareBtn');
+      if (btn) {
+        const original = btn.textContent;
+        btn.textContent = '✅ 已複製！';
         setTimeout(() => {
-          if (btnText) btnText.textContent = '🔗 分享片段';
-          if (btnIcon) btnIcon.textContent = '🔗';
+          if (btn) btn.textContent = original;
         }, 2000);
-      } else {
-        const btn = document.getElementById('shareBtn');
-        if (btn) {
-          const original = btn.textContent;
-          btn.textContent = '✅ 已複製！';
-          setTimeout(() => {
-            if (btn) btn.textContent = original;
-          }, 2000);
-        }
       }
-    })
-    .catch(() => {
-      alert('複製失敗，請手動複製網址列。');
-    });
+    }
+  };
+
+  // 實作回退機制，解決 HTTP / 區域網路測試時 navigator.clipboard undefined 的常見問題
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard
+      .writeText(urlStr)
+      .then(handleSuccess)
+      .catch((err) => {
+        console.warn('Clipboard API 失敗，嘗試 fallback:', err);
+        fallbackCopyTextToClipboard(urlStr, handleSuccess);
+      });
+  } else {
+    fallbackCopyTextToClipboard(urlStr, handleSuccess);
+  }
+}
+
+function fallbackCopyTextToClipboard(text, onSuccess) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+
+  // 為了避免影響排版，將 textarea 置於畫面上方並隱藏
+  textArea.style.top = '0';
+  textArea.style.left = '0';
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    const successful = document.execCommand('copy');
+    if (successful) {
+      onSuccess();
+    } else {
+      alert('複製失敗，請手動複製這段網址:\n' + text);
+    }
+  } catch (err) {
+    alert('複製失敗，請手動複製這段網址:\n' + text);
+  }
+
+  document.body.removeChild(textArea);
 }
 
 onMounted(() => {
