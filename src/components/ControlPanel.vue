@@ -4,10 +4,10 @@ import { ref, onMounted } from 'vue';
 const emit = defineEmits(['load', 'play-status']);
 
 const cid = ref('');
-const gateway = ref('/ipfs/');
+const gateway = ref('http://127.0.0.1:8080/ipfs/');
 
 const gateways = [
-  { url: '/ipfs/', label: '本地 (最穩定/測試首選)' },
+  { url: 'http://127.0.0.1:8080/ipfs/', label: '本地 (最穩定/測試首選)' },
   { url: 'https://gateway.pinata.cloud/ipfs/', label: 'Pinata (速度快/推薦)' },
   { url: 'https://dweb.link/ipfs/', label: 'DWeb.link (官方推薦)' },
   { url: 'https://ipfs.io/ipfs/', label: 'IPFS.io (標準網關)' },
@@ -22,13 +22,8 @@ function loadVideo(eventOrStartTime) {
   }
 
   const selectedGateway = gateway.value;
-  let ipfsBaseUrl;
-  if (selectedGateway.startsWith('/') || selectedGateway.startsWith('./')) {
-    // 讓請求使用相對路徑 (例如 /ipfs/...)，這樣才會正確觸發 vite.config.js 的 proxy 來避免 CORS 問題
-    ipfsBaseUrl = `${selectedGateway}${trimmed}/`;
-  } else {
-    ipfsBaseUrl = `${selectedGateway}${trimmed}/`;
-  }
+  let ipfsBaseUrl = `${selectedGateway}${trimmed}/`;
+
   const m3u8Url = `${ipfsBaseUrl}output.m3u8`;
 
   emit('play-status', '正在連線至網關...');
