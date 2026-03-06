@@ -9,17 +9,90 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 window.videojs = videojs;
 
+const props = defineProps({
+  m3u8Url: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  ipfsBaseUrl: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  startTime: {
+    type: Number,
+    default: 0,
+  },
+});
+
+const emit = defineEmits(['status-update', 'levels-loaded']);
+
 const videoRef = ref(null);
 let player = null;
 
-onMounted(() => {
+function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
+  if (!player) return;
+
+  // 清除舊字幕軌道
+  const oldTracks = player.remoteTextTracks();
+  if (oldTracks) {
+    let i = oldTracks.length;
+    while (i--) {
+      player.removeRemoteTextTrack(oldTracks[i]);
+    }
+  }
+
+  // 先掛載影片來源
+  player.src({
+    src: m3u8Url,
+    type: 'application/x-mpegURL',
+  });
+
+  // 動態新增字幕 (必須放在設完 src 之後，才不會在一開始因為來源變更而被清空)
+  if (ipfsBaseUrl) {
+    const twTrack = player.addRemoteTextTrack(
+      {
+        kind: 'captions',
+        label: '繁體中文',
+        srclang: 'zh-TW',
+        src: `${ipfsBaseUrl}zh-TW.vtt`,
+        default: true,
+      },
+      false
+    );
+
+    // 確保新增後這條字幕軌道會自動顯示
+    if (twTrack && twTrack.track) {
+      twTrack.track.mode = 'showing';
+    }
+
+    player.addRemoteTextTrack(
+      {
+        kind: 'captions',
+        label: 'English',
+        srclang: 'en',
+        src: `${ipfsBaseUrl}en.vtt`,
+      },
+      false
+    );
+  }
+
+  if (props.startTime > 0) {
+    player.currentTime(props.startTime);
+  }
+}
+
+function initPlayer() {
+  if (!videoRef.value) return;
+
   player = videojs(
     videoRef.value,
     {
@@ -39,32 +112,28 @@ onMounted(() => {
           displayCurrentQuality: true,
         },
       },
-      tracks: [
-        {
-          kind: 'captions',
-          label: '繁體中文',
-          srclang: 'zh-TW',
-          src: 'http://127.0.0.1:8080/ipfs/QmXD3mqDcBpFn51c6wDgKPVMCDMYNxA8W94aCpw5TuRLuQ/zh-TW.vtt',
-          default: true,
-        },
-        {
-          kind: 'captions',
-          label: 'English',
-          srclang: 'en',
-          src: 'http://127.0.0.1:8080/ipfs/QmXD3mqDcBpFn51c6wDgKPVMCDMYNxA8W94aCpw5TuRLuQ/en.vtt',
-        },
-      ],
     },
     () => {
-      // 確保播放器與外掛套件完全就緒後，再掛載影片來源
-      // 這樣套件才能順利捕捉到 'addqualitylevel' 事件來產生解析度選單
-      player.src({
-        src: 'http://127.0.0.1:8080/ipfs/Qmd19GKkJy4cchnpFcLnZJZ7QsqL1z8fbuEsXygfVpDrbk/index.m3u8',
-        type: 'application/x-mpegURL',
-      });
+      emit('status-update', '播放器已就緒');
+      if (props.m3u8Url) {
+        setupSourceAndTracks(props.m3u8Url, props.ipfsBaseUrl);
+      }
     }
   );
+}
+
+onMounted(() => {
+  initPlayer();
 });
+
+watch(
+  () => props.m3u8Url,
+  (newUrl) => {
+    if (newUrl && player) {
+      setupSourceAndTracks(newUrl, props.ipfsBaseUrl);
+    }
+  }
+);
 
 onBeforeUnmount(() => {
   if (player) {
