@@ -6,6 +6,7 @@ export default defineConfig({
     host: true, // Listen on all local IPs
   },
   plugins: [vue()],
+  base: '/',
   resolve: {
     alias: {
       'videojs-hls-quality-selector':

@@ -1,0 +1,59 @@
+name: Deploy Vue to GitHub Pages
+
+on:
+  # 觸發條件：當推入程式碼到 main 分支時執行
+  push:
+    branches: ['main'] # 如果你的預設分支是 master，請改成 master
+
+# 設定 GitHub 權限以允許部署到 Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 確保不會有多個部署任務同時進行，避免衝突
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  # 建置任務
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # 可依你的開發環境調整 Node 版本
+          cache: 'npm' # 若你使用 pnpm 或 yarn，這裡需更改
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # 指向打包後的產物目錄（Vite 預設是 dist，Vue CLI 預設是 dist）
+          path: './dist'
+
+  # 部署任務
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
