@@ -24,7 +24,7 @@ function loadVideo(eventOrStartTime) {
   const selectedGateway = gateway.value;
   let ipfsBaseUrl = `${selectedGateway}${trimmed}/`;
 
-  const m3u8Url = `${ipfsBaseUrl}output.m3u8`;
+  const m3u8Url = `${ipfsBaseUrl}index.m3u8`;
 
   emit('play-status', '正在連線至網關...');
   emit('load', { ipfsBaseUrl, m3u8Url, startTime });

@@ -36,7 +36,7 @@ npm run dev
 ### 使用說明
 
 1. **選擇網關** - 從下拉選單中選擇 IPFS 網關
-2. **輸入 CID** - 輸入包含 `output.m3u8` 的 IPFS 文件夾 CID
+2. **輸入 CID** - 輸入包含 `index.m3u8` 的 IPFS 文件夾 CID
 3. **載入影片** - 點擊「▶️ 載入影片」按鈕
 4. **分享片段** - 點擊「🔗 分享片段」複製包含目前播放時間的連結
 
@@ -199,7 +199,7 @@ npm run preview
 預期的中 IPFS 文件夾結構：
 ```
 QmXxxx.../
-├── output.m3u8          # HLS 主播放列表
+├── index.m3u8          # HLS 主播放列表
 ├── segment1.ts          # 視頻分片
 ├── segment2.ts
 ├── ...
@@ -226,7 +226,7 @@ http://localhost:5173/?cid=QmXxxx...&gateway=https://dweb.link&t=120
 
 **可能原因：**
 1. CID 不正確或資料夾不存在
-2. `output.m3u8` 文件不在指定 CID 下
+2. `index.m3u8` 文件不在指定 CID 下
 3. 選中的網關無法訪問該 CID
 4. 跨域(CORS)限制
 

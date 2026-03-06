@@ -82,7 +82,7 @@ curl http://127.0.0.1:8080/ipfs/QmUvC2Fe... (替換為實際的CID)
 確保您輸入的CID正確：
 
 1. CID 應該指向一個文件夾，不是單個文件
-2. 文件夾中必須包含 `output.m3u8` 文件
+2. 文件夾中必須包含 `index.m3u8` 文件
 
 驗證方法：
 
@@ -90,7 +90,7 @@ curl http://127.0.0.1:8080/ipfs/QmUvC2Fe... (替換為實際的CID)
 # 訪問該CID的目錄列表
 curl http://127.0.0.1:8080/ipfs/<YOUR_CID>/
 
-# 應該能看到 output.m3u8 文件
+# 應該能看到 index.m3u8 文件
 ```
 
 ### 4. 字幕加載失敗
@@ -135,7 +135,7 @@ curl http://127.0.0.1:8080/ipfs/<YOUR_CID>/en.vtt
 1. 嘗試加載視頻
 2. 查找以下請求：
    - `/ipfs/...` (M3U8 文件)
-   - `output.m3u8` (主播放列表)
+   - `index.m3u8` (主播放列表)
    - `.ts` 文件 (視頻分段)
 3. 檢查返回的HTTP狀態碼
    - 200 = 成功
@@ -147,7 +147,7 @@ curl http://127.0.0.1:8080/ipfs/<YOUR_CID>/en.vtt
 
 ```bash
 # 測試M3U8文件
-curl -v 'http://127.0.0.1:8080/ipfs/<YOUR_CID>/output.m3u8'
+curl -v 'http://127.0.0.1:8080/ipfs/<YOUR_CID>/index.m3u8'
 
 # 應該返回 M3U8 格式的播放列表
 ```
@@ -157,7 +157,7 @@ curl -v 'http://127.0.0.1:8080/ipfs/<YOUR_CID>/output.m3u8'
 - [ ] IPFS網關正在運行 (`ipfs daemon`)
 - [ ] 開發伺服器正在運行 (`npm run dev`)
 - [ ] CID 格式正確（`Qm...` 或 `bafy...`）
-- [ ] IPFS文件夾包含 `output.m3u8`
+- [ ] IPFS文件夾包含 `index.m3u8`
 - [ ] 本地網關選擇為 `本地 (最穩定/測試首選)`
 - [ ] 瀏覽器控制台無 CORS 錯誤
 - [ ] 網絡請求返回 HTTP 200
