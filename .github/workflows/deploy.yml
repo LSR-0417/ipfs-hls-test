@@ -28,7 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20 # 可依你的開發環境調整 Node 版本
-          cache: 'npm' # 若你使用 pnpm 或 yarn，這裡需更改
 
       - name: Install dependencies
         run: npm install
@@ -40,7 +39,7 @@ jobs:
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v3wi
         with:
           # 指向打包後的產物目錄（Vite 預設是 dist，Vue CLI 預設是 dist）
           path: './dist'
