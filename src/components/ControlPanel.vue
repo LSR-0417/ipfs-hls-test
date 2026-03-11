@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 
 const emit = defineEmits(['load', 'play-status']);
 
@@ -142,6 +142,13 @@ onMounted(() => {
   if (cidFromUrl) {
     cid.value = cidFromUrl;
     loadVideo(timeFromUrl);
+  }
+});
+
+// 切換閘道時自動重新載入影片（若已有 CID）
+watch(gateway, () => {
+  if (cid.value.trim()) {
+    loadVideo();
   }
 });
 </script>

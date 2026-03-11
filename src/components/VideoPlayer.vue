@@ -4,6 +4,8 @@
       ref="videoRef"
       class="video-js vjs-big-play-centered"
       crossorigin="anonymous"
+      playsinline
+      webkit-playsinline
     ></video>
   </div>
 </template>
