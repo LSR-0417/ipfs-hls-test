@@ -4,6 +4,7 @@ import { ref, watch } from 'vue';
 const props = defineProps({
   title: { type: String, default: 'IPFS Video Stream' },
   cid: { type: String, default: '' },
+  gateway: { type: String, default: '' },
   views: { type: String, default: 'Decentralized' },
   date: { type: String, default: 'Live' },
 });
@@ -28,6 +29,9 @@ function shareCurrentTime() {
 
   const shareUrl = new URL(window.location.origin + window.location.pathname);
   shareUrl.searchParams.set('cid', props.cid);
+  if (props.gateway) {
+    shareUrl.searchParams.set('gateway', props.gateway);
+  }
   if (currentTime > 0) {
     shareUrl.searchParams.set('t', currentTime);
   }

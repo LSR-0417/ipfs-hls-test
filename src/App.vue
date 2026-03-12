@@ -19,6 +19,11 @@ onMounted(() => {
   const urlParams = new URLSearchParams(window.location.search);
   const cidFromUrl = urlParams.get('cid');
   const timeFromUrl = parseInt(urlParams.get('t'), 10) || 0;
+  const gatewayFromUrl = urlParams.get('gateway');
+
+  if (gatewayFromUrl) {
+    currentGateway.value = gatewayFromUrl;
+  }
   if (cidFromUrl) {
     onSearchCid(cidFromUrl, timeFromUrl);
   }
@@ -34,6 +39,10 @@ function onGatewayChange(gateway) {
   currentGateway.value = gateway;
   if (currentCid.value) {
     loadVideo(currentCid.value, gateway, currentStartTime.value);
+  } else {
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('gateway', gateway);
+    window.history.pushState({}, '', currentUrl);
   }
 }
 
@@ -48,6 +57,7 @@ function loadVideo(cid, gateway, startTime = 0) {
 
   const currentUrl = new URL(window.location.href);
   currentUrl.searchParams.set('cid', cid);
+  currentUrl.searchParams.set('gateway', gateway);
   if (startTime > 0) {
     currentUrl.searchParams.set('t', startTime);
   } else {
@@ -87,7 +97,7 @@ function onLevelsLoaded(levels) {}
           </div>
           <div id="status" class="status-msg">{{ status }}</div>
 
-          <VideoInfo :cid="currentCid" />
+          <VideoInfo :cid="currentCid" :gateway="currentGateway" />
         </div>
         
         <div class="secondary-column">
