@@ -2,7 +2,6 @@
 import { ref, onMounted } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
-import ControlPanel from './components/ControlPanel.vue';
 import VideoPlayer from './components/VideoPlayer.vue';
 import VideoInfo from './components/VideoInfo.vue';
 import VideoGrid from './components/VideoGrid.vue';
@@ -20,7 +19,6 @@ onMounted(() => {
   const urlParams = new URLSearchParams(window.location.search);
   const cidFromUrl = urlParams.get('cid');
   const timeFromUrl = parseInt(urlParams.get('t'), 10) || 0;
-
   if (cidFromUrl) {
     onSearchCid(cidFromUrl, timeFromUrl);
   }
@@ -66,7 +64,11 @@ function onLevelsLoaded(levels) {}
 </script>
 
 <template>
-  <Header @search="onSearchCid" />
+  <Header
+    @search="onSearchCid"
+    :current-gateway="currentGateway"
+    @gateway-change="onGatewayChange"
+  />
   <div class="app-container">
     <Sidebar />
     <main class="main-content">
@@ -84,12 +86,7 @@ function onLevelsLoaded(levels) {}
             />
           </div>
           <div id="status" class="status-msg">{{ status }}</div>
-          
-          
-          <div class="control-area glass-panel">
-            <ControlPanel :currentGateway="currentGateway" @gateway-change="onGatewayChange" />
-          </div>
-          
+
           <VideoInfo :cid="currentCid" />
         </div>
         
@@ -154,11 +151,6 @@ function onLevelsLoaded(levels) {}
 .player-container :deep(> div) {
   width: 100%;
   height: 100%;
-}
-
-.control-area {
-  padding: 20px;
-  border-radius: 12px;
 }
 
 .status-msg {
