@@ -1,10 +1,12 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch } from 'vue';
 
-const emit = defineEmits(['load', 'play-status']);
+const props = defineProps({
+  currentGateway: { type: String, default: 'http://127.0.0.1:8080/ipfs/' }
+});
+const emit = defineEmits(['gateway-change']);
 
-const cid = ref('');
-const gateway = ref('http://127.0.0.1:8080/ipfs/');
+const localGateway = ref(props.currentGateway);
 const settingsOpen = ref(false);
 
 const gateways = [
@@ -14,177 +16,27 @@ const gateways = [
   { url: 'https://ipfs.io/ipfs/', label: 'IPFS.io (標準網關)' },
 ];
 
-function loadVideo(eventOrStartTime) {
-  const startTime = typeof eventOrStartTime === 'number' ? eventOrStartTime : 0;
-  const trimmed = cid.value.trim();
-  if (!trimmed) {
-    alert('請先輸入 CID！');
-    return;
-  }
-
-  const selectedGateway = gateway.value;
-  let ipfsBaseUrl = `${selectedGateway}${trimmed}/`;
-
-  const m3u8Url = `${ipfsBaseUrl}index.m3u8`;
-
-  emit('play-status', '正在連線至網關...');
-  emit('load', { ipfsBaseUrl, m3u8Url, startTime });
-
-  const currentUrl = new URL(window.location.href);
-  currentUrl.searchParams.set('cid', trimmed);
-  if (startTime > 0) {
-    currentUrl.searchParams.set('t', startTime);
-  } else {
-    currentUrl.searchParams.delete('t');
-  }
-  window.history.pushState({}, '', currentUrl);
-}
-
-function shareCurrentTime() {
-  const trimmed = cid.value.trim();
-  if (!trimmed) {
-    alert('請先輸入或載入 CID！');
-    return;
-  }
-
-  // 取得當前時間，優先透過 videojs api 來取得，如果沒有則嘗試透過 DOM
-  let currentTime = 0;
-  if (window.videojs && window.videojs.getAllPlayers().length > 0) {
-    currentTime = Math.floor(window.videojs.getAllPlayers()[0].currentTime());
-  } else {
-    const video = document.querySelector('video');
-    if (video) {
-      currentTime = Math.floor(video.currentTime);
-    } else {
-      alert('找不到影片播放器');
-      return;
-    }
-  }
-
-  // 組合包含當下時間的 URL，取得乾淨的 base url 來重新構建
-  const shareUrl = new URL(window.location.origin + window.location.pathname);
-  shareUrl.searchParams.set('cid', trimmed);
-  if (currentTime > 0) {
-    shareUrl.searchParams.set('t', currentTime);
-  }
-
-  const urlStr = shareUrl.toString();
-
-  // UI 更新成功回饋
-  const handleSuccess = () => {
-    const btnText = document.querySelector('#shareBtn .btn-text');
-    const btnIcon = document.querySelector('#shareBtn .btn-icon');
-    if (btnText && btnIcon) {
-      btnText.textContent = '✅ 已複製！';
-      btnIcon.textContent = '✅';
-      setTimeout(() => {
-        if (btnText) btnText.textContent = '🔗 分享片段';
-        if (btnIcon) btnIcon.textContent = '🔗';
-      }, 2000);
-    } else {
-      const btn = document.getElementById('shareBtn');
-      if (btn) {
-        const original = btn.textContent;
-        btn.textContent = '✅ 已複製！';
-        setTimeout(() => {
-          if (btn) btn.textContent = original;
-        }, 2000);
-      }
-    }
-  };
-
-  // 實作回退機制，解決 HTTP / 區域網路測試時 navigator.clipboard undefined 的常見問題
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard
-      .writeText(urlStr)
-      .then(handleSuccess)
-      .catch((err) => {
-        console.warn('Clipboard API 失敗，嘗試 fallback:', err);
-        fallbackCopyTextToClipboard(urlStr, handleSuccess);
-      });
-  } else {
-    fallbackCopyTextToClipboard(urlStr, handleSuccess);
-  }
-}
-
-function fallbackCopyTextToClipboard(text, onSuccess) {
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-
-  // 為了避免影響排版，將 textarea 置於畫面上方並隱藏
-  textArea.style.top = '0';
-  textArea.style.left = '0';
-  textArea.style.position = 'fixed';
-  textArea.style.opacity = '0';
-
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-
-  try {
-    const successful = document.execCommand('copy');
-    if (successful) {
-      onSuccess();
-    } else {
-      alert('複製失敗，請手動複製這段網址:\n' + text);
-    }
-  } catch (err) {
-    alert('複製失敗，請手動複製這段網址:\n' + text);
-  }
-
-  document.body.removeChild(textArea);
-}
-
-onMounted(() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const cidFromUrl = urlParams.get('cid');
-  const timeFromUrl = parseInt(urlParams.get('t'), 10) || 0;
-
-  if (cidFromUrl) {
-    cid.value = cidFromUrl;
-    loadVideo(timeFromUrl);
-  }
+watch(() => props.currentGateway, (newVal) => {
+  localGateway.value = newVal;
 });
 
-// 切換閘道時自動重新載入影片（若已有 CID）
-watch(gateway, () => {
-  if (cid.value.trim()) {
-    loadVideo();
-  }
+watch(localGateway, (newVal) => {
+  emit('gateway-change', newVal);
 });
 </script>
 
 <template>
   <div class="control-panel">
-    <div class="input-row">
-      <input
-        type="text"
-        id="cidInput"
-        placeholder="請輸入資料夾 CID (例如: Qm...)"
-        v-model="cid"
-        @keyup.enter="loadVideo"
-      />
+    <div class="input-row compact">
+      <span class="gateway-label">Current Gateway: <span class="highlight">{{ localGateway }}</span></span>
       <button
         class="action-btn settings-btn"
         title="設定"
         @click="settingsOpen = true"
         aria-label="開啟設定"
       >
-        <span class="btn-text">⚙️ 設定</span>
-        <span class="btn-icon">⚙️</span>
-      </button>
-      <button @click="loadVideo" class="action-btn">
-        <span class="btn-text">▶️ 載入影片</span>
-        <span class="btn-icon">▶️</span>
-      </button>
-      <button
-        @click="shareCurrentTime"
-        id="shareBtn"
-        class="action-btn"
-        title="複製包含目前播放時間的連結"
-      >
-        <span class="btn-text">🔗 分享片段</span>
-        <span class="btn-icon">🔗</span>
+        <span class="btn-text"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span>
+        <span class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span>
       </button>
     </div>
 
@@ -199,7 +51,7 @@ watch(gateway, () => {
 
         <div class="dialog-body">
           <label for="gatewaySelect">選擇網關</label>
-          <select id="gatewaySelect" v-model="gateway">
+          <select id="gatewaySelect" v-model="localGateway">
             <option v-for="g in gateways" :key="g.url" :value="g.url">
               {{ g.label }}
             </option>
