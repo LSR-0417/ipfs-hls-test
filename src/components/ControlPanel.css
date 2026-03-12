@@ -54,6 +54,13 @@ button:hover {
   background-color: #218838;
 }
 
+.settings-btn {
+  background-color: #6c757d;
+}
+.settings-btn:hover {
+  background-color: #5a6268;
+}
+
 label {
   font-size: 14px;
   color: #333;
@@ -70,6 +77,65 @@ label {
 
 .btn-icon {
   display: none;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.dialog {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  text-align: left;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eee;
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog-close {
+  padding: 6px 10px;
+  font-size: 16px;
+  border-radius: 6px;
+  background: #f3f3f3;
+  color: #333;
+}
+
+.dialog-body {
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.dialog-body select {
+  width: 100%;
+}
+
+.dialog-footer {
+  padding: 14px 18px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 @media (max-width: 600px) {

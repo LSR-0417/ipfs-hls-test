@@ -5,6 +5,7 @@ const emit = defineEmits(['load', 'play-status']);
 
 const cid = ref('');
 const gateway = ref('http://127.0.0.1:8080/ipfs/');
+const settingsOpen = ref(false);
 
 const gateways = [
   { url: 'http://127.0.0.1:8080/ipfs/', label: '本地 (最穩定/測試首選)' },
@@ -156,15 +157,6 @@ watch(gateway, () => {
 <template>
   <div class="control-panel">
     <div class="input-row">
-      <label for="gatewaySelect">選擇網關：</label>
-      <select id="gatewaySelect" v-model="gateway">
-        <option v-for="g in gateways" :key="g.url" :value="g.url">
-          {{ g.label }}
-        </option>
-      </select>
-    </div>
-
-    <div class="input-row">
       <input
         type="text"
         id="cidInput"
@@ -172,6 +164,15 @@ watch(gateway, () => {
         v-model="cid"
         @keyup.enter="loadVideo"
       />
+      <button
+        class="action-btn settings-btn"
+        title="設定"
+        @click="settingsOpen = true"
+        aria-label="開啟設定"
+      >
+        <span class="btn-text">⚙️ 設定</span>
+        <span class="btn-icon">⚙️</span>
+      </button>
       <button @click="loadVideo" class="action-btn">
         <span class="btn-text">▶️ 載入影片</span>
         <span class="btn-icon">▶️</span>
@@ -185,6 +186,30 @@ watch(gateway, () => {
         <span class="btn-text">🔗 分享片段</span>
         <span class="btn-icon">🔗</span>
       </button>
+    </div>
+
+    <div v-if="settingsOpen" class="dialog-backdrop" @click.self="settingsOpen = false">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="dialog-header">
+          <h3 id="settingsTitle">設定</h3>
+          <button class="dialog-close" @click="settingsOpen = false" aria-label="關閉設定">
+            ✕
+          </button>
+        </div>
+
+        <div class="dialog-body">
+          <label for="gatewaySelect">選擇網關</label>
+          <select id="gatewaySelect" v-model="gateway">
+            <option v-for="g in gateways" :key="g.url" :value="g.url">
+              {{ g.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="dialog-footer">
+          <button class="action-btn" @click="settingsOpen = false">完成</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
