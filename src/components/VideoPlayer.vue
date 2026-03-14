@@ -35,77 +35,142 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  shouldAutoplay: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['status-update', 'levels-loaded']);
 
 const videoRef = ref(null);
 let player = null;
+let sourceSeq = 0;
 
 const { detectSubtitles } = useSubtitles();
 
-async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
-  if (!player) return;
+async function resumePlaybackIfNeeded() {
+  if (!player || !props.shouldAutoplay) return;
 
-  // 清除舊字幕軌道
-  const oldTracks = player.remoteTextTracks();
-  if (oldTracks) {
-    let i = oldTracks.length;
-    while (i--) {
-      player.removeRemoteTextTrack(oldTracks[i]);
+  try {
+    await player.play();
+    emit('status-update', '播放器已就緒，繼續播放中');
+  } catch (_) {
+    if (props.startTime > 0) {
+      const formattedTime = formatTime(props.startTime);
+      emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
+    } else {
+      emit('status-update', '播放器已就緒，請手動播放');
     }
   }
+}
 
-  // 先偵測真正存在的字幕
-  emit('status-update', '正在檢查可用字幕...');
-  const availableSubtitles = await detectSubtitles(ipfsBaseUrl);
+function beginSourceSwitch() {
+  if (!player) return 0;
 
-  // 根據 startTime 設定狀態文字
-  if (props.startTime > 0) {
-    const formattedTime = formatTime(props.startTime);
-    emit(
-      'status-update',
-      `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`
-    );
-  } else {
-    emit('status-update', '播放器已就緒');
-  }
+  const seq = ++sourceSeq;
+  player.pause();
+  clearTracks();
+  player.reset();
+  return seq;
+}
 
-  // 先掛載影片來源
+async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
+  if (!player) return;
+  const seq = beginSourceSwitch();
+
+  // Switch the source first so gateway switching doesn't feel blocked by subtitle detection.
+  emit('status-update', '正在載入影片...');
   player.src({
     src: m3u8Url,
     type: 'application/x-mpegURL',
   });
 
-  // 動態新增字幕 (依據 useSubtitles 偵測結果)
-  if (availableSubtitles && availableSubtitles.length > 0) {
-    availableSubtitles.forEach((sub) => {
-      // 若為繁中，預設開啟
-      const isDefault = sub.lang === 'zh-TW';
+  player.one('loadedmetadata', () => {
+    if (!player || seq !== sourceSeq) return;
 
-      const trackEl = player.addRemoteTextTrack(
-        {
-          kind: 'captions',
-          label: sub.label,
-          srclang: sub.lang,
-          src: sub.src,
-          default: isDefault,
-        },
-        false
-      );
-
-      // 確保該字幕自動顯示
-      if (isDefault && trackEl && trackEl.track) {
-        trackEl.track.mode = 'showing';
-      }
-    });
-  }
-
-  if (props.startTime > 0) {
-    player.one('loadedmetadata', () => {
+    if (props.startTime > 0) {
       player.currentTime(props.startTime);
-    });
+    }
+    if (props.shouldAutoplay) {
+      player.one('canplay', () => {
+        if (!player || seq !== sourceSeq) return;
+        void resumePlaybackIfNeeded();
+      });
+    } else if (props.startTime > 0) {
+      const formattedTime = formatTime(props.startTime);
+      emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
+    } else {
+      emit('status-update', '播放器已就緒');
+    }
+  });
+
+  // Subtitle detection runs in background; apply only if this is the latest source switch.
+  try {
+    const availableSubtitles = await detectSubtitles(ipfsBaseUrl);
+    if (seq !== sourceSeq) return;
+
+    const oldTracks = player.remoteTextTracks();
+    if (oldTracks) {
+      let i = oldTracks.length;
+      while (i--) {
+        player.removeRemoteTextTrack(oldTracks[i]);
+      }
+    }
+
+    if (availableSubtitles && availableSubtitles.length > 0) {
+      availableSubtitles.forEach((sub) => {
+        const isDefault = sub.lang === 'zh-TW';
+        const trackEl = player.addRemoteTextTrack(
+          {
+            kind: 'captions',
+            label: sub.label,
+            srclang: sub.lang,
+            src: sub.src,
+            default: isDefault,
+          },
+          false
+        );
+        if (isDefault && trackEl && trackEl.track) {
+          trackEl.track.mode = 'showing';
+        }
+      });
+    }
+  } catch (e) {
+    // Subtitle detection failure shouldn't break playback.
+    console.warn('[VideoPlayer] subtitle detection failed:', e);
   }
+}
+
+function clearTracks() {
+  if (!player) return;
+
+  const oldTracks = player.remoteTextTracks();
+  if (!oldTracks) return;
+
+  let i = oldTracks.length;
+  while (i--) {
+    player.removeRemoteTextTrack(oldTracks[i]);
+  }
+}
+
+function syncStartTime(startTime) {
+  if (!player || !(startTime > 0)) return;
+
+  const applySeek = () => {
+    if (player) {
+      player.currentTime(startTime);
+    }
+  };
+
+  if (player.readyState() > 0) {
+    applySeek();
+  } else {
+    player.one('loadedmetadata', applySeek);
+  }
+
+  const formattedTime = formatTime(startTime);
+  emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
 }
 
 function initPlayer() {
@@ -145,10 +210,28 @@ onMounted(() => {
 });
 
 watch(
-  () => props.m3u8Url,
-  (newUrl) => {
-    if (newUrl && player) {
-      setupSourceAndTracks(newUrl, props.ipfsBaseUrl);
+  () => [props.m3u8Url, props.ipfsBaseUrl, props.startTime],
+  ([newUrl, newBaseUrl, newStartTime], [oldUrl, oldBaseUrl, oldStartTime] = []) => {
+    if (!player) return;
+
+    if (!newUrl) {
+      beginSourceSwitch();
+      emit('status-update', '準備就緒');
+      return;
+    }
+
+    if (newUrl !== oldUrl || newBaseUrl !== oldBaseUrl) {
+      setupSourceAndTracks(newUrl, newBaseUrl);
+      return;
+    }
+
+    if (newStartTime !== oldStartTime) {
+      if (newStartTime > 0) {
+        syncStartTime(newStartTime);
+      } else if (player.readyState() > 0) {
+        player.currentTime(0);
+        emit('status-update', '播放器已就緒');
+      }
     }
   }
 );
