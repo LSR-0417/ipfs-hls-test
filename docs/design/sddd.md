@@ -21,7 +21,7 @@
 #### 2.2 VideoInfo.vue (整合分享功能)
 - 承載影片標題外，進一步加入了按讚、倒讚等虛擬按鈕以構築完整平台氛圍。
 - **Share Icon (分享按鈕)**: 取代了過去龐大突兀的「複製目前播放連結」按鈕，現已整合進 `VideoInfo` 的動作列中 (`actions`)。點擊時提供 `Copied!` 切換文字與顏色的微互動 (Micro-animation)，整體邏輯乾淨簡潔。
-- **CID / Gateway 參數傳遞**: `App.vue` 會在分享時將 Header 當前選中的 gateway 以及播放進度 time (`t`) 作為 Query Parameter (`?cid=&gateway=&t=`) 掛載至網址列。
+- **分享連結策略**: 分享 URL 僅承載可重現播放內容所需的 `cid` 與播放進度 `t` (`?cid=&t=`)。使用者選定的 gateway 屬於本機偏好設定，會持久化到瀏覽器 `localStorage`，不會出現在分享連結中。
 
 #### 2.3 ControlPanel.vue (棄用/降級)
 - 原本負責全部參數的 `ControlPanel.vue` 已完成歷史任務。其 Gateway 切換邏輯被提取並融入到 `Header.vue` 或 `App.vue` 全域狀態管理。
@@ -37,5 +37,6 @@
   - 針對手機版 (`max-width: 600px/768px`)，隱藏文字按鈕保留 Icon；網關面板自動撐滿版面避免超出邊界；Secondary Column 自動重排至影片下方展現出 Single-column 行動端體驗。
 
 ## 4. 狀態流與路由管理 (State & Routing)
-- 所有關鍵狀態 (CID, Gateway, Time) 皆具備 **URL 雙向綁定能力** (`history.pushState`)。
-- 當 URL 載入給定 `?cid=...&t=...&gateway=...` 時，App.vue 負責解析並將狀態派發給子元件 (Header, VideoPlayer)，觸發播放流程。
+- `cid` 與 `time` (`t`) 具備 **URL 雙向綁定能力** (`history.pushState`)，作為可分享、可重放的播放狀態。
+- `gateway` 不再作為 URL Query Parameter，而是作為瀏覽器端偏好設定，持久化在 `localStorage`，供 `App.vue` 與 `Header.vue` 還原目前使用中的網關。
+- 當 URL 載入給定 `?cid=...&t=...` 時，`App.vue` 會解析並派發狀態給子元件以觸發播放流程。

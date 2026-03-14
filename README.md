@@ -212,13 +212,14 @@ QmXxxx.../
 
 生成的分享連結格式：
 ```
-http://localhost:5173/?cid=QmXxxx...&gateway=https://dweb.link&t=120
+http://localhost:5173/?cid=QmXxxx...&t=120
 ```
 
 **參數說明：**
 - `cid` - IPFS 文件夾 CID
-- `gateway` - 網關 URL (可選)
 - `t` - 開始播放時間 (秒)
+
+目前選中的 gateway 會保存在瀏覽器的 `localStorage`，不會附加在分享 URL 上。
 
 ## ⚠️ 常見問題
 

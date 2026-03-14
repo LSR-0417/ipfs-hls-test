@@ -5,9 +5,11 @@ import Sidebar from './components/Sidebar.vue';
 import VideoPlayer from './components/VideoPlayer.vue';
 import VideoInfo from './components/VideoInfo.vue';
 import VideoGrid from './components/VideoGrid.vue';
+import { persistGateway, readStoredGateway } from './utils/gateway';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 
+const DEFAULT_GATEWAY = 'http://127.0.0.1:8080/ipfs/';
 const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
@@ -15,7 +17,7 @@ const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const playerRef = ref(null);
 const currentCid = ref('');
-const currentGateway = ref('http://127.0.0.1:8080/ipfs/');
+const currentGateway = ref(DEFAULT_GATEWAY);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -29,13 +31,48 @@ function resetPlaybackState() {
   status.value = '準備就緒';
 }
 
-function syncFromUrl() {
-  const { cid, gateway, time } = parsePlayerParams(window.location.search);
-  const prevGateway = currentGateway.value;
-  const nextGateway = gateway || prevGateway;
+function commitHistoryUrl(mode, url) {
+  if (!window?.history) return;
 
-  if (gateway && gateway !== currentGateway.value) {
-    currentGateway.value = gateway;
+  const method =
+    mode === 'replace'
+      ? originalReplaceState || window.history.replaceState
+      : originalPushState || window.history.pushState;
+
+  method.call(window.history, window.history.state, '', url);
+}
+
+function syncPlayerUrl(cid, time, mode = 'push') {
+  const nextUrl = new URL(window.location.href);
+  const currentHref = nextUrl.toString();
+
+  if (cid) {
+    nextUrl.searchParams.set('cid', cid);
+  } else {
+    nextUrl.searchParams.delete('cid');
+  }
+
+  nextUrl.searchParams.delete('gateway');
+
+  if (cid && time > 0) {
+    nextUrl.searchParams.set('t', time);
+  } else {
+    nextUrl.searchParams.delete('t');
+  }
+
+  if (nextUrl.toString() === currentHref) return;
+
+  commitHistoryUrl(mode, nextUrl);
+}
+
+function syncFromUrl() {
+  const { cid, time } = parsePlayerParams(window.location.search);
+  const prevGateway = currentGateway.value;
+  const storedGateway = readStoredGateway(window);
+  const nextGateway = storedGateway || prevGateway || DEFAULT_GATEWAY;
+
+  if (nextGateway !== currentGateway.value) {
+    currentGateway.value = nextGateway;
   }
 
   if (cid) {
@@ -105,23 +142,24 @@ function onSearchCid(cid, time = 0) {
 
 function onGatewayChange(gateway) {
   currentGateway.value = gateway;
+  persistGateway(gateway, window);
   if (currentCid.value) {
     const snapshot = getPlaybackSnapshot(window);
     loadVideo(currentCid.value, gateway, snapshot.time, {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
     });
-  } else {
-    const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('gateway', gateway);
-    window.history.pushState({}, '', currentUrl);
   }
 }
 
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
+  const nextGateway = gateway || readStoredGateway(window) || DEFAULT_GATEWAY;
   currentCid.value = cid;
-  const ipfsBaseUrl = `${gateway}${cid}/`;
+  currentGateway.value = nextGateway;
+  persistGateway(nextGateway, window);
+
+  const ipfsBaseUrl = `${nextGateway}${cid}/`;
   const m3u8Url = `${ipfsBaseUrl}index.m3u8`;
   status.value = '正在連線至網關...';
   
@@ -131,15 +169,7 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentShouldAutoplay.value = shouldAutoplay;
 
   if (updateUrl) {
-    const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('cid', cid);
-    currentUrl.searchParams.set('gateway', gateway);
-    if (startTime > 0) {
-      currentUrl.searchParams.set('t', startTime);
-    } else {
-      currentUrl.searchParams.delete('t');
-    }
-    window.history.pushState({}, '', currentUrl);
+    syncPlayerUrl(cid, startTime, 'push');
   }
 }
 
@@ -175,7 +205,7 @@ function onLevelsLoaded(levels) {}
           </div>
           <div id="status" class="status-msg">{{ status }}</div>
 
-          <VideoInfo :cid="currentCid" :gateway="currentGateway" />
+          <VideoInfo :cid="currentCid" />
         </div>
         
         <div class="secondary-column">

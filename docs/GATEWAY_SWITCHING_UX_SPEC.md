@@ -14,7 +14,7 @@
    使用者點擊 `applyGateway()` 後，設定視窗會立刻關閉，但播放器只顯示泛用的 `正在載入影片...` 狀態。沒有專門的「切換中」視覺層，因此畫面看起來不穩定。
 
 2. 切換太早破壞連續性。
-   `App.vue` 在使用者切換 gateway 時，會立刻改寫來源 URL。功能上雖然正確，但在新 gateway 尚未證明能正常提供媒體前，就先放棄了舊的播放上下文。
+   `App.vue` 在使用者切換 gateway 時，會立刻提交新的來源狀態。gateway 選擇應視為本機偏好，而不是分享 URL 的一部分；在新 gateway 尚未證明能正常提供媒體前，就先提交狀態，仍會破壞舊的播放上下文。
 
 3. 從使用者角度來看，續播行為不夠可信。
    目前程式透過 `getCurrentPlaybackTime(window)` 嘗試保留播放時間，但沒有確認：
@@ -138,7 +138,7 @@ Metadata 已載入，播放器正在 seek 回原本位置。
 行為：
 - 若切換前正在播放，成功後自動續播
 - 若切換前是暫停，成功後維持暫停
-- 只有成功後才更新 URL
+- 只有成功後才提交新的 gateway state；分享 URL 仍僅更新 `cid` / `t`
 
 ### 6. Failed
 新 gateway 無法在合理時間內提供媒體。
@@ -231,11 +231,16 @@ Metadata 已載入，播放器正在 seek 回原本位置。
 }
 ```
 
-### FR-3 延後提交 URL
-在切換成功前，不要先把 `window.history` 更新成新的 gateway。
+### FR-3 URL 與 Storage 提交策略
+在切換成功前，不要先把新的 gateway 視為已提交狀態。
 
 原因：
-- URL 應代表已經提交成功的播放狀態，而不是尚未驗證的嘗試。
+- gateway 屬於本機偏好，應持久化於瀏覽器 storage，而不是 Query Parameter。
+- 分享 URL 應代表可分享的播放狀態，只包含 `cid` 與 `t`，而不是尚未驗證的 gateway 嘗試。
+
+規則：
+- gateway 必須寫入瀏覽器 storage（目前採 `localStorage`）以保留使用者偏好。
+- `window.history` 不應寫入 `gateway` Query Parameter。
 
 ### FR-4 Timeout 政策
 需要定義切換 timeout。
@@ -296,7 +301,7 @@ Header 上的 gateway 按鈕應反映切換狀態。
 依目前程式碼來看：
 
 1. `App.vue` 內的 `onGatewayChange()` 會立刻呼叫 `loadVideo(...)`
-2. `loadVideo()` 會立刻更新 state 與 URL
+2. `loadVideo()` 會立刻更新 state；其中分享 URL 只應反映 `cid` / `t`，gateway 則應由 storage 管理
 3. `VideoPlayer.vue` 目前只提供泛用的狀態更新，沒有明確的切換生命週期事件
 4. 播放器回傳給 `App.vue` 的成功 / 失敗握手機制仍不完整
 
@@ -337,7 +342,7 @@ Header 上的 gateway 按鈕應反映切換狀態。
    載入目標來源，並持續發出生命週期事件。
 
 5. `App.vue`
-   只有在收到 `switch-ready` 後才提交 gateway state 與 URL。
+   只有在收到 `switch-ready` 後才提交 gateway state 與 storage；若有必要，URL 只更新 `cid` / `t`。
 
 6. `App.vue`
    若收到 `switch-failed`，則執行 rollback。
@@ -408,8 +413,8 @@ Local Node -> Pinata
 ### AC-2 連續性
 若切換成功，播放應回到原本時間附近，誤差不超過 2 秒。
 
-### AC-3 URL 可信度
-若切換失敗，URL 應維持在最後一個已知可用的 gateway。
+### AC-3 URL / Storage 一致性
+若切換失敗，URL 不得出現未成功提交的 gateway；分享 URL 仍只包含最後一個已知的 `cid` / `t`，而 gateway 選擇應維持在最後一個已知可用值的瀏覽器 storage 中。
 
 ### AC-4 失敗恢復
 若選定的 gateway 失敗，系統必須明確告知使用者，並提供恢復操作。
@@ -424,7 +429,7 @@ Local Node -> Pinata
 
 ### Phase 1
 - 在 `App.vue` 引入 gateway transition state
-- 將 URL 提交延後到切換成功後
+- 明確定義 share URL 與 gateway storage 的責任分工
 - 加入 player overlay 狀態
 - 讓 `VideoPlayer.vue` 發出成功 / 失敗事件
 - 補上 timeout 與 rollback
