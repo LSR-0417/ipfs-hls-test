@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { getCurrentPlaybackTime, getPlaybackSnapshot } from './playback';
+import {
+  applyPlaybackHotkey,
+  clampSeekTime,
+  getPlaybackHotkeyAction,
+  getCurrentPlaybackTime,
+  getPlaybackSnapshot,
+  shouldIgnorePlaybackHotkey,
+} from './playback';
 
 describe('getCurrentPlaybackTime', () => {
   it('returns 0 when no window', () => {
@@ -89,5 +96,216 @@ describe('getPlaybackSnapshot', () => {
       time: 0,
       isPlaying: false,
     });
+  });
+});
+
+describe('clampSeekTime', () => {
+  it('clamps backward seeks to zero', () => {
+    expect(clampSeekTime(3, 120, -5)).toBe(0);
+  });
+
+  it('clamps forward seeks to the media duration', () => {
+    expect(clampSeekTime(118, 120, 5)).toBe(120);
+  });
+
+  it('returns the shifted time when duration is unavailable', () => {
+    expect(clampSeekTime(20, Number.NaN, 5)).toBe(25);
+  });
+
+  it('returns null when current time is invalid', () => {
+    expect(clampSeekTime(Number.NaN, 120, 5)).toBeNull();
+  });
+});
+
+describe('shouldIgnorePlaybackHotkey', () => {
+  it('ignores modified or prevented keyboard events', () => {
+    expect(shouldIgnorePlaybackHotkey({ ctrlKey: true })).toBe(true);
+    expect(shouldIgnorePlaybackHotkey({ defaultPrevented: true })).toBe(true);
+  });
+
+  it('ignores editable targets', () => {
+    expect(shouldIgnorePlaybackHotkey({ target: { tagName: 'INPUT' } })).toBe(true);
+    expect(shouldIgnorePlaybackHotkey({ target: { isContentEditable: true } })).toBe(true);
+    expect(
+      shouldIgnorePlaybackHotkey({
+        target: {
+          closest: () => ({}),
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('allows non-interactive targets', () => {
+    expect(
+      shouldIgnorePlaybackHotkey({
+        target: {
+          tagName: 'DIV',
+          closest: () => null,
+        },
+      })
+    ).toBe(false);
+  });
+});
+
+describe('getPlaybackHotkeyAction', () => {
+  it('maps left and right arrows to seek actions', () => {
+    expect(
+      getPlaybackHotkeyAction({
+        key: 'ArrowLeft',
+        target: { tagName: 'DIV', closest: () => null },
+      })
+    ).toEqual({ type: 'seek', deltaSeconds: -5 });
+
+    expect(
+      getPlaybackHotkeyAction({
+        key: 'ArrowRight',
+        target: { tagName: 'DIV', closest: () => null },
+      })
+    ).toEqual({ type: 'seek', deltaSeconds: 5 });
+  });
+
+  it('maps space to playback toggle actions', () => {
+    expect(
+      getPlaybackHotkeyAction({
+        key: ' ',
+        target: { tagName: 'DIV', closest: () => null },
+      })
+    ).toEqual({ type: 'toggle-playback' });
+
+    expect(
+      getPlaybackHotkeyAction({
+        code: 'Space',
+        target: { tagName: 'DIV', closest: () => null },
+      })
+    ).toEqual({ type: 'toggle-playback' });
+  });
+
+  it('returns null for unsupported keys or ignored targets', () => {
+    expect(
+      getPlaybackHotkeyAction({
+        key: 'Enter',
+        target: { tagName: 'DIV', closest: () => null },
+      })
+    ).toBeNull();
+
+    expect(
+      getPlaybackHotkeyAction({
+        key: ' ',
+        target: { tagName: 'INPUT' },
+      })
+    ).toBeNull();
+  });
+});
+
+describe('applyPlaybackHotkey', () => {
+  function createPlayer(initialTime, duration = 120) {
+    let current = initialTime;
+    let paused = true;
+    let played = 0;
+    let pausedCalls = 0;
+
+    return {
+      get time() {
+        return current;
+      },
+      get isPaused() {
+        return paused;
+      },
+      get playCalls() {
+        return played;
+      },
+      get pauseCalls() {
+        return pausedCalls;
+      },
+      duration() {
+        return duration;
+      },
+      currentTime(nextTime) {
+        if (typeof nextTime === 'number') {
+          current = nextTime;
+        }
+        return current;
+      },
+      paused() {
+        return paused;
+      },
+      play() {
+        played += 1;
+        paused = false;
+        return Promise.resolve();
+      },
+      pause() {
+        pausedCalls += 1;
+        paused = true;
+      },
+    };
+  }
+
+  function createKeyboardEvent(key, target = { tagName: 'DIV', closest: () => null }) {
+    let defaultPrevented = false;
+
+    return {
+      event: {
+        key,
+        target,
+        preventDefault() {
+          defaultPrevented = true;
+        },
+      },
+      wasPrevented() {
+        return defaultPrevented;
+      },
+    };
+  }
+
+  it('seeks forward by 5 seconds on ArrowRight', () => {
+    const player = createPlayer(10, 120);
+    const keyboard = createKeyboardEvent('ArrowRight');
+
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
+    expect(player.time).toBe(15);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('seeks backward by 5 seconds on ArrowLeft and clamps to zero', () => {
+    const player = createPlayer(3, 120);
+    const keyboard = createKeyboardEvent('ArrowLeft');
+
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
+    expect(player.time).toBe(0);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('ignores hotkeys when focus is inside editable controls', () => {
+    const player = createPlayer(10, 120);
+    const keyboard = createKeyboardEvent('ArrowRight', { tagName: 'INPUT' });
+
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(false);
+    expect(player.time).toBe(10);
+    expect(keyboard.wasPrevented()).toBe(false);
+  });
+
+  it('plays when pressing Space on a paused player', () => {
+    const player = createPlayer(10, 120);
+    const keyboard = createKeyboardEvent(' ');
+
+    expect(player.isPaused).toBe(true);
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
+    expect(player.isPaused).toBe(false);
+    expect(player.playCalls).toBe(1);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('pauses when pressing Space on a playing player', () => {
+    const player = createPlayer(10, 120);
+    const startPlayback = createKeyboardEvent(' ');
+    const pausePlayback = createKeyboardEvent(' ');
+
+    applyPlaybackHotkey(startPlayback.event, player);
+
+    expect(applyPlaybackHotkey(pausePlayback.event, player)).toBe(true);
+    expect(player.isPaused).toBe(true);
+    expect(player.pauseCalls).toBe(1);
+    expect(pausePlayback.wasPrevented()).toBe(true);
   });
 });

@@ -18,12 +18,20 @@
 - **Search Bar**: 取代原有的 CID 輸入框，將輸入影片 CID (或未來擴展為關鍵字搜尋) 以及跳轉邏輯集中在 Header 之中。
 - **Gateway Configurator**: 在 Header 的右側提供一顆有科技感的 `⚙ Gateway` 按鈕，點開後以 Glassmorphism 浮動視窗 (Dialog) 提供完整的網關 (IPFS Gateway) 選擇與 Local Node 自訂(Host, Port)功能。減少首頁的空間佔用。
 
-#### 2.2 VideoInfo.vue (整合分享功能)
+#### 2.2 VideoPlayer.vue (播放核心與快捷鍵)
+- **video.js 播放核心**: `VideoPlayer.vue` 仍作為 HLS 載入、字幕掛載、起始時間同步與播放器生命週期管理的核心元件。
+- **全域鍵盤快捷鍵**: 元件在 `mounted` 時向 `window` 註冊 `keydown` handler，在 `beforeUnmount` 時解除註冊，避免播放器卸載後殘留事件監聽器。
+- **播放快捷鍵策略**: 左右方向鍵分別對應 `-5` 秒與 `+5` 秒 seek；空白鍵則負責在播放與暫停之間切換。實作上統一透過 `src/utils/playback.js` 的 `applyPlaybackHotkey()` 進行動作判斷、時間計算與事件過濾。
+- **互動衝突避免**: 當焦點位於 `input`、`textarea`、`select`、`button`、`contenteditable` 或 ARIA 互動控制項時，快捷鍵不應觸發，避免干擾搜尋框、設定視窗與播放器控制元件。
+- **Seek 邊界控制**: `clampSeekTime()` 會保證 seek 結果不小於 `0`，且在媒體總長度可用時不超過 `duration`。
+- **空白鍵事件消耗**: 當空白鍵確實被播放器接手時，需呼叫 `preventDefault()`，避免頁面捲動與播放器控制行為互相競爭。
+
+#### 2.3 VideoInfo.vue (整合分享功能)
 - 承載影片標題外，進一步加入了按讚、倒讚等虛擬按鈕以構築完整平台氛圍。
 - **Share Icon (分享按鈕)**: 取代了過去龐大突兀的「複製目前播放連結」按鈕，現已整合進 `VideoInfo` 的動作列中 (`actions`)。點擊時提供 `Copied!` 切換文字與顏色的微互動 (Micro-animation)，整體邏輯乾淨簡潔。
 - **分享連結策略**: 分享 URL 僅承載可重現播放內容所需的 `cid` 與播放進度 `t` (`?cid=&t=`)。使用者選定的 gateway 屬於本機偏好設定，會持久化到瀏覽器 `localStorage`，不會出現在分享連結中。
 
-#### 2.3 ControlPanel.vue (棄用/降級)
+#### 2.4 ControlPanel.vue (棄用/降級)
 - 原本負責全部參數的 `ControlPanel.vue` 已完成歷史任務。其 Gateway 切換邏輯被提取並融入到 `Header.vue` 或 `App.vue` 全域狀態管理。
 
 ## 3. UI/UX 與美學準則 (Aesthetics Guidelines)
@@ -40,3 +48,7 @@
 - `cid` 與 `time` (`t`) 具備 **URL 雙向綁定能力** (`history.pushState`)，作為可分享、可重放的播放狀態。
 - `gateway` 不再作為 URL Query Parameter，而是作為瀏覽器端偏好設定，持久化在 `localStorage`，供 `App.vue` 與 `Header.vue` 還原目前使用中的網關。
 - 當 URL 載入給定 `?cid=...&t=...` 時，`App.vue` 會解析並派發狀態給子元件以觸發播放流程。
+
+## 5. 測試設計對應
+- 播放時間讀取、seek clamp 與鍵盤快捷鍵事件過濾邏輯集中於 `src/utils/playback.js`，以便使用 Vitest 進行純單元測試。
+- 左右鍵 `±5` 秒 seek、空白鍵播放 / 暫停切換、輸入框忽略規則與 seek 邊界條件，皆需在 `src/utils/playback.spec.js` 內有明確案例。

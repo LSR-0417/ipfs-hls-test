@@ -16,6 +16,7 @@ import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import { useSubtitles } from '../composables/useSubtitles';
 import { formatTime } from '../utils/time';
+import { applyPlaybackHotkey } from '../utils/playback';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 window.videojs = videojs;
@@ -44,6 +45,7 @@ const props = defineProps({
 const emit = defineEmits(['status-update', 'levels-loaded']);
 
 const videoRef = ref(null);
+const SEEK_STEP_SECONDS = 5;
 let player = null;
 let sourceSeq = 0;
 
@@ -173,6 +175,10 @@ function syncStartTime(startTime) {
   emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
 }
 
+function handleGlobalKeydown(event) {
+  applyPlaybackHotkey(event, player, SEEK_STEP_SECONDS);
+}
+
 function initPlayer() {
   if (!videoRef.value) return;
 
@@ -207,6 +213,7 @@ function initPlayer() {
 
 onMounted(() => {
   initPlayer();
+  window.addEventListener('keydown', handleGlobalKeydown);
 });
 
 watch(
@@ -237,6 +244,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
   if (player) {
     player.dispose();
   }
