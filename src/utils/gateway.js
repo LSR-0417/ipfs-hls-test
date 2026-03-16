@@ -1,4 +1,27 @@
 export const gatewayStorageKey = 'ipfs-hls-selected-gateway';
+export const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
+export const publicGatewayOptions = [
+  {
+    id: 'pinata',
+    label: 'Pinata',
+    desc: 'Reliable and usually fast',
+    url: 'https://gateway.pinata.cloud/ipfs/',
+  },
+  {
+    id: 'dweb',
+    label: 'dweb.link',
+    desc: 'Official IPFS gateway',
+    url: 'https://dweb.link/ipfs/',
+  },
+  {
+    id: 'ipfsio',
+    label: 'ipfs.io',
+    desc: 'Standard public gateway',
+    url: 'https://ipfs.io/ipfs/',
+  },
+];
+export const defaultPublicGateway = publicGatewayOptions[0].url;
+export const defaultLocalGateway = 'http://127.0.0.1:8080/ipfs/';
 
 function resolveStorage(target) {
   if (target && typeof target.getItem === 'function') {
@@ -17,33 +40,117 @@ function resolveStorage(target) {
 }
 
 export function readStoredGateway(target) {
+  return readStoredValue(gatewayStorageKey, target);
+}
+
+export function persistGateway(gateway, target) {
+  persistStoredValue(gatewayStorageKey, gateway, target);
+}
+
+export function readStoredCustomGateway(target) {
+  return readStoredValue(customGatewayStorageKey, target);
+}
+
+export function persistCustomGateway(gateway, target) {
+  persistStoredValue(customGatewayStorageKey, gateway, target);
+}
+
+function readStoredValue(key, target) {
   const storage = resolveStorage(target);
   if (!storage) return '';
 
   try {
-    const value = storage.getItem(gatewayStorageKey);
+    const value = storage.getItem(key);
     return typeof value === 'string' ? value.trim() : '';
   } catch (_) {
     return '';
   }
 }
 
-export function persistGateway(gateway, target) {
+function persistStoredValue(key, value, target) {
   const storage = resolveStorage(target);
   if (!storage) return;
 
-  const normalized = typeof gateway === 'string' ? gateway.trim() : '';
+  const normalized = typeof value === 'string' ? value.trim() : '';
 
   try {
     if (normalized) {
-      storage.setItem(gatewayStorageKey, normalized);
+      storage.setItem(key, normalized);
       return;
     }
 
     if (typeof storage.removeItem === 'function') {
-      storage.removeItem(gatewayStorageKey);
+      storage.removeItem(key);
     }
   } catch (_) {
     // ignore storage errors
   }
+}
+
+export function isPrivateHostname(hostname) {
+  const normalized = String(hostname || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+
+  if (!normalized) return false;
+  if (normalized === 'localhost' || normalized === '::1') return true;
+  if (normalized.startsWith('127.')) return true;
+  if (normalized.startsWith('10.')) return true;
+  if (normalized.startsWith('192.168.')) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)) return true;
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  return false;
+}
+
+export function normalizeGatewayUrl(input, options = {}) {
+  const { allowPrivateHosts = false, defaultProtocol = 'https:' } = options;
+  const trimmed = typeof input === 'string' ? input.trim() : '';
+  if (!trimmed) return '';
+
+  const candidate =
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `${defaultProtocol}//${trimmed.replace(/^\/\//, '')}`;
+
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch (_) {
+    return '';
+  }
+
+  const isPrivate = isPrivateHostname(parsed.hostname);
+  const isHttps = parsed.protocol === 'https:';
+  const isHttp = parsed.protocol === 'http:';
+
+  if (isPrivate) {
+    if (!allowPrivateHosts || (!isHttp && !isHttps)) {
+      return '';
+    }
+  } else if (!isHttps) {
+    return '';
+  }
+
+  const pathname = normalizeGatewayPath(parsed.pathname);
+  if (!pathname) return '';
+
+  parsed.username = '';
+  parsed.password = '';
+  parsed.pathname = pathname;
+  parsed.search = '';
+  parsed.hash = '';
+
+  return parsed.toString();
+}
+
+export function getDefaultGateway(options = {}) {
+  return options.allowPrivateHosts ? defaultLocalGateway : defaultPublicGateway;
+}
+
+function normalizeGatewayPath(pathname) {
+  if (!pathname || pathname === '/') return '/ipfs/';
+  if (pathname.endsWith('/ipfs')) return `${pathname}/`;
+  if (pathname.endsWith('/ipfs/')) return pathname;
+  return '';
 }

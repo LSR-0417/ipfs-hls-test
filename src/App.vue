@@ -5,11 +5,12 @@ import Sidebar from './components/Sidebar.vue';
 import VideoPlayer from './components/VideoPlayer.vue';
 import VideoInfo from './components/VideoInfo.vue';
 import VideoGrid from './components/VideoGrid.vue';
-import { persistGateway, readStoredGateway } from './utils/gateway';
+import { getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 
-const DEFAULT_GATEWAY = 'http://127.0.0.1:8080/ipfs/';
+const allowPrivateGateways = import.meta.env.DEV;
+const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
 const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
@@ -68,7 +69,7 @@ function syncPlayerUrl(cid, time, mode = 'push') {
 function syncFromUrl() {
   const { cid, time } = parsePlayerParams(window.location.search);
   const prevGateway = currentGateway.value;
-  const storedGateway = readStoredGateway(window);
+  const storedGateway = readConfiguredGateway();
   const nextGateway = storedGateway || prevGateway || DEFAULT_GATEWAY;
 
   if (nextGateway !== currentGateway.value) {
@@ -141,11 +142,12 @@ function onSearchCid(cid, time = 0) {
 }
 
 function onGatewayChange(gateway) {
-  currentGateway.value = gateway;
-  persistGateway(gateway, window);
+  const nextGateway = resolveGateway(gateway);
+  currentGateway.value = nextGateway;
+  persistGateway(nextGateway, window);
   if (currentCid.value) {
     const snapshot = getPlaybackSnapshot(window);
-    loadVideo(currentCid.value, gateway, snapshot.time, {
+    loadVideo(currentCid.value, nextGateway, snapshot.time, {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
     });
@@ -154,7 +156,7 @@ function onGatewayChange(gateway) {
 
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
-  const nextGateway = gateway || readStoredGateway(window) || DEFAULT_GATEWAY;
+  const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   currentCid.value = cid;
   currentGateway.value = nextGateway;
   persistGateway(nextGateway, window);
@@ -178,6 +180,25 @@ function onStatusUpdate(newStatus) {
 }
 
 function onLevelsLoaded(levels) {}
+
+function resolveGateway(candidate) {
+  return normalizeGatewayUrl(candidate, { allowPrivateHosts: allowPrivateGateways }) || DEFAULT_GATEWAY;
+}
+
+function readConfiguredGateway() {
+  const storedGateway = readStoredGateway(window);
+  const normalized = normalizeGatewayUrl(storedGateway, { allowPrivateHosts: allowPrivateGateways });
+
+  if (normalized) {
+    return normalized;
+  }
+
+  if (storedGateway) {
+    persistGateway('', window);
+  }
+
+  return '';
+}
 </script>
 
 <template>

@@ -1,65 +1,53 @@
 <script setup>
-import { ref, watch, computed, onMounted } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { isPrivateHostname, normalizeGatewayUrl, persistCustomGateway, publicGatewayOptions, readStoredCustomGateway } from '../utils/gateway';
+
+const LOCAL_GATEWAY_ID = 'local';
+const CUSTOM_GATEWAY_ID = 'custom';
+const isDevMode = import.meta.env.DEV;
+const localStorageKey = 'ipfs-hls-local-gateway';
+const localGatewayOption = {
+  id: LOCAL_GATEWAY_ID,
+  label: 'Local Node',
+  desc: 'Dev only: localhost or trusted LAN',
+};
+const builtInGateways = isDevMode ? [localGatewayOption, ...publicGatewayOptions] : publicGatewayOptions;
 
 const props = defineProps({
-  currentGateway: { type: String, default: 'http://127.0.0.1:8080/ipfs/' },
+  currentGateway: { type: String, default: '' },
 });
 const emit = defineEmits(['search', 'gateway-change']);
 
 const searchQuery = ref('');
 const settingsOpen = ref(false);
-const selectedGateway = ref(props.currentGateway);
+const selectedGatewayId = ref(builtInGateways[0].id);
 const localHost = ref('127.0.0.1');
 const localPort = ref('8080');
+const customGateway = ref('');
+const gatewayError = ref('');
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
-const gateways = [
-  {
-    id: 'local',
-    label: 'Local Node',
-    desc: 'Fastest for local dev, no public dependency',
-  },
-  {
-    id: 'pinata',
-    url: 'https://gateway.pinata.cloud/ipfs/',
-    label: 'Pinata',
-    desc: 'Reliable and usually fast',
-  },
-  {
-    id: 'dweb',
-    url: 'https://dweb.link/ipfs/',
-    label: 'dweb.link',
-    desc: 'Official IPFS gateway',
-  },
-  {
-    id: 'ipfsio',
-    url: 'https://ipfs.io/ipfs/',
-    label: 'ipfs.io',
-    desc: 'Standard public gateway',
-  },
-];
-
-const lastLocalGateway = ref(localGatewayUrl.value);
-const localStorageKey = 'ipfs-hls-local-gateway';
+const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
+const currentGatewayValue = computed(
+  () => normalizeGatewayUrl(props.currentGateway, { allowPrivateHosts: isDevMode }) || props.currentGateway
+);
+const isCurrentCustomGateway = computed(() => {
+  const current = currentGatewayValue.value;
+  return Boolean(current) && !builtInGateways.some((gateway) => gatewayUrl(gateway) === current);
+});
 
 watch(
   () => props.currentGateway,
   (next) => {
-    if (!settingsOpen.value) {
-      selectedGateway.value = next;
+    if (isDevMode) {
+      syncLocalFromGateway(next);
     }
-  }
-);
 
-watch(
-  () => localGatewayUrl.value,
-  (next) => {
-    if (selectedGateway.value === lastLocalGateway.value) {
-      selectedGateway.value = next;
+    if (!settingsOpen.value) {
+      syncSelectionFromGateway(next);
     }
-    lastLocalGateway.value = next;
-    persistLocalGateway();
-  }
+  },
+  { immediate: true }
 );
 
 function onSearch() {
@@ -69,20 +57,13 @@ function onSearch() {
   }
 }
 
-function isPrivateHost(hostname) {
-  if (!hostname) return false;
-  if (hostname === 'localhost') return true;
-  if (hostname.startsWith('127.')) return true;
-  if (hostname.startsWith('10.')) return true;
-  if (hostname.startsWith('192.168.')) return true;
-  return /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-}
-
 function syncLocalFromGateway(urlStr) {
+  if (!isDevMode) return;
+
   try {
     const parsed = new URL(urlStr);
-    if (!parsed.pathname.startsWith('/ipfs')) return;
-    if (!isPrivateHost(parsed.hostname)) return;
+    if (!normalizeGatewayUrl(parsed.toString(), { allowPrivateHosts: true })) return;
+    if (!isPrivateHostname(parsed.hostname)) return;
     localHost.value = parsed.hostname;
     localPort.value = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
   } catch (_) {
@@ -91,7 +72,7 @@ function syncLocalFromGateway(urlStr) {
 }
 
 function normalizeLocalHost(value) {
-  return value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  return value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
 }
 
 function normalizeLocalPort(value) {
@@ -100,25 +81,68 @@ function normalizeLocalPort(value) {
 }
 
 function gatewayUrl(gateway) {
-  return gateway.id === 'local' ? localGatewayUrl.value : gateway.url;
+  return gateway.id === LOCAL_GATEWAY_ID ? localGatewayUrl.value : gateway.url;
 }
 
 function openSettings() {
-  restoreLocalGateway();
-  syncLocalFromGateway(props.currentGateway);
-  selectedGateway.value = props.currentGateway;
+  if (isDevMode) {
+    restoreLocalGateway();
+    syncLocalFromGateway(props.currentGateway);
+  }
+  customGateway.value = readStoredCustomGateway(window) || customGateway.value;
+  syncSelectionFromGateway(props.currentGateway);
+  gatewayError.value = '';
   settingsOpen.value = true;
 }
 
 function applyGateway() {
-  localHost.value = normalizeLocalHost(localHost.value);
-  localPort.value = normalizeLocalPort(localPort.value);
-  if (selectedGateway.value === lastLocalGateway.value) {
-    selectedGateway.value = localGatewayUrl.value;
+  gatewayError.value = '';
+
+  let nextGateway = '';
+
+  if (selectedGatewayId.value === LOCAL_GATEWAY_ID) {
+    if (!isDevMode) {
+      selectedGatewayId.value = builtInGateways[0].id;
+      nextGateway = gatewayUrl(builtInGateways[0]);
+    } else {
+      localHost.value = normalizeLocalHost(localHost.value);
+      localPort.value = normalizeLocalPort(localPort.value);
+      nextGateway = localGatewayUrl.value;
+      persistLocalGateway();
+    }
+  } else if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
+    nextGateway = normalizeGatewayUrl(customGateway.value);
+    if (!nextGateway) {
+      gatewayError.value = 'Enter a valid public HTTPS gateway URL that ends with /ipfs/.';
+      return;
+    }
+    customGateway.value = nextGateway;
+    persistCustomGateway(nextGateway, window);
+  } else {
+    const selectedGateway = builtInGateways.find((gateway) => gateway.id === selectedGatewayId.value);
+    nextGateway = selectedGateway ? gatewayUrl(selectedGateway) : gatewayUrl(builtInGateways[0]);
   }
-  persistLocalGateway();
-  emit('gateway-change', selectedGateway.value);
+
+  emit('gateway-change', nextGateway);
   settingsOpen.value = false;
+}
+
+function syncSelectionFromGateway(urlStr) {
+  const normalized = normalizeGatewayUrl(urlStr, { allowPrivateHosts: isDevMode });
+
+  if (!normalized) {
+    selectedGatewayId.value = builtInGateways[0].id;
+    return;
+  }
+
+  const matchedGateway = builtInGateways.find((gateway) => gatewayUrl(gateway) === normalized);
+  if (matchedGateway) {
+    selectedGatewayId.value = matchedGateway.id;
+    return;
+  }
+
+  selectedGatewayId.value = CUSTOM_GATEWAY_ID;
+  customGateway.value = normalized;
 }
 
 function persistLocalGateway() {
@@ -148,7 +172,10 @@ function restoreLocalGateway() {
 }
 
 onMounted(() => {
-  restoreLocalGateway();
+  if (isDevMode) {
+    restoreLocalGateway();
+  }
+  customGateway.value = readStoredCustomGateway(window);
 });
 </script>
 
@@ -212,16 +239,16 @@ onMounted(() => {
 
       <div class="gateway-list">
         <label
-          v-for="g in gateways"
+          v-for="g in builtInGateways"
           :key="g.id"
           class="gateway-option"
-          :class="{ selected: selectedGateway === gatewayUrl(g) }"
+          :class="{ selected: selectedGatewayId === g.id }"
         >
-          <input type="radio" name="gateway" :value="gatewayUrl(g)" v-model="selectedGateway" />
+          <input type="radio" name="gateway" :value="g.id" v-model="selectedGatewayId" />
           <div class="gateway-meta">
             <div class="gateway-title">
               {{ g.label }}
-              <span v-if="gatewayUrl(g) === currentGateway" class="badge">Active</span>
+              <span v-if="gatewayUrl(g) === currentGatewayValue" class="badge">Active</span>
             </div>
             <div class="gateway-desc">{{ g.desc }}</div>
             <div class="gateway-url">{{ gatewayUrl(g) }}</div>
@@ -230,16 +257,58 @@ onMounted(() => {
         </label>
       </div>
 
-      <div class="local-config">
+      <label class="gateway-option" :class="{ selected: selectedGatewayId === CUSTOM_GATEWAY_ID }">
+        <input type="radio" name="gateway" :value="CUSTOM_GATEWAY_ID" v-model="selectedGatewayId" />
+        <div class="gateway-meta">
+          <div class="gateway-title">
+            Custom Gateway
+            <span v-if="isCurrentCustomGateway" class="badge">Active</span>
+          </div>
+          <div class="gateway-desc">Use a public HTTPS gateway that is not in the default list</div>
+          <div class="gateway-url">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</div>
+        </div>
+        <div class="gateway-check">✓</div>
+      </label>
+
+      <div class="custom-config" :class="{ active: selectedGatewayId === CUSTOM_GATEWAY_ID }">
+        <div class="local-title">Custom Public Gateway</div>
+        <label for="customGateway">HTTPS Gateway URL</label>
+        <input
+          id="customGateway"
+          type="text"
+          v-model="customGateway"
+          placeholder="https://friend-gateway.example/ipfs/"
+          @focus="selectedGatewayId = CUSTOM_GATEWAY_ID"
+          @input="gatewayError = ''"
+        />
+        <div class="local-preview">
+          <span class="label">Preview</span>
+          <span class="value">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</span>
+        </div>
+      </div>
+
+      <div v-if="isDevMode" class="local-config">
         <div class="local-title">Local Node Settings</div>
         <div class="local-fields">
           <div class="field">
             <label for="localHost">Host / IP</label>
-            <input id="localHost" type="text" v-model="localHost" placeholder="127.0.0.1" />
+            <input
+              id="localHost"
+              type="text"
+              v-model="localHost"
+              placeholder="127.0.0.1"
+              @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
+            />
           </div>
           <div class="field">
             <label for="localPort">Port</label>
-            <input id="localPort" type="text" v-model="localPort" placeholder="8080" />
+            <input
+              id="localPort"
+              type="text"
+              v-model="localPort"
+              placeholder="8080"
+              @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
+            />
           </div>
         </div>
         <div class="local-preview">
@@ -247,6 +316,8 @@ onMounted(() => {
           <span class="value">{{ localGatewayUrl }}</span>
         </div>
       </div>
+
+      <div v-if="gatewayError" class="gateway-error">{{ gatewayError }}</div>
 
       <div class="gateway-actions">
         <button class="ghost-btn" @click="settingsOpen = false">Cancel</button>
@@ -664,6 +735,21 @@ onMounted(() => {
   gap: 10px;
 }
 
+.custom-config {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.25);
+  display: grid;
+  gap: 10px;
+}
+
+.custom-config.active {
+  border-color: rgba(0, 210, 255, 0.45);
+  box-shadow: 0 0 18px rgba(0, 210, 255, 0.12);
+}
+
 .local-title {
   font-weight: 600;
   font-size: 0.95rem;
@@ -675,12 +761,14 @@ onMounted(() => {
   gap: 12px;
 }
 
-.local-config label {
+.local-config label,
+.custom-config label {
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
-.local-config input {
+.local-config input,
+.custom-config input {
   margin-top: 6px;
   width: 100%;
   border-radius: 10px;
@@ -692,7 +780,8 @@ onMounted(() => {
   outline: none;
 }
 
-.local-config input:focus {
+.local-config input:focus,
+.custom-config input:focus {
   border-color: rgba(0, 210, 255, 0.5);
   box-shadow: 0 0 10px rgba(0, 210, 255, 0.2);
 }
@@ -714,6 +803,16 @@ onMounted(() => {
   font-size: 0.85rem;
   color: var(--text-primary);
   word-break: break-all;
+}
+
+.gateway-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 107, 129, 0.35);
+  background: rgba(255, 107, 129, 0.08);
+  color: #ffd0d7;
+  font-size: 0.85rem;
 }
 
 @media (max-width: 768px) {
@@ -773,10 +872,14 @@ onMounted(() => {
   .local-config {
     padding: 10px;
   }
+  .custom-config {
+    padding: 10px;
+  }
   .local-fields {
     grid-template-columns: 1fr;
   }
-  .local-config input {
+  .local-config input,
+  .custom-config input {
     padding: 9px 10px;
     font-size: 0.85rem;
   }
