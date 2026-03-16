@@ -108,12 +108,13 @@ for dir in "${BASENAME}"/*/; do
         mv "$dir/temp.m3u8" "$variant_playlist"
     fi
 
-    # 將 segment 檔名補上畫質名稱，避免不同畫質的片段名稱過於相似。
-    for segment_path in "$dir"/segment_*.ts; do
+    # 僅改名 FFmpeg 原始輸出的純數字 segment，避免重跑時重複補上畫質前綴。
+    for segment_path in "$dir"/segment_[0-9]*.ts; do
         [ -f "$segment_path" ] || continue
 
         segment_name=$(basename "$segment_path")
-        segment_suffix="${segment_name#segment_}"
+        [[ "$segment_name" =~ ^segment_([0-9]+)\.ts$ ]] || continue
+        segment_suffix="${BASH_REMATCH[1]}.ts"
         mv "$segment_path" "$dir/segment_${folder_name}_${segment_suffix}"
     done
 

@@ -189,6 +189,28 @@ describe('multi_resolution_hls.sh', () => {
     await expect(readFile(join(outputDir, '1080p', 'segment_1080p_001.ts'), 'utf8')).resolves.toBe('');
   });
 
+  it('does not duplicate the resolution prefix when rerun in the same output directory', async () => {
+    const toolchain = await createToolchain({ height: 480 });
+    const inputFile = join(toolchain.root, 'demo.mp4');
+
+    await writeFile(inputFile, '');
+
+    const firstRun = await runScript([inputFile], toolchain.env);
+    const secondRun = await runScript([inputFile], toolchain.env);
+    const outputDir = join(toolchain.root, 'demo');
+    const variantPlaylist = await readFile(join(outputDir, '480p', 'streaminglist-480p.m3u8'), 'utf8');
+
+    expect(firstRun.exitCode).toBe(0);
+    expect(secondRun.exitCode).toBe(0);
+    expect(getSegmentLines(variantPlaylist)).toEqual([
+      'segment_480p_000.ts',
+      'segment_480p_001.ts',
+    ]);
+
+    await expect(readFile(join(outputDir, '480p', 'segment_480p_000.ts'), 'utf8')).resolves.toBe('');
+    await expect(readFile(join(outputDir, '480p', 'segment_480p_001.ts'), 'utf8')).resolves.toBe('');
+  });
+
   it('falls back to orig output when the source height is below 480p', async () => {
     const toolchain = await createToolchain({ height: 360 });
     const inputFile = join(toolchain.root, 'low-res.mp4');
