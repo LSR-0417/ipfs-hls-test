@@ -205,6 +205,7 @@ function readConfiguredGateway() {
   <Header
     @search="onSearchCid"
     :current-gateway="currentGateway"
+    :current-cid="currentCid"
     @gateway-change="onGatewayChange"
   />
   <div class="app-container">

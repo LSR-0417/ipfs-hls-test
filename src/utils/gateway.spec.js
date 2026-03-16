@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildGatewayIndexUrl,
   customGatewayStorageKey,
   gatewayStorageKey,
   isPrivateHostname,
   normalizeGatewayUrl,
   persistCustomGateway,
   persistGateway,
+  probeGatewayAvailability,
   readStoredCustomGateway,
   readStoredGateway,
 } from './gateway';
@@ -25,6 +27,10 @@ function createStorage() {
     },
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('readStoredGateway', () => {
   it('returns a trimmed gateway from storage', () => {
@@ -106,5 +112,76 @@ describe('normalizeGatewayUrl', () => {
     expect(normalizeGatewayUrl('https://example.com/')).toBe('https://example.com/ipfs/');
     expect(normalizeGatewayUrl('https://example.com/ipns/')).toBe('');
     expect(normalizeGatewayUrl('https://example.com/ipfs/some-cid')).toBe('');
+  });
+});
+
+describe('buildGatewayIndexUrl', () => {
+  it('builds the index.m3u8 URL from a gateway base and CID', () => {
+    expect(buildGatewayIndexUrl('https://example.com/ipfs/', 'bafy123')).toBe(
+      'https://example.com/ipfs/bafy123/index.m3u8'
+    );
+  });
+});
+
+describe('probeGatewayAvailability', () => {
+  it('returns ready when index.m3u8 is reachable', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const nowFn = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(132);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'ready',
+        detail: '已找到 index.m3u8',
+        durationMs: 32,
+      }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://example.com/ipfs/bafy123/index.m3u8',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+      })
+    );
+  });
+
+  it('returns failed when the gateway responds with an error status', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    const nowFn = vi.fn().mockReturnValueOnce(20).mockReturnValueOnce(55);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'failed',
+        detail: '找不到 index.m3u8 (HTTP 404)',
+        durationMs: 35,
+      }
+    );
+  });
+
+  it('returns failed on timeout', async () => {
+    vi.useFakeTimers();
+    const nowFn = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(50);
+
+    const fetchImpl = vi.fn((_, init) => {
+      return new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+
+    const probePromise = probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', {
+      fetchImpl,
+      timeoutMs: 50,
+      nowFn,
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(probePromise).resolves.toEqual({
+      state: 'failed',
+      detail: '逾時，找不到 index.m3u8',
+      durationMs: 50,
+    });
   });
 });

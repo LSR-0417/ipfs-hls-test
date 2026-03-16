@@ -1,6 +1,13 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
-import { isPrivateHostname, normalizeGatewayUrl, persistCustomGateway, publicGatewayOptions, readStoredCustomGateway } from '../utils/gateway';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  isPrivateHostname,
+  normalizeGatewayUrl,
+  persistCustomGateway,
+  probeGatewayAvailability,
+  publicGatewayOptions,
+  readStoredCustomGateway,
+} from '../utils/gateway';
 
 const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
@@ -12,9 +19,11 @@ const localGatewayOption = {
   desc: 'Dev only: localhost or trusted LAN',
 };
 const builtInGateways = isDevMode ? [localGatewayOption, ...publicGatewayOptions] : publicGatewayOptions;
+const builtInGatewayOrder = Object.fromEntries(builtInGateways.map((gateway, index) => [gateway.id, index]));
 
 const props = defineProps({
   currentGateway: { type: String, default: '' },
+  currentCid: { type: String, default: '' },
 });
 const emit = defineEmits(['search', 'gateway-change']);
 
@@ -25,16 +34,83 @@ const localHost = ref('127.0.0.1');
 const localPort = ref('8080');
 const customGateway = ref('');
 const gatewayError = ref('');
+const gatewayProbeStates = ref({});
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
 const currentGatewayValue = computed(
   () => normalizeGatewayUrl(props.currentGateway, { allowPrivateHosts: isDevMode }) || props.currentGateway
 );
+const currentCidValue = computed(() => props.currentCid.trim());
 const isCurrentCustomGateway = computed(() => {
   const current = currentGatewayValue.value;
   return Boolean(current) && !builtInGateways.some((gateway) => gatewayUrl(gateway) === current);
 });
+const orderedBuiltInGateways = computed(() =>
+  [...builtInGateways].sort((left, right) => {
+    const leftState = probeStateFor(left.id);
+    const rightState = probeStateFor(right.id);
+    const rankDiff = probeSortRank(leftState) - probeSortRank(rightState);
+
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+
+    if (leftState.state === 'ready' && rightState.state === 'ready') {
+      const durationDiff = (leftState.durationMs ?? Number.MAX_SAFE_INTEGER) - (rightState.durationMs ?? Number.MAX_SAFE_INTEGER);
+      if (durationDiff !== 0) {
+        return durationDiff;
+      }
+    }
+
+    return (builtInGatewayOrder[left.id] ?? 0) - (builtInGatewayOrder[right.id] ?? 0);
+  })
+);
+const recommendedGatewayId = computed(() => {
+  const candidates = [
+    ...builtInGateways.map((gateway) => ({
+      id: gateway.id,
+      probeState: probeStateFor(gateway.id),
+      order: builtInGatewayOrder[gateway.id] ?? 0,
+    })),
+    {
+      id: CUSTOM_GATEWAY_ID,
+      probeState: probeStateFor(CUSTOM_GATEWAY_ID),
+      order: Number.MAX_SAFE_INTEGER,
+    },
+  ];
+
+  const readyCandidates = candidates.filter(({ probeState }) => probeState.state === 'ready');
+  if (!readyCandidates.length) return '';
+
+  readyCandidates.sort((left, right) => {
+    const durationDiff = (left.probeState.durationMs ?? Number.MAX_SAFE_INTEGER) - (right.probeState.durationMs ?? Number.MAX_SAFE_INTEGER);
+    if (durationDiff !== 0) {
+      return durationDiff;
+    }
+
+    return left.order - right.order;
+  });
+
+  return readyCandidates[0].id;
+});
+const currentGatewayProbeState = computed(() => {
+  const current = currentGatewayValue.value;
+  const matchedGateway = builtInGateways.find((gateway) => gatewayUrl(gateway) === current);
+
+  if (matchedGateway) {
+    return probeStateFor(matchedGateway.id);
+  }
+
+  if (current && current === customGatewayPreview.value) {
+    return probeStateFor(CUSTOM_GATEWAY_ID);
+  }
+
+  return createIdleProbeState();
+});
+
+let gatewayProbeSeq = 0;
+let gatewayProbeTimer = null;
 
 watch(
   () => props.currentGateway,
@@ -48,6 +124,28 @@ watch(
     }
   },
   { immediate: true }
+);
+
+watch(
+  () => [settingsOpen.value, currentCidValue.value],
+  ([open]) => {
+    if (!open) {
+      cancelScheduledGatewayProbe();
+      gatewayProbeSeq += 1;
+      resetGatewayProbeStates();
+      return;
+    }
+
+    scheduleGatewayProbe();
+  }
+);
+
+watch(
+  () => [settingsOpen.value, localGatewayUrl.value, customGatewayPreview.value],
+  ([open]) => {
+    if (!open) return;
+    scheduleGatewayProbe();
+  }
 );
 
 function onSearch() {
@@ -92,6 +190,7 @@ function openSettings() {
   customGateway.value = readStoredCustomGateway(window) || customGateway.value;
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
+  resetGatewayProbeStates();
   settingsOpen.value = true;
 }
 
@@ -145,6 +244,128 @@ function syncSelectionFromGateway(urlStr) {
   customGateway.value = normalized;
 }
 
+function createIdleProbeState(detail = '') {
+  return {
+    state: 'idle',
+    detail: detail || (currentCidValue.value ? '等待檢查 index.m3u8' : '載入 CID 後可檢查'),
+    durationMs: null,
+  };
+}
+
+function probeStateFor(id) {
+  return gatewayProbeStates.value[id] || createIdleProbeState();
+}
+
+function setGatewayProbeState(id, state, detail, durationMs = null) {
+  gatewayProbeStates.value = {
+    ...gatewayProbeStates.value,
+    [id]: {
+      state,
+      detail,
+      durationMs,
+    },
+  };
+}
+
+function resetGatewayProbeStates() {
+  const nextStates = {};
+
+  builtInGateways.forEach((gateway) => {
+    nextStates[gateway.id] = createIdleProbeState();
+  });
+
+  nextStates[CUSTOM_GATEWAY_ID] = createIdleProbeState(
+    customGatewayPreview.value ? '等待檢查 index.m3u8' : '輸入 HTTPS gateway 後可檢查'
+  );
+
+  gatewayProbeStates.value = nextStates;
+}
+
+function scheduleGatewayProbe(delay = 250) {
+  cancelScheduledGatewayProbe();
+  gatewayProbeTimer = window.setTimeout(() => {
+    gatewayProbeTimer = null;
+    void runGatewayProbe();
+  }, delay);
+}
+
+function cancelScheduledGatewayProbe() {
+  if (gatewayProbeTimer) {
+    clearTimeout(gatewayProbeTimer);
+    gatewayProbeTimer = null;
+  }
+}
+
+async function runGatewayProbe() {
+  const cid = currentCidValue.value;
+  const seq = ++gatewayProbeSeq;
+
+  resetGatewayProbeStates();
+
+  if (!settingsOpen.value) return;
+  if (!cid) return;
+
+  const candidates = builtInGateways.map((gateway) => ({
+    id: gateway.id,
+    url: gatewayUrl(gateway),
+  }));
+
+  if (customGatewayPreview.value) {
+    candidates.push({
+      id: CUSTOM_GATEWAY_ID,
+      url: customGatewayPreview.value,
+    });
+  }
+
+  candidates.forEach(({ id }) => {
+    setGatewayProbeState(id, 'probing', '正在尋找 index.m3u8');
+  });
+
+  const results = await Promise.all(
+    candidates.map(async ({ id, url }) => ({
+      id,
+      result: await probeGatewayAvailability(url, cid),
+    }))
+  );
+
+  if (seq !== gatewayProbeSeq) return;
+
+  results.forEach(({ id, result }) => {
+    setGatewayProbeState(id, result.state, result.detail, result.durationMs);
+  });
+}
+
+function gatewaySignalClass(id) {
+  return `is-${probeStateFor(id).state}`;
+}
+
+function gatewaySignalText(id) {
+  return formatProbeStateText(probeStateFor(id));
+}
+
+function formatProbeStateText(probeState) {
+  if (probeState.state === 'ready') {
+    return probeState.durationMs != null ? `可用 · ${probeState.durationMs} ms` : '可用';
+  }
+
+  if (probeState.state === 'probing') {
+    return '檢查中';
+  }
+
+  return probeState.detail;
+}
+
+function isRecommendedGateway(id) {
+  return recommendedGatewayId.value === id && probeStateFor(id).state === 'ready';
+}
+
+function probeSortRank(probeState) {
+  if (probeState.state === 'ready') return 0;
+  if (probeState.state === 'probing') return 1;
+  if (probeState.state === 'idle') return 2;
+  return 3;
+}
+
 function persistLocalGateway() {
   try {
     const payload = {
@@ -176,6 +397,12 @@ onMounted(() => {
     restoreLocalGateway();
   }
   customGateway.value = readStoredCustomGateway(window);
+  resetGatewayProbeStates();
+});
+
+onBeforeUnmount(() => {
+  cancelScheduledGatewayProbe();
+  gatewayProbeSeq += 1;
 });
 </script>
 
@@ -234,12 +461,16 @@ onMounted(() => {
 
       <div class="gateway-current">
         <span class="label">Current</span>
-        <span class="value">{{ currentGateway }}</span>
+        <div class="gateway-current-row">
+          <span class="gateway-signal" :class="`is-${currentGatewayProbeState.state}`" aria-hidden="true"></span>
+          <span class="value">{{ currentGateway }}</span>
+        </div>
+        <span class="gateway-status-text">{{ formatProbeStateText(currentGatewayProbeState) }}</span>
       </div>
 
       <div class="gateway-list">
         <label
-          v-for="g in builtInGateways"
+          v-for="g in orderedBuiltInGateways"
           :key="g.id"
           class="gateway-option"
           :class="{ selected: selectedGatewayId === g.id }"
@@ -247,10 +478,17 @@ onMounted(() => {
           <input type="radio" name="gateway" :value="g.id" v-model="selectedGatewayId" />
           <div class="gateway-meta">
             <div class="gateway-title">
-              {{ g.label }}
-              <span v-if="gatewayUrl(g) === currentGatewayValue" class="badge">Active</span>
+              <span class="gateway-title-main">
+                <span class="gateway-signal" :class="gatewaySignalClass(g.id)" aria-hidden="true"></span>
+                <span>{{ g.label }}</span>
+              </span>
+              <span class="gateway-badges">
+                <span v-if="isRecommendedGateway(g.id)" class="badge badge-recommended">Recommended</span>
+                <span v-if="gatewayUrl(g) === currentGatewayValue" class="badge">Active</span>
+              </span>
             </div>
             <div class="gateway-desc">{{ g.desc }}</div>
+            <div class="gateway-status-text">{{ gatewaySignalText(g.id) }}</div>
             <div class="gateway-url">{{ gatewayUrl(g) }}</div>
           </div>
           <div class="gateway-check">✓</div>
@@ -261,10 +499,17 @@ onMounted(() => {
         <input type="radio" name="gateway" :value="CUSTOM_GATEWAY_ID" v-model="selectedGatewayId" />
         <div class="gateway-meta">
           <div class="gateway-title">
-            Custom Gateway
-            <span v-if="isCurrentCustomGateway" class="badge">Active</span>
+            <span class="gateway-title-main">
+              <span class="gateway-signal" :class="gatewaySignalClass(CUSTOM_GATEWAY_ID)" aria-hidden="true"></span>
+              <span>Custom Gateway</span>
+            </span>
+            <span class="gateway-badges">
+              <span v-if="isRecommendedGateway(CUSTOM_GATEWAY_ID)" class="badge badge-recommended">Recommended</span>
+              <span v-if="isCurrentCustomGateway" class="badge">Active</span>
+            </span>
           </div>
           <div class="gateway-desc">Use a public HTTPS gateway that is not in the default list</div>
+          <div class="gateway-status-text">{{ gatewaySignalText(CUSTOM_GATEWAY_ID) }}</div>
           <div class="gateway-url">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</div>
         </div>
         <div class="gateway-check">✓</div>
@@ -612,6 +857,12 @@ onMounted(() => {
   word-break: break-all;
 }
 
+.gateway-current-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .gateway-list {
   margin-top: 16px;
   display: grid;
@@ -649,13 +900,35 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: space-between;
   font-weight: 600;
+}
+
+.gateway-title-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gateway-badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .gateway-desc {
   color: var(--text-secondary);
   font-size: 0.85rem;
   margin-top: 4px;
+}
+
+.gateway-status-text {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.78rem;
+  margin-top: 6px;
 }
 
 .gateway-url {
@@ -675,6 +948,36 @@ onMounted(() => {
   opacity: 1;
 }
 
+.gateway-signal {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.gateway-signal.is-idle {
+  background: #7f8b99;
+  box-shadow: 0 0 0 1px rgba(127, 139, 153, 0.25);
+}
+
+.gateway-signal.is-probing {
+  background: #ffd166;
+  box-shadow: 0 0 10px rgba(255, 209, 102, 0.7);
+  animation: gateway-pulse 1.1s ease-in-out infinite;
+}
+
+.gateway-signal.is-ready {
+  background: #38d39f;
+  box-shadow: 0 0 12px rgba(56, 211, 159, 0.75);
+}
+
+.gateway-signal.is-failed {
+  background: #ff6b6b;
+  box-shadow: 0 0 12px rgba(255, 107, 107, 0.7);
+}
+
 .badge {
   font-size: 0.7rem;
   padding: 2px 8px;
@@ -682,6 +985,12 @@ onMounted(() => {
   background: rgba(0, 210, 255, 0.15);
   color: var(--accent-cyan);
   border: 1px solid rgba(0, 210, 255, 0.4);
+}
+
+.badge-recommended {
+  background: rgba(56, 211, 159, 0.14);
+  color: #7be7c1;
+  border-color: rgba(56, 211, 159, 0.45);
 }
 
 .gateway-actions {
@@ -815,6 +1124,18 @@ onMounted(() => {
   font-size: 0.85rem;
 }
 
+@keyframes gateway-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 768px) {
   .gateway-backdrop {
     align-items: flex-end;
@@ -845,6 +1166,9 @@ onMounted(() => {
   }
   .gateway-title {
     font-size: 0.95rem;
+  }
+  .gateway-status-text {
+    font-size: 0.74rem;
   }
   .gateway-desc {
     font-size: 0.8rem;
