@@ -1,10 +1,128 @@
-# yt-dlp 影音下載指令說明
+# YouTube 素材下載與整理流程
 
-這份文件說明了如何使用 `yt-dlp` 指令來下載包含完整中繼資料、縮圖及字幕的影音檔案，確保在離線播放或後續串流時有最完整的體驗。
+這份文件對應兩支腳本：
 
-## 複製指令
+- `script/download_youtube_assets.sh`
+- `script/package_youtube_assets.sh`
 
-請將最後的 `"影片網址"` 替換為實際的網址後再執行：
+用途分成兩段：
+
+- 從 YouTube 下載原始影片與 sidecar 素材
+- 把字幕、精簡版 metadata、封面與頭像整理成固定結構，方便後續播放器或 IPFS 流程使用
+
+## 前置需求
+
+- `yt-dlp`
+- `ffmpeg`
+- `jq`
+
+其中：
+
+- `download_youtube_assets.sh` 需要 `yt-dlp` 與 `ffmpeg`
+- `package_youtube_assets.sh` 需要 `jq`
+
+## 腳本分工
+
+### 1. `download_youtube_assets.sh`
+
+這支腳本會：
+
+- 要求使用者輸入 YouTube 影片網址
+- 先解析出影片 ID，再重組成乾淨的 `watch` URL
+- 建立 `YYYYMMDD_uploader_title_id` 風格的下載資料夾
+- 下載影片、`.info.json`、縮圖、所有可用字幕
+- 把 metadata、thumbnail、subtitles 內嵌回影片
+- 額外嘗試下載頻道縮圖，輸出為 `channel_avatar.<ext>`
+
+執行方式：
+
+```bash
+./script/download_youtube_assets.sh
+```
+
+### 2. `package_youtube_assets.sh`
+
+這支腳本假設你目前所在的目錄，就是某一支影片的 yt-dlp 下載目錄。它會：
+
+- 找出目前目錄中的第一個 `.info.json`
+- 擷取較適合前端直接使用的欄位，另存為精簡版 `info.json`
+- 複製同影片 basename 的字幕檔，並整理成 `en.vtt`、`zh-TW.vtt` 這種乾淨名稱
+- 將影片封面複製為 `cover.<ext>`
+- 優先把 `channel_avatar.<ext>` 複製為 `avatar.<ext>`
+- 保留所有原始檔，不做刪除或覆寫
+
+執行方式：
+
+```bash
+cd "<download-folder>"
+/Users/iskku/Project/ipfs-hls-test/script/package_youtube_assets.sh
+```
+
+## 建議使用流程
+
+```bash
+cd /path/to/workdir
+/Users/iskku/Project/ipfs-hls-test/script/download_youtube_assets.sh
+
+cd "./YYYYMMDD_uploader_title_id"
+/Users/iskku/Project/ipfs-hls-test/script/package_youtube_assets.sh
+```
+
+第二步一定要在下載目錄內執行，因為整理腳本是依照目前目錄中的 `.info.json`、`.vtt`、封面圖與頭像圖來判斷輸入來源。
+
+## 整理後的資料結構
+
+原始下載目錄大致會長這樣：
+
+```text
+20240101_Uploader_Some_Title_abc123/
+├── Some Title [abc123].mp4
+├── Some Title [abc123].info.json
+├── Some Title [abc123].en.vtt
+├── Some Title [abc123].zh-TW.vtt
+├── Some Title [abc123].webp
+└── channel_avatar.jpg
+```
+
+執行整理腳本後，會額外建立一個以影片 basename 命名的 sidecar 資產資料夾：
+
+```text
+20240101_Uploader_Some_Title_abc123/
+├── Some Title [abc123].mp4
+├── Some Title [abc123].info.json
+├── Some Title [abc123].en.vtt
+├── Some Title [abc123].zh-TW.vtt
+├── Some Title [abc123].webp
+├── channel_avatar.jpg
+└── Some Title [abc123]/
+    ├── info.json
+    ├── en.vtt
+    ├── zh-TW.vtt
+    ├── cover.webp
+    └── avatar.jpg
+```
+
+注意：
+
+- `cover` 與 `avatar` 會保留來源副檔名，不一定永遠是 `.webp` 或 `.jpg`
+- 這支腳本只複製 sidecar 素材，不會移動或重新命名原始影片
+- 如果同一個目錄中有多個 `.info.json`，目前只會處理找到的第一個
+
+## 與本專案播放器的關聯
+
+整理後的字幕會變成 `en.vtt`、`zh-TW.vtt` 這類檔名，這和目前播放器對字幕檔名的偵測方式一致。
+
+如果接下來要把影片轉成 HLS，請另外使用：
+
+```bash
+./script/multi_resolution_hls.sh /path/to/video.mp4
+```
+
+`multi_resolution_hls.sh` 只負責影片轉檔，不會處理這裡的 metadata、封面或頭像整理。
+
+## 腳本實際使用的 yt-dlp 下載參數
+
+`download_youtube_assets.sh` 核心上等價於下列流程：
 
 ```bash
 yt-dlp \
@@ -17,29 +135,8 @@ yt-dlp \
   --embed-metadata \
   --embed-thumbnail \
   --embed-subs \
-  -P "下載資料夾路徑" \
-  "影片網址"
+  -P "<download-folder>" \
+  "https://www.youtube.com/watch?v=<video_id>"
 ```
 
-## 指令意圖與參數解析
-
-這個指令的主要目的是**下載影片並同時抓取最豐富的周邊資訊（包含中繼資料、縮圖、所有語言的字幕等），並將這些資訊盡可能地內嵌（embed）至最終的影片檔中**。同時，它也會額外輸出獨立的 `.info.json` 及 `.vtt` 字幕檔案，方便網頁播放器或其他程式獨立調用處理。
-
-詳細參數說明如下：
-
-- `yt-dlp`：主程式名稱，一個強大且支援度廣泛的命令列影音下載工具。
-- `-P "下載資料夾路徑"`：指定所有下載的檔案（包含影片、縮圖、字幕、中繼資料檔）都要存放到哪一個資料夾路徑。如果是相對路徑例如 `./downloads` 也能支援，**且當指定的資料夾不存在時，yt-dlp 會自動幫你建立該資料夾**。
-- `--write-info-json`：將影片的詳細中繼資料（Metadata，包含標題、描述、上傳者、觀看數等資訊）輸出為一個 `.info.json` 檔案。
-- `--write-thumbnail`：將影片的縮圖（封面圖）下載並儲存至儲存空間。
-- `--write-subs`：下載影片自帶的字幕檔。
-- `--sub-langs all`：指定下載**所有可用語言**的字幕。
-- `--convert-subs vtt`：將下載的字幕檔統一轉換為 WebVTT (`.vtt`) 格式。VTT 是網頁前端影音播放器最原生且廣泛支援的標準字幕格式。
-- `--no-write-comments`：**不將**影片底下的留言寫回 JSON 中。這有助於大幅縮減 `.info.json` 的檔案體積並加快處理結算速度。
-- `--embed-metadata`：將擷取到的中繼資料（標題、作者等影片屬性）直接寫入（內嵌至）下載好的影片檔案內部。
-- `--embed-thumbnail`：將下載下來的縮圖直接寫入為影片檔的封面預覽圖（Cover Art）。
-- `--embed-subs`：將下載好的所有語言字幕檔全部封裝內嵌進最終的影片檔案內（等同隨附的多軌軟字幕），使得單一影片檔案在支援的本機播放器上觀看時，也能自由切換語系。
-- `"影片網址"`：目標影音的來源連結網址（實務上請保留雙引號包覆網址，以避免 URL 中的特殊字元使終端機判斷錯誤）。
-
-## 總結
-
-透過這行組合指令，非常適合用在**建立高質量的本地端影音資料庫**或是**作為前端串流網站後送的預處理工具**。原因在於產出的資源除了能夠作為獨立的高規影片播放以外，還能完美分離出 `.vtt` 以及 `.info.json` 提供網頁做 UI 的介面呈現與切片處理。
+這樣的組合適合保留最完整的原始素材，同時產出前端較容易再利用的字幕與 JSON。
