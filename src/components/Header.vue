@@ -20,6 +20,7 @@ const localGatewayOption = {
 };
 const builtInGateways = isDevMode ? [localGatewayOption, ...publicGatewayOptions] : publicGatewayOptions;
 const builtInGatewayOrder = Object.fromEntries(builtInGateways.map((gateway, index) => [gateway.id, index]));
+const gatewayProbeRefreshMs = 180000;
 
 const props = defineProps({
   currentGateway: { type: String, default: '' },
@@ -35,6 +36,7 @@ const localPort = ref('8080');
 const customGateway = ref('');
 const gatewayError = ref('');
 const gatewayProbeStates = ref({});
+const gatewayCooldownUntilByUrl = ref({});
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
@@ -111,6 +113,7 @@ const currentGatewayProbeState = computed(() => {
 
 let gatewayProbeSeq = 0;
 let gatewayProbeTimer = null;
+let gatewayProbeInterval = null;
 
 watch(
   () => props.currentGateway,
@@ -127,23 +130,32 @@ watch(
 );
 
 watch(
-  () => [settingsOpen.value, currentCidValue.value],
-  ([open]) => {
-    if (!open) {
-      cancelScheduledGatewayProbe();
-      gatewayProbeSeq += 1;
+  () => currentCidValue.value,
+  (cid) => {
+    gatewayProbeSeq += 1;
+    cancelScheduledGatewayProbe();
+
+    if (!cid) {
+      stopGatewayProbeLoop();
       resetGatewayProbeStates();
       return;
     }
 
-    scheduleGatewayProbe();
-  }
+    startGatewayProbeLoop();
+    resetGatewayProbeStates();
+    scheduleGatewayProbe(0);
+  },
+  { immediate: true }
 );
 
 watch(
-  () => [settingsOpen.value, localGatewayUrl.value, customGatewayPreview.value],
-  ([open]) => {
-    if (!open) return;
+  () => [localGatewayUrl.value, customGatewayPreview.value],
+  () => {
+    if (!currentCidValue.value) {
+      resetGatewayProbeStates();
+      return;
+    }
+
     scheduleGatewayProbe();
   }
 );
@@ -190,8 +202,11 @@ function openSettings() {
   customGateway.value = readStoredCustomGateway(window) || customGateway.value;
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
-  resetGatewayProbeStates();
   settingsOpen.value = true;
+
+  if (currentCidValue.value) {
+    scheduleGatewayProbe(0);
+  }
 }
 
 function applyGateway() {
@@ -249,6 +264,9 @@ function createIdleProbeState(detail = '') {
     state: 'idle',
     detail: detail || (currentCidValue.value ? '等待檢查 index.m3u8' : '載入 CID 後可檢查'),
     durationMs: null,
+    httpStatus: null,
+    retryAfterMs: null,
+    nextProbeAt: null,
   };
 }
 
@@ -256,27 +274,38 @@ function probeStateFor(id) {
   return gatewayProbeStates.value[id] || createIdleProbeState();
 }
 
-function setGatewayProbeState(id, state, detail, durationMs = null) {
+function setGatewayProbeState(id, state, detail, durationMs = null, extras = {}) {
   gatewayProbeStates.value = {
     ...gatewayProbeStates.value,
     [id]: {
       state,
       detail,
       durationMs,
+      httpStatus: null,
+      retryAfterMs: null,
+      nextProbeAt: null,
+      ...extras,
     },
   };
 }
 
 function resetGatewayProbeStates() {
   const nextStates = {};
+  const now = Date.now();
 
   builtInGateways.forEach((gateway) => {
-    nextStates[gateway.id] = createIdleProbeState();
+    const cooldownUntil = readGatewayCooldown(gatewayUrl(gateway));
+    nextStates[gateway.id] =
+      currentCidValue.value && cooldownUntil > now
+        ? createRateLimitedProbeState(cooldownUntil)
+        : createIdleProbeState();
   });
 
-  nextStates[CUSTOM_GATEWAY_ID] = createIdleProbeState(
-    customGatewayPreview.value ? '等待檢查 index.m3u8' : '輸入 HTTPS gateway 後可檢查'
-  );
+  const customCooldownUntil = readGatewayCooldown(customGatewayPreview.value);
+  nextStates[CUSTOM_GATEWAY_ID] =
+    currentCidValue.value && customCooldownUntil > now
+      ? createRateLimitedProbeState(customCooldownUntil)
+      : createIdleProbeState(customGatewayPreview.value ? '等待檢查 index.m3u8' : '輸入 HTTPS gateway 後可檢查');
 
   gatewayProbeStates.value = nextStates;
 }
@@ -296,13 +325,23 @@ function cancelScheduledGatewayProbe() {
   }
 }
 
+function startGatewayProbeLoop() {
+  if (gatewayProbeInterval || !currentCidValue.value) return;
+
+  gatewayProbeInterval = window.setInterval(() => {
+    void runGatewayProbe();
+  }, gatewayProbeRefreshMs);
+}
+
+function stopGatewayProbeLoop() {
+  if (!gatewayProbeInterval) return;
+  clearInterval(gatewayProbeInterval);
+  gatewayProbeInterval = null;
+}
+
 async function runGatewayProbe() {
   const cid = currentCidValue.value;
   const seq = ++gatewayProbeSeq;
-
-  resetGatewayProbeStates();
-
-  if (!settingsOpen.value) return;
   if (!cid) return;
 
   const candidates = builtInGateways.map((gateway) => ({
@@ -317,21 +356,59 @@ async function runGatewayProbe() {
     });
   }
 
-  candidates.forEach(({ id }) => {
+  const now = Date.now();
+  const activeCandidates = [];
+
+  candidates.forEach(({ id, url }) => {
+    const cooldownUntil = readGatewayCooldown(url);
+
+    if (cooldownUntil > now) {
+      setGatewayProbeState(id, 'rate_limited', formatRateLimitedDetail(cooldownUntil), null, {
+        httpStatus: 429,
+        retryAfterMs: cooldownUntil - now,
+        nextProbeAt: cooldownUntil,
+      });
+      return;
+    }
+
+    if (cooldownUntil) {
+      clearGatewayCooldown(url);
+    }
+
     setGatewayProbeState(id, 'probing', '正在尋找 index.m3u8');
+    activeCandidates.push({ id, url });
   });
 
+  if (!activeCandidates.length) {
+    return;
+  }
+
   const results = await Promise.all(
-    candidates.map(async ({ id, url }) => ({
+    activeCandidates.map(async ({ id, url }) => ({
       id,
+      url,
       result: await probeGatewayAvailability(url, cid),
     }))
   );
 
   if (seq !== gatewayProbeSeq) return;
 
-  results.forEach(({ id, result }) => {
-    setGatewayProbeState(id, result.state, result.detail, result.durationMs);
+  results.forEach(({ id, url, result }) => {
+    if (result.state === 'rate_limited') {
+      const nextProbeAt = setGatewayCooldown(url, result.retryAfterMs);
+      setGatewayProbeState(id, result.state, formatRateLimitedDetail(nextProbeAt), result.durationMs, {
+        httpStatus: result.httpStatus,
+        retryAfterMs: result.retryAfterMs,
+        nextProbeAt,
+      });
+      return;
+    }
+
+    clearGatewayCooldown(url);
+    setGatewayProbeState(id, result.state, result.detail, result.durationMs, {
+      httpStatus: result.httpStatus,
+      retryAfterMs: result.retryAfterMs,
+    });
   });
 }
 
@@ -352,6 +429,14 @@ function formatProbeStateText(probeState) {
     return '檢查中';
   }
 
+  if (probeState.state === 'rate_limited') {
+    return probeState.detail || '暫時限流';
+  }
+
+  if (probeState.state === 'redirected') {
+    return probeState.detail || '重新導向';
+  }
+
   return probeState.detail;
 }
 
@@ -363,7 +448,60 @@ function probeSortRank(probeState) {
   if (probeState.state === 'ready') return 0;
   if (probeState.state === 'probing') return 1;
   if (probeState.state === 'idle') return 2;
-  return 3;
+  if (probeState.state === 'redirected') return 3;
+  if (probeState.state === 'rate_limited') return 4;
+  return 5;
+}
+
+function createRateLimitedProbeState(nextProbeAt) {
+  return {
+    state: 'rate_limited',
+    detail: formatRateLimitedDetail(nextProbeAt),
+    durationMs: null,
+    httpStatus: 429,
+    retryAfterMs: Math.max(0, nextProbeAt - Date.now()),
+    nextProbeAt,
+  };
+}
+
+function formatRateLimitedDetail(nextProbeAt) {
+  const remainingMs = Math.max(0, nextProbeAt - Date.now());
+  const seconds = Math.ceil(remainingMs / 1000);
+
+  if (seconds >= 120) {
+    return `限流中 · 約 ${Math.ceil(seconds / 60)} 分後重試`;
+  }
+
+  if (seconds > 0) {
+    return `限流中 · 約 ${seconds} 秒後重試`;
+  }
+
+  return '限流中 · 即將重試';
+}
+
+function readGatewayCooldown(url) {
+  if (!url) return 0;
+  return gatewayCooldownUntilByUrl.value[url] ?? 0;
+}
+
+function setGatewayCooldown(url, retryAfterMs) {
+  if (!url || !(retryAfterMs > 0)) return 0;
+
+  const nextProbeAt = Date.now() + retryAfterMs;
+  gatewayCooldownUntilByUrl.value = {
+    ...gatewayCooldownUntilByUrl.value,
+    [url]: nextProbeAt,
+  };
+
+  return nextProbeAt;
+}
+
+function clearGatewayCooldown(url) {
+  if (!url || !(url in gatewayCooldownUntilByUrl.value)) return;
+
+  const nextCooldowns = { ...gatewayCooldownUntilByUrl.value };
+  delete nextCooldowns[url];
+  gatewayCooldownUntilByUrl.value = nextCooldowns;
 }
 
 function persistLocalGateway() {
@@ -401,6 +539,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopGatewayProbeLoop();
   cancelScheduledGatewayProbe();
   gatewayProbeSeq += 1;
 });
@@ -436,6 +575,7 @@ onBeforeUnmount(() => {
     <div class="actions-area">
       <button class="action-btn gateway-btn" @click="openSettings" aria-label="Gateway Settings">
         <span class="btn-icon">⚙</span>
+        <span class="gateway-signal gateway-btn-signal" :class="`is-${currentGatewayProbeState.state}`" aria-hidden="true"></span>
         <span class="btn-text">Gateway</span>
       </button>
       <button class="action-btn icon-btn" title="Notifications">
@@ -710,6 +850,11 @@ onBeforeUnmount(() => {
   font-size: 1.1rem;
 }
 
+.gateway-btn-signal {
+  width: 8px;
+  height: 8px;
+}
+
 .gateway-btn .btn-text {
   font-weight: 600;
 }
@@ -971,6 +1116,16 @@ onBeforeUnmount(() => {
 .gateway-signal.is-ready {
   background: #38d39f;
   box-shadow: 0 0 12px rgba(56, 211, 159, 0.75);
+}
+
+.gateway-signal.is-rate_limited {
+  background: #ffb347;
+  box-shadow: 0 0 12px rgba(255, 179, 71, 0.72);
+}
+
+.gateway-signal.is-redirected {
+  background: #7cc8ff;
+  box-shadow: 0 0 12px rgba(124, 200, 255, 0.68);
 }
 
 .gateway-signal.is-failed {

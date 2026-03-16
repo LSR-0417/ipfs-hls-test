@@ -31,7 +31,10 @@
 ## 5. 功能需求
 
 ### FR-1 狀態檢查觸發
-當使用者開啟 Gateway Settings 視窗，且目前已有 CID 時，系統應開始檢查每個可顯示 gateway 的 `index.m3u8` 可達性。
+當目前 CID 被載入或切換時，系統應開始檢查每個可顯示 gateway 的 `index.m3u8` 可達性，而不是等待使用者開啟 Gateway Settings 視窗。
+
+### FR-1.1 背景定期刷新
+當目前已有 CID 時，系統應定期重新檢查 gateway 狀態，讓使用者在稍後打開 Gateway Settings 時，能立即看到接近即時的結果。預設背景輪詢週期為 3 分鐘。
 
 ### FR-2 綠燈條件
 當某個 gateway 成功取得 `index.m3u8` 時，該 gateway 應顯示綠燈。
@@ -41,6 +44,15 @@
 
 ### FR-4 紅燈條件
 當某個 gateway 在預設 timeout 內未能取得 `index.m3u8`，或請求結果為失敗時，該 gateway 應顯示紅燈。
+
+### FR-4.1 限流冷卻
+當某個 gateway 回傳 `429 Too Many Requests` 時，系統應將該 gateway 標記為限流，而不是一般失敗，並在冷卻期間暫停對該 gateway 的背景檢查。
+
+### FR-4.2 失敗原因分類
+系統應區分常見 HTTP 狀態，不應將所有非成功回應都視為「被 ban」：
+- `429`: 限流
+- `504`: 上游逾時
+- `301/302/307/308`: 重新導向
 
 ### FR-5 多 gateway 並列顯示
 系統應能在同一個 Gateway Settings 視窗中，同時顯示多個 gateway 的檢查狀態。
@@ -70,6 +82,7 @@ gateway 狀態檢查不應阻塞視窗操作，也不應中斷既有播放流程
 
 ## 7. 驗收條件
 1. 開啟 Gateway Settings 且有 CID 時，所有候選 gateway 會先進入黃燈，再依結果轉成綠燈或紅燈。
+1.1 載入 CID 後，即使尚未開啟 Gateway Settings，系統也會在背景更新 gateway 狀態。
 2. 成功取得 `index.m3u8` 的 gateway 顯示綠燈。
 3. 超時、404、網路失敗等情況顯示紅燈。
 4. 無 CID 時不發送檢查請求，顯示中性提示。

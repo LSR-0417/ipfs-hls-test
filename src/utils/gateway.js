@@ -1,6 +1,7 @@
 export const gatewayStorageKey = 'ipfs-hls-selected-gateway';
 export const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
 export const gatewayProbeTimeoutMs = 5000;
+export const gatewayRateLimitBackoffMs = 30 * 60 * 1000;
 export const publicGatewayOptions = [
   {
     id: 'pinata',
@@ -171,6 +172,8 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       state: 'failed',
       detail: '無法建立 index.m3u8 檢查請求',
       durationMs: null,
+      httpStatus: null,
+      retryAfterMs: null,
     };
   }
 
@@ -198,13 +201,60 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
         state: 'ready',
         detail: '已找到 index.m3u8',
         durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+        httpStatus: response.status,
+        retryAfterMs: null,
+      };
+    }
+
+    const status = Number.isFinite(response?.status) ? response.status : null;
+    const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
+
+    if (status === 429) {
+      return {
+        state: 'rate_limited',
+        detail: '暫時限流 (HTTP 429)',
+        durationMs,
+        httpStatus: status,
+        retryAfterMs: parseRetryAfterHeader(response) ?? gatewayRateLimitBackoffMs,
+      };
+    }
+
+    if (status && [301, 302, 307, 308].includes(status)) {
+      return {
+        state: 'redirected',
+        detail: `重新導向 (HTTP ${status})`,
+        durationMs,
+        httpStatus: status,
+        retryAfterMs: null,
+      };
+    }
+
+    if (status === 504) {
+      return {
+        state: 'failed',
+        detail: '來源逾時 (HTTP 504)',
+        durationMs,
+        httpStatus: status,
+        retryAfterMs: null,
+      };
+    }
+
+    if (status === 403) {
+      return {
+        state: 'failed',
+        detail: '拒絕存取 (HTTP 403)',
+        durationMs,
+        httpStatus: status,
+        retryAfterMs: null,
       };
     }
 
     return {
       state: 'failed',
-      detail: `找不到 index.m3u8 (HTTP ${response?.status ?? 'ERR'})`,
-      durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+      detail: `找不到 index.m3u8 (HTTP ${status ?? 'ERR'})`,
+      durationMs,
+      httpStatus: status,
+      retryAfterMs: null,
     };
   } catch (error) {
     if (error?.name === 'AbortError') {
@@ -212,6 +262,8 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
         state: 'failed',
         detail: '逾時，找不到 index.m3u8',
         durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+        httpStatus: null,
+        retryAfterMs: null,
       };
     }
 
@@ -219,12 +271,39 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       state: 'failed',
       detail: '無法取得 index.m3u8',
       durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+      httpStatus: null,
+      retryAfterMs: null,
     };
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
   }
+}
+
+function parseRetryAfterHeader(response) {
+  const rawValue = getHeaderValue(response?.headers, 'retry-after');
+  if (!rawValue) return null;
+
+  const seconds = Number.parseInt(rawValue, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const dateValue = Date.parse(rawValue);
+  if (Number.isNaN(dateValue)) {
+    return null;
+  }
+
+  return Math.max(0, dateValue - Date.now());
+}
+
+function getHeaderValue(headers, name) {
+  if (!headers || typeof headers.get !== 'function') {
+    return '';
+  }
+
+  return headers.get(name) || headers.get(name.toLowerCase()) || '';
 }
 
 function normalizeGatewayPath(pathname) {

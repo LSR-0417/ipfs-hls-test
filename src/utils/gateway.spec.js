@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildGatewayIndexUrl,
   customGatewayStorageKey,
+  gatewayRateLimitBackoffMs,
   gatewayStorageKey,
   isPrivateHostname,
   normalizeGatewayUrl,
@@ -24,6 +25,16 @@ function createStorage() {
     },
     removeItem(key) {
       data.delete(key);
+    },
+  };
+}
+
+function createHeaders(values = {}) {
+  const entries = new Map(Object.entries(values).map(([key, value]) => [key.toLowerCase(), value]));
+
+  return {
+    get(name) {
+      return entries.get(String(name).toLowerCase()) ?? null;
     },
   };
 }
@@ -133,6 +144,8 @@ describe('probeGatewayAvailability', () => {
         state: 'ready',
         detail: '已找到 index.m3u8',
         durationMs: 32,
+        httpStatus: 200,
+        retryAfterMs: null,
       }
     );
 
@@ -154,6 +167,84 @@ describe('probeGatewayAvailability', () => {
         state: 'failed',
         detail: '找不到 index.m3u8 (HTTP 404)',
         durationMs: 35,
+        httpStatus: 404,
+        retryAfterMs: null,
+      }
+    );
+  });
+
+  it('returns a rate-limited result for 429 responses', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: createHeaders({ 'retry-after': '120' }),
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(200).mockReturnValueOnce(245);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'rate_limited',
+        detail: '暫時限流 (HTTP 429)',
+        durationMs: 45,
+        httpStatus: 429,
+        retryAfterMs: 120000,
+      }
+    );
+  });
+
+  it('falls back to the default backoff when retry-after is missing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: createHeaders(),
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(20);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'rate_limited',
+        detail: '暫時限流 (HTTP 429)',
+        durationMs: 10,
+        httpStatus: 429,
+        retryAfterMs: gatewayRateLimitBackoffMs,
+      }
+    );
+  });
+
+  it('classifies redirects separately from bans', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 301,
+      headers: createHeaders(),
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(8);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'redirected',
+        detail: '重新導向 (HTTP 301)',
+        durationMs: 8,
+        httpStatus: 301,
+        retryAfterMs: null,
+      }
+    );
+  });
+
+  it('classifies 504 as an upstream timeout', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 504,
+      headers: createHeaders(),
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(16);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'failed',
+        detail: '來源逾時 (HTTP 504)',
+        durationMs: 16,
+        httpStatus: 504,
+        retryAfterMs: null,
       }
     );
   });
@@ -182,6 +273,8 @@ describe('probeGatewayAvailability', () => {
       state: 'failed',
       detail: '逾時，找不到 index.m3u8',
       durationMs: 50,
+      httpStatus: null,
+      retryAfterMs: null,
     });
   });
 });

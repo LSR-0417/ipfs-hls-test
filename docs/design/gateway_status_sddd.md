@@ -37,9 +37,12 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 
 ```js
 {
-  state: 'idle' | 'probing' | 'ready' | 'failed',
+  state: 'idle' | 'probing' | 'ready' | 'rate_limited' | 'redirected' | 'failed',
   detail: '',
   durationMs: null,
+  httpStatus: null,
+  retryAfterMs: null,
+  nextProbeAt: null,
 }
 ```
 
@@ -47,21 +50,30 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 - `idle`: 灰燈，表示尚未檢查或目前沒有 CID
 - `probing`: 黃燈，帶 pulse 動畫，表示正在尋找 `index.m3u8`
 - `ready`: 綠燈，表示已找到 `index.m3u8`
+- `rate_limited`: 橘燈，表示 gateway 暫時限流，進入冷卻期
+- `redirected`: 藍燈，表示 gateway 回傳重新導向
 - `failed`: 紅燈，表示 timeout 或 HTTP / 網路失敗
 
 ### 3.3 狀態文字
 - `idle`: `載入 CID 後可檢查` 或 `輸入 HTTPS gateway 後可檢查`
 - `probing`: `檢查中`
 - `ready`: `可用 · {durationMs} ms`
+- `rate_limited`: `限流中 · 約 N 分後重試`
+- `redirected`: `重新導向 (HTTP 301)`
 - `failed`: `逾時`、`HTTP 404`、`無法取得 index.m3u8`
 
 ## 4. 互動設計
 
-### 4.1 視窗開啟時的行為
+### 4.1 背景探測行為
+當 CID 被載入後：
+1. 系統立即對所有候選 gateway 啟動 probe
+2. probe 結果回來後更新燈號、狀態文案與延遲
+3. 若 CID 仍存在，系統以固定週期持續刷新 probe 結果；目前預設為每 3 分鐘一次
+
 當 Gateway Settings 開啟時：
-1. 若沒有 CID，只顯示中性狀態
-2. 若有 CID，對所有候選 gateway 啟動 probe
-3. probe 結果回來後更新燈號、狀態文案與延遲
+1. 不再等到開啟後才開始第一次檢查
+2. 直接顯示最近一次背景 probe 的結果
+3. 若剛好正在刷新，對應 gateway 顯示 `檢查中`
 
 ### 4.2 自訂 gateway
 - 自訂 gateway 在 URL 合法時納入檢查
@@ -79,7 +91,9 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 1. `ready`
 2. `probing`
 3. `idle`
-4. `failed`
+4. `redirected`
+5. `rate_limited`
+6. `failed`
 
 同為 `ready` 時，依 `durationMs` 由小到大排序；其他同級則保留原始順序。
 
@@ -94,19 +108,20 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 
 ### 5.2 Probe 流程
 1. `Header.vue` 收到 `currentCid`
-2. 開啟 Gateway Settings
-3. 建立候選清單
-4. 對每個候選 gateway 呼叫共用 probe utility
-5. probe utility 檢查 `${gateway}${cid}/index.m3u8`
-6. 成功回傳 `ready + durationMs`
-7. 失敗回傳 `failed + detail`
-8. UI 更新燈號、文案、推薦標記與排序
+2. 建立候選清單
+3. 對每個候選 gateway 呼叫共用 probe utility
+4. probe utility 檢查 `${gateway}${cid}/index.m3u8`
+5. 成功回傳 `ready + durationMs`
+6. 失敗依情況回傳 `rate_limited`、`redirected` 或 `failed`
+7. UI 更新燈號、文案、推薦標記與排序
+8. 之後依固定週期再次執行 probe
 
 ### 5.3 過期結果保護
 使用 sequence token 或等效機制丟棄舊結果，避免：
 - 視窗已關閉但請求晚回來
 - CID 改變後舊影片的 probe 結果覆蓋新影片
 - 自訂 gateway 輸入途中出現錯置狀態
+- 週期性背景 probe 與手動輸入修改彼此覆蓋
 
 ## 6. 技術選型
 - Probe utility 放在 `src/utils/gateway.js`
@@ -122,6 +137,9 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 ### 7.2 為何不在 v1 阻擋紅燈切換
 紅燈代表本輪檢查失敗，但仍可能是暫時性網路波動或 CORS 差異。v1 應保留使用者手動切換能力，只提供明確警示，不做硬阻擋。
 
+### 7.2.1 為何 `429` 要做冷卻
+`429` 代表 gateway 正在限流。若背景 probe 繼續對同一 gateway 發送請求，只會更接近被長時間封鎖，因此設計上應進入冷卻期並暫停該 gateway 的 probe。
+
 ### 7.3 為何保留文字說明
 色弱使用者、低亮度環境或行動裝置縮小版面下，單靠顏色不足。文字說明可補足辨識與信心。
 
@@ -131,6 +149,7 @@ ${gatewayBaseUrl}${cid}/index.m3u8
 - 實作成功延遲顯示
 - 實作推薦標記
 - 實作依 probe 結果排序預設 gateway
+- 實作 CID 載入後的背景定期 probe
 
 不在本次實作：
 - 自動切換到推薦 gateway
