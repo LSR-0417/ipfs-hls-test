@@ -10,8 +10,10 @@
 - **Top Header**: 提供頂部導覽、全域 IPFS 搜尋框與 Gateway 設定入口。
 - **Sidebar**: 提供導覽圖示 (Home, Explore 等)，手機版自動收縮或轉為底部導航。
 - **Main Content Layout**: 
-  - **Primary Column**: VideoPlayer (播放器) + VideoInfo (影片資訊、社群互動按鈕)。
+  - **Primary Column**: VideoPlayer (播放器) + Player Title + VideoInfo。
   - **Secondary Column**: VideoGrid (推薦影片列表)。
+
+- **Player Title Row**: `App.vue` 透過 `currentVideoTitle` 接收 `VideoInfo` 發出的 metadata，將 `info.json.title` 放在播放器正下方，取代舊的播放狀態文字列。
 
 ### 經過優化的關鍵元件
 #### 2.1 Header.vue (整合搜尋與網關設定)
@@ -26,10 +28,13 @@
 - **Seek 邊界控制**: `clampSeekTime()` 會保證 seek 結果不小於 `0`，且在媒體總長度可用時不超過 `duration`。
 - **空白鍵事件消耗**: 當空白鍵確實被播放器接手時，需呼叫 `preventDefault()`，避免頁面捲動與播放器控制行為互相競爭。
 
-#### 2.3 VideoInfo.vue (整合分享功能)
-- 承載影片標題外，進一步加入了按讚、倒讚等虛擬按鈕以構築完整平台氛圍。
-- **Share Icon (分享按鈕)**: 取代了過去龐大突兀的「複製目前播放連結」按鈕，現已整合進 `VideoInfo` 的動作列中 (`actions`)。點擊時提供 `Copied!` 切換文字與顏色的微互動 (Micro-animation)，整體邏輯乾淨簡潔。
-- **分享連結策略**: 分享 URL 僅承載可重現播放內容所需的 `cid` 與播放進度 `t` (`?cid=&t=`)。使用者選定的 gateway 屬於本機偏好設定，會持久化到瀏覽器 `localStorage`，不會出現在分享連結中。
+#### 2.3 VideoInfo.vue (metadata 與互動資訊列)
+- **Sidecar Metadata 載入**: `VideoInfo.vue` 會以與 `index.m3u8` 相同的 base URL 請求 `info.json` 與 `avatar.jpg`。資料正規化由 `src/utils/videoInfo.js` 負責。
+- **標題責任拆分**: `VideoInfo.vue` 不再自行渲染最上方標題，而是透過 `metadata-update` event 將 metadata 往上送，由 `App.vue` 控制播放器下方的標題列。
+- **上傳者列 / 按鈕列**: 標題下方第一列為「左側上傳者資訊、右側互動按鈕」的雙欄結構。按鈕列使用 `margin-left: auto` 與 `justify-content: flex-end` 保持右對齊。
+- **Description Card**: 說明、metadata grid 與 tags 置於下一層獨立玻璃卡片，與上傳者列分離，避免資訊區塊過度擁擠。
+- **Share Icon (分享按鈕)**: 分享按鈕仍整合於 `VideoInfo` 的動作列。點擊時提供 `Copied!` 微互動，且分享 URL 僅承載 `cid` 與播放進度 `t` (`?cid=&t=`)。
+- **Fallback 策略**: `avatar.jpg` 載入失敗時退回 identicon；`info.json` 不可用時退回預設文案，但不影響播放器與分享功能。
 
 #### 2.4 ControlPanel.vue (棄用/降級)
 - 原本負責全部參數的 `ControlPanel.vue` 已完成歷史任務。其 Gateway 切換邏輯被提取並融入到 `Header.vue` 或 `App.vue` 全域狀態管理。
@@ -48,7 +53,17 @@
 - `cid` 與 `time` (`t`) 具備 **URL 雙向綁定能力** (`history.pushState`)，作為可分享、可重放的播放狀態。
 - `gateway` 不再作為 URL Query Parameter，而是作為瀏覽器端偏好設定，持久化在 `localStorage`，供 `App.vue` 與 `Header.vue` 還原目前使用中的網關。
 - 當 URL 載入給定 `?cid=...&t=...` 時，`App.vue` 會解析並派發狀態給子元件以觸發播放流程。
+- `App.vue` 會將同一個 gateway + cid 推導出的 sidecar 路徑分派給各子元件：
+  - `index.m3u8`
+  - `cover.webp`
+  - `info.json`
+  - `avatar.jpg`
 
 ## 5. 測試設計對應
 - 播放時間讀取、seek clamp 與鍵盤快捷鍵事件過濾邏輯集中於 `src/utils/playback.js`，以便使用 Vitest 進行純單元測試。
 - 左右鍵 `±5` 秒 seek、空白鍵播放 / 暫停切換、輸入框忽略規則與 seek 邊界條件，皆需在 `src/utils/playback.spec.js` 內有明確案例。
+- `src/utils/videoInfo.spec.js` 負責覆蓋 `info.json` 的欄位正規化、日期格式化與讀取 fallback。
+- `src/components/video_layout.spec.js` 以 SFC template / style regression 測試保護以下契約：
+  - 播放器下方標題列由 `App.vue` 控制
+  - `VideoInfo` 內部為「上傳者左、按鈕右」的同列布局
+  - description / metadata 區塊位於獨立玻璃卡片中
