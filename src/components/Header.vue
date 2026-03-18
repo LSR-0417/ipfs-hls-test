@@ -110,6 +110,49 @@ const currentGatewayProbeState = computed(() => {
 
   return createIdleProbeState();
 });
+const currentGatewayName = computed(() => {
+  const current = currentGatewayValue.value;
+  if (!current) return 'Not set';
+
+  const matchedGateway = builtInGateways.find((gateway) => gatewayUrl(gateway) === current);
+  if (matchedGateway) {
+    return matchedGateway.label;
+  }
+
+  try {
+    const parsed = new URL(current);
+    return parsed.hostname || parsed.host || 'Custom Gateway';
+  } catch (_) {
+    return 'Custom Gateway';
+  }
+});
+const currentGatewayKind = computed(() => {
+  const current = currentGatewayValue.value;
+  if (!current) return 'public';
+
+  const matchedGateway = builtInGateways.find((gateway) => gatewayUrl(gateway) === current);
+  if (matchedGateway) {
+    return matchedGateway.id === LOCAL_GATEWAY_ID ? 'local' : 'public';
+  }
+
+  try {
+    const parsed = new URL(current);
+    return isPrivateHostname(parsed.hostname) ? 'local' : 'custom';
+  } catch (_) {
+    return 'custom';
+  }
+});
+const currentGatewayIconPath = computed(() => {
+  if (currentGatewayKind.value === 'local') {
+    return 'M4 5.75A2.75 2.75 0 0 1 6.75 3h10.5A2.75 2.75 0 0 1 20 5.75v5.5A2.75 2.75 0 0 1 17.25 14H13.5v2H15a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h1.5v-2H6.75A2.75 2.75 0 0 1 4 11.25Zm2.75-.75A.75.75 0 0 0 6 5.75v5.5c0 .41.34.75.75.75h10.5a.75.75 0 0 0 .75-.75v-5.5a.75.75 0 0 0-.75-.75Zm9.75 2.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z';
+  }
+
+  if (currentGatewayKind.value === 'custom') {
+    return 'M14.75 5A3.25 3.25 0 0 1 18 8.25v1a1 1 0 1 1-2 0v-1A1.25 1.25 0 0 0 14.75 7H13a1 1 0 1 1 0-2ZM9 7a1 1 0 0 1 0 2H7.25A1.25 1.25 0 0 0 6 10.25v5.5A1.25 1.25 0 0 0 7.25 17H9a1 1 0 1 1 0 2H7.25A3.25 3.25 0 0 1 4 15.75v-5.5A3.25 3.25 0 0 1 7.25 7Zm7.03 3.22a1 1 0 0 1 0 1.41l-3.4 3.4a3 3 0 0 1-4.24 0 1 1 0 0 1 1.41-1.41 1 1 0 0 0 1.42 0l3.4-3.4a1 1 0 0 1 1.41 0Zm-1.83-2.83a3 3 0 0 1 4.24 0 1 1 0 0 1-1.41 1.41 1 1 0 0 0-1.42 0l-3.4 3.4a1 1 0 0 1-1.41-1.41Z';
+  }
+
+  return 'M12 3a9 9 0 1 0 9 9 9 9 0 0 0-9-9Zm6.92 8h-3.1a14.9 14.9 0 0 0-1.14-4.33A7.02 7.02 0 0 1 18.92 11ZM12 5c.82 0 2.17 2.07 2.72 6H9.28C9.83 7.07 11.18 5 12 5ZM9.32 6.67A14.9 14.9 0 0 0 8.18 11h-3.1a7.02 7.02 0 0 1 4.24-4.33ZM5.08 13h3.1a14.9 14.9 0 0 0 1.14 4.33A7.02 7.02 0 0 1 5.08 13ZM12 19c-.82 0-2.17-2.07-2.72-6h5.44C14.17 16.93 12.82 19 12 19Zm2.68-1.67A14.9 14.9 0 0 0 15.82 13h3.1a7.02 7.02 0 0 1-4.24 4.33Z';
+});
 
 let gatewayProbeSeq = 0;
 let gatewayProbeTimer = null;
@@ -573,10 +616,24 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="actions-area">
-      <button class="action-btn gateway-btn" @click="openSettings" aria-label="Gateway Settings">
-        <span class="btn-icon">⚙</span>
-        <span class="gateway-signal gateway-btn-signal" :class="`is-${currentGatewayProbeState.state}`" aria-hidden="true"></span>
-        <span class="btn-text">Gateway</span>
+      <button
+        class="action-btn gateway-btn"
+        @click="openSettings"
+        aria-haspopup="dialog"
+        :aria-expanded="settingsOpen ? 'true' : 'false'"
+        :aria-label="`Switch gateway. Current gateway: ${currentGatewayName}`"
+        :title="currentGatewayValue || currentGatewayName"
+      >
+        <span class="gateway-btn-visual" :class="`is-${currentGatewayKind}`" aria-hidden="true">
+          <svg class="gateway-btn-icon" viewBox="0 0 24 24">
+            <path fill="currentColor" :d="currentGatewayIconPath" />
+          </svg>
+          <span class="gateway-signal gateway-btn-signal" :class="`is-${currentGatewayProbeState.state}`"></span>
+        </span>
+        <span class="gateway-btn-copy">
+          <span class="gateway-btn-action">Gateway</span>
+          <span class="gateway-btn-name">{{ currentGatewayName }}</span>
+        </span>
       </button>
       <button class="action-btn icon-btn" title="Notifications">
         <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
@@ -825,38 +882,126 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  width: 250px;
+  width: clamp(280px, 28vw, 336px);
+  min-width: 0;
   justify-content: flex-end;
 }
 
 .gateway-btn {
-  background: rgba(162, 82, 255, 0.12);
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
-  border: 1px solid rgba(162, 82, 255, 0.3);
-  border-radius: 18px;
-  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 10px 10px 10px 12px;
   font-size: 0.9rem;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  flex: 1 1 0;
+  width: min(100%, 224px);
+  min-width: 0;
+  max-width: 224px;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.gateway-btn::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 19px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 
 .gateway-btn:hover {
-  background: rgba(162, 82, 255, 0.2);
-  box-shadow: 0 0 14px rgba(162, 82, 255, 0.25);
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.gateway-btn .btn-icon {
-  font-size: 1.1rem;
+.gateway-btn-visual {
+  position: relative;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.gateway-btn-visual.is-local {
+  color: rgba(120, 233, 196, 0.92);
+  background: rgba(56, 211, 159, 0.09);
+}
+
+.gateway-btn-visual.is-public {
+  color: rgba(164, 228, 255, 0.9);
+  background: rgba(0, 210, 255, 0.08);
+}
+
+.gateway-btn-visual.is-custom {
+  color: rgba(221, 193, 255, 0.92);
+  background: rgba(162, 82, 255, 0.09);
+}
+
+.gateway-btn-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .gateway-btn-signal {
-  width: 8px;
-  height: 8px;
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(11, 14, 25, 0.95);
 }
 
-.gateway-btn .btn-text {
+.gateway-btn-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 3px;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.gateway-btn-action {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.gateway-btn-name {
+  display: block;
+  width: 100%;
+  font-size: 0.98rem;
   font-weight: 600;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.9);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon-btn {
@@ -916,8 +1061,14 @@ onBeforeUnmount(() => {
   .actions-area .avatar {
     display: none;
   }
-  .gateway-btn .btn-text {
-    display: none;
+  .gateway-btn {
+    width: min(100%, 208px);
+    min-width: 0;
+    max-width: 208px;
+    padding: 10px;
+  }
+  .gateway-btn-name {
+    font-size: 0.9rem;
   }
 }
 @media (max-width: 480px) {
