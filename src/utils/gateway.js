@@ -150,13 +150,22 @@ export function getDefaultGateway(options = {}) {
   return options.allowPrivateHosts ? defaultLocalGateway : defaultPublicGateway;
 }
 
-export function buildGatewayIndexUrl(gatewayUrl, cid) {
+export function buildGatewayAssetUrl(gatewayUrl, cid, assetPath = '') {
   const normalizedGateway = typeof gatewayUrl === 'string' ? gatewayUrl.trim() : '';
   const normalizedCid = typeof cid === 'string' ? cid.trim() : '';
+  const normalizedAssetPath = typeof assetPath === 'string' ? assetPath.trim().replace(/^\/+/, '') : '';
 
   if (!normalizedGateway || !normalizedCid) return '';
 
-  return `${normalizedGateway}${normalizedCid}/index.m3u8`;
+  if (!normalizedAssetPath) {
+    return `${normalizedGateway}${normalizedCid}/`;
+  }
+
+  return `${normalizedGateway}${normalizedCid}/${normalizedAssetPath}`;
+}
+
+export function buildGatewayIndexUrl(gatewayUrl, cid) {
+  return buildGatewayAssetUrl(gatewayUrl, cid, 'index.m3u8');
 }
 
 export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {

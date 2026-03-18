@@ -5,7 +5,7 @@ import Sidebar from './components/Sidebar.vue';
 import VideoPlayer from './components/VideoPlayer.vue';
 import VideoInfo from './components/VideoInfo.vue';
 import VideoGrid from './components/VideoGrid.vue';
-import { getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
+import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 
@@ -14,6 +14,8 @@ const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGatew
 const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
+const currentPosterUrl = ref('');
+const currentVideoTitle = ref('');
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const playerRef = ref(null);
@@ -27,6 +29,8 @@ function resetPlaybackState() {
   currentCid.value = '';
   currentM3u8Url.value = '';
   currentIpfsBaseUrl.value = '';
+  currentPosterUrl.value = '';
+  currentVideoTitle.value = '';
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
   status.value = '準備就緒';
@@ -161,12 +165,14 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentGateway.value = nextGateway;
   persistGateway(nextGateway, window);
 
-  const ipfsBaseUrl = `${nextGateway}${cid}/`;
-  const m3u8Url = `${ipfsBaseUrl}index.m3u8`;
+  const ipfsBaseUrl = buildGatewayAssetUrl(nextGateway, cid);
+  const m3u8Url = buildGatewayAssetUrl(nextGateway, cid, 'index.m3u8');
+  const posterUrl = buildGatewayAssetUrl(nextGateway, cid, 'cover.webp');
   status.value = '正在連線至網關...';
   
   currentIpfsBaseUrl.value = ipfsBaseUrl;
   currentM3u8Url.value = m3u8Url;
+  currentPosterUrl.value = posterUrl;
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
 
@@ -180,6 +186,10 @@ function onStatusUpdate(newStatus) {
 }
 
 function onLevelsLoaded(levels) {}
+
+function onMetadataUpdate(videoInfo) {
+  currentVideoTitle.value = videoInfo?.title || '';
+}
 
 function resolveGateway(candidate) {
   return normalizeGatewayUrl(candidate, { allowPrivateHosts: allowPrivateGateways }) || DEFAULT_GATEWAY;
@@ -219,15 +229,16 @@ function readConfiguredGateway() {
               ref="playerRef"
               :m3u8-url="currentM3u8Url"
               :ipfs-base-url="currentIpfsBaseUrl"
+              :poster-url="currentPosterUrl"
               :start-time="currentStartTime"
               :should-autoplay="currentShouldAutoplay"
               @status-update="onStatusUpdate"
               @levels-loaded="onLevelsLoaded"
             />
           </div>
-          <div id="status" class="status-msg">{{ status }}</div>
+          <div v-if="currentVideoTitle" class="player-title">{{ currentVideoTitle }}</div>
 
-          <VideoInfo :cid="currentCid" />
+          <VideoInfo :cid="currentCid" :ipfs-base-url="currentIpfsBaseUrl" @metadata-update="onMetadataUpdate" />
         </div>
         
         <div class="secondary-column">
@@ -293,10 +304,11 @@ function readConfiguredGateway() {
   height: 100%;
 }
 
-.status-msg {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  font-style: italic;
+.player-title {
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.35;
   padding: 0 4px;
 }
 

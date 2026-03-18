@@ -4,6 +4,7 @@
       ref="videoRef"
       class="video-js vjs-big-play-centered"
       crossorigin="anonymous"
+      :poster="posterUrl"
       playsinline
       webkit-playsinline
     ></video>
@@ -23,6 +24,11 @@ window.videojs = videojs;
 
 const props = defineProps({
   m3u8Url: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  posterUrl: {
     type: String,
     required: false,
     default: '',
@@ -74,6 +80,7 @@ function beginSourceSwitch() {
   player.pause();
   clearTracks();
   player.reset();
+  player.poster(props.posterUrl || '');
   return seq;
 }
 
@@ -179,6 +186,12 @@ function handleGlobalKeydown(event) {
   applyPlaybackHotkey(event, player, SEEK_STEP_SECONDS);
 }
 
+function syncPoster(posterUrl) {
+  if (!player) return;
+
+  player.poster(posterUrl || '');
+}
+
 function initPlayer() {
   if (!videoRef.value) return;
 
@@ -203,6 +216,7 @@ function initPlayer() {
       },
     },
     () => {
+      syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
         setupSourceAndTracks(props.m3u8Url, props.ipfsBaseUrl);
@@ -240,6 +254,13 @@ watch(
         emit('status-update', '播放器已就緒');
       }
     }
+  }
+);
+
+watch(
+  () => props.posterUrl,
+  (newPosterUrl) => {
+    syncPoster(newPosterUrl);
   }
 );
 
