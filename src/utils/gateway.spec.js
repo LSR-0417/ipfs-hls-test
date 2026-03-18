@@ -4,6 +4,7 @@ import {
   buildGatewayIndexUrl,
   customGatewayStorageKey,
   gatewayRateLimitBackoffMs,
+  gatewayProbeSegmentSampleCount,
   gatewayStorageKey,
   isPrivateHostname,
   normalizeGatewayUrl,
@@ -37,6 +38,34 @@ function createHeaders(values = {}) {
     get(name) {
       return entries.get(String(name).toLowerCase()) ?? null;
     },
+  };
+}
+
+function createResponse({ ok = true, status = 200, headers = {}, text = '', bodyChunks = [new Uint8Array([1])] } = {}) {
+  let chunkIndex = 0;
+
+  return {
+    ok,
+    status,
+    headers: createHeaders(headers),
+    text: vi.fn().mockResolvedValue(text),
+    body: {
+      getReader() {
+        return {
+          read: vi.fn().mockImplementation(async () => {
+            if (chunkIndex >= bodyChunks.length) {
+              return { done: true, value: undefined };
+            }
+
+            const value = bodyChunks[chunkIndex];
+            chunkIndex += 1;
+            return { done: false, value };
+          }),
+          cancel: vi.fn().mockResolvedValue(undefined),
+        };
+      },
+    },
+    arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
   };
 }
 
@@ -143,14 +172,40 @@ describe('buildGatewayIndexUrl', () => {
 });
 
 describe('probeGatewayAvailability', () => {
-  it('returns ready when index.m3u8 is reachable', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+  it('returns ready when the playlist and sample segments are reachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\n720p/streaminglist-720p.m3u8\n',
+        });
+      }
+
+      if (url === 'https://example.com/ipfs/bafy123/720p/streaminglist-720p.m3u8') {
+        return createResponse({
+          text: [
+            '#EXTM3U',
+            '#EXTINF:5.0,',
+            'segment_000.ts',
+            '#EXTINF:5.0,',
+            'segment_001.ts',
+            '#EXTINF:5.0,',
+            'segment_002.ts',
+          ].join('\n'),
+        });
+      }
+
+      if (/segment_00[0-2]\.ts$/.test(url)) {
+        return createResponse();
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
     const nowFn = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(132);
 
     await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
       {
         state: 'ready',
-        detail: '已找到 index.m3u8',
+        detail: `已快速驗證前 ${gatewayProbeSegmentSampleCount} 個片段`,
         durationMs: 32,
         httpStatus: 200,
         retryAfterMs: null,
@@ -164,6 +219,55 @@ describe('probeGatewayAvailability', () => {
         cache: 'no-store',
       })
     );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://example.com/ipfs/bafy123/720p/segment_000.ts',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+      })
+    );
+  });
+
+  it('emits playlist-ready progress once index.m3u8 is reachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXTINF:5.0,\nsegment_000.ts\n#EXTINF:5.0,\nsegment_001.ts\n',
+        });
+      }
+
+      if (/segment_00[0-1]\.ts$/.test(url)) {
+        return createResponse();
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(112).mockReturnValueOnce(128);
+    const onProgress = vi.fn();
+
+    await expect(
+      probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', {
+        fetchImpl,
+        nowFn,
+        onProgress,
+      })
+    ).resolves.toEqual({
+      state: 'ready',
+      detail: '已快速驗證前 2 個片段',
+      durationMs: 28,
+      httpStatus: 200,
+      retryAfterMs: null,
+    });
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith({
+      state: 'playlist_ready',
+      detail: '已找到 index.m3u8，正在驗證片段',
+      durationMs: 12,
+      httpStatus: 200,
+      retryAfterMs: null,
+    });
   });
 
   it('returns failed when the gateway responds with an error status', async () => {
@@ -176,6 +280,97 @@ describe('probeGatewayAvailability', () => {
         detail: '找不到 index.m3u8 (HTTP 404)',
         durationMs: 35,
         httpStatus: 404,
+        retryAfterMs: null,
+      }
+    );
+  });
+
+  it('returns degraded when a sampled segment is not reachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\n720p/streaminglist-720p.m3u8\n',
+        });
+      }
+
+      if (url === 'https://example.com/ipfs/bafy123/720p/streaminglist-720p.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXTINF:5.0,\nsegment_000.ts\n#EXTINF:5.0,\nsegment_001.ts\n',
+        });
+      }
+
+      if (url === 'https://example.com/ipfs/bafy123/720p/segment_000.ts') {
+        return createResponse({ ok: false, status: 404 });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(50).mockReturnValueOnce(88);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'degraded',
+        detail: '已找到 index.m3u8，但前幾個片段不可用 (HTTP 404)',
+        durationMs: 38,
+        httpStatus: 404,
+        retryAfterMs: null,
+      }
+    );
+  });
+
+  it('keeps the gateway yellow when segments are reachable but too slow for green', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXTINF:5.0,\nsegment_000.ts\n#EXTINF:5.0,\nsegment_001.ts\n#EXTINF:5.0,\nsegment_002.ts\n',
+        });
+      }
+
+      if (/segment_00[0-2]\.ts$/.test(url)) {
+        return createResponse();
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(35);
+
+    await expect(
+      probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', {
+        fetchImpl,
+        nowFn,
+        readyThresholdMs: 20,
+      })
+    ).resolves.toEqual({
+      state: 'playlist_ready',
+      detail: '已找到 index.m3u8，前 3 個片段可取但偏慢',
+      durationMs: 25,
+      httpStatus: 200,
+      retryAfterMs: null,
+    });
+  });
+
+  it('supports index.m3u8 files that are already media playlists', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXTINF:5.0,\nsegment_000.ts\n#EXTINF:5.0,\nsegment_001.ts\n',
+        });
+      }
+
+      if (/segment_00[0-1]\.ts$/.test(url)) {
+        return createResponse();
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(24);
+
+    await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
+      {
+        state: 'ready',
+        detail: '已快速驗證前 2 個片段',
+        durationMs: 14,
+        httpStatus: 200,
         retryAfterMs: null,
       }
     );

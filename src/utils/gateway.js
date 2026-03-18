@@ -2,6 +2,8 @@ export const gatewayStorageKey = 'ipfs-hls-selected-gateway';
 export const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
 export const gatewayProbeTimeoutMs = 5000;
 export const gatewayRateLimitBackoffMs = 30 * 60 * 1000;
+export const gatewayProbeSegmentSampleCount = 3;
+export const gatewayProbeReadyThresholdMs = 2000;
 export const publicGatewayOptions = [
   {
     id: 'pinata',
@@ -173,13 +175,15 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     fetchImpl = globalThis.fetch,
     timeoutMs = gatewayProbeTimeoutMs,
     nowFn = defaultNow,
+    readyThresholdMs = gatewayProbeReadyThresholdMs,
+    onProgress = null,
   } = options;
   const playlistUrl = buildGatewayIndexUrl(gatewayUrl, cid);
 
   if (!playlistUrl || typeof fetchImpl !== 'function') {
     return {
       state: 'failed',
-      detail: '無法建立 index.m3u8 檢查請求',
+      detail: '無法建立 gateway 檢查請求',
       durationMs: null,
       httpStatus: null,
       retryAfterMs: null,
@@ -194,92 +198,134 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
           controller.abort();
         }, timeoutMs)
       : null;
+  let phase = 'index';
 
   try {
-    const response = await fetchImpl(playlistUrl, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, text/plain;q=0.8, */*;q=0.1',
-      },
-      signal: controller.signal,
-    });
+    const playlistResponse = await fetchGatewayTextResource(playlistUrl, fetchImpl, controller.signal);
+    if (!playlistResponse?.ok) {
+      return buildProbeFailureResult(
+        playlistResponse,
+        Math.max(0, Math.round(nowFn() - startedAt)),
+        '找不到 index.m3u8'
+      );
+    }
 
-    if (response?.ok) {
+    emitProbeProgress(onProgress, () => ({
+      state: 'playlist_ready',
+      detail: '已找到 index.m3u8，正在驗證片段',
+      durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+      httpStatus: playlistResponse.status,
+      retryAfterMs: null,
+    }));
+
+    const playlistText = await readTextResponse(playlistResponse);
+    const parsedPlaylist = parseHlsPlaylist(playlistText, playlistUrl);
+    let segmentUrls = parsedPlaylist.segmentUrls;
+
+    if (!segmentUrls.length) {
+      const variantUrls = parsedPlaylist.variantPlaylistUrls;
+
+      for (const variantUrl of variantUrls) {
+        phase = 'media';
+        const variantResponse = await fetchGatewayTextResource(variantUrl, fetchImpl, controller.signal);
+        if (!variantResponse?.ok) {
+          return buildProbeFailureResult(
+            variantResponse,
+            Math.max(0, Math.round(nowFn() - startedAt)),
+            '已找到 index.m3u8，但子播放清單不可用',
+            {
+              defaultState: 'degraded',
+              forbiddenDetail: '已找到 index.m3u8，但子播放清單拒絕存取',
+              timeoutDetail: '已找到 index.m3u8，但子播放清單來源逾時',
+            }
+          );
+        }
+
+        const variantText = await readTextResponse(variantResponse);
+        segmentUrls = parseHlsPlaylist(variantText, variantUrl).segmentUrls;
+        if (segmentUrls.length) {
+          break;
+        }
+      }
+    }
+
+    if (!segmentUrls.length) {
       return {
-        state: 'ready',
-        detail: '已找到 index.m3u8',
+        state: 'degraded',
+        detail: '已找到 index.m3u8，但播放清單內找不到可驗證的媒體片段',
         durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
-        httpStatus: response.status,
+        httpStatus: playlistResponse.status,
         retryAfterMs: null,
       };
     }
 
-    const status = Number.isFinite(response?.status) ? response.status : null;
+    phase = 'segment';
+    const segmentSampleUrls = segmentUrls.slice(0, gatewayProbeSegmentSampleCount);
+    let httpStatus = playlistResponse.status;
+
+    for (const segmentUrl of segmentSampleUrls) {
+      const segmentResponse = await fetchGatewayMediaResource(segmentUrl, fetchImpl, controller.signal);
+      if (!segmentResponse?.ok) {
+        return buildProbeFailureResult(
+          segmentResponse,
+          Math.max(0, Math.round(nowFn() - startedAt)),
+          '已找到 index.m3u8，但前幾個片段不可用',
+          {
+            defaultState: 'degraded',
+            forbiddenDetail: '已找到 index.m3u8，但前幾個片段拒絕存取',
+            timeoutDetail: '已找到 index.m3u8，但前幾個片段來源逾時',
+          }
+        );
+      }
+
+      httpStatus = segmentResponse.status;
+      await readMediaProbeChunk(segmentResponse);
+    }
+
     const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
-
-    if (status === 429) {
+    if (readyThresholdMs > 0 && durationMs > readyThresholdMs) {
       return {
-        state: 'rate_limited',
-        detail: '暫時限流 (HTTP 429)',
+        state: 'playlist_ready',
+        detail: `已找到 index.m3u8，前 ${segmentSampleUrls.length} 個片段可取但偏慢`,
         durationMs,
-        httpStatus: status,
-        retryAfterMs: parseRetryAfterHeader(response) ?? gatewayRateLimitBackoffMs,
-      };
-    }
-
-    if (status && [301, 302, 307, 308].includes(status)) {
-      return {
-        state: 'redirected',
-        detail: `重新導向 (HTTP ${status})`,
-        durationMs,
-        httpStatus: status,
-        retryAfterMs: null,
-      };
-    }
-
-    if (status === 504) {
-      return {
-        state: 'failed',
-        detail: '來源逾時 (HTTP 504)',
-        durationMs,
-        httpStatus: status,
-        retryAfterMs: null,
-      };
-    }
-
-    if (status === 403) {
-      return {
-        state: 'failed',
-        detail: '拒絕存取 (HTTP 403)',
-        durationMs,
-        httpStatus: status,
+        httpStatus,
         retryAfterMs: null,
       };
     }
 
     return {
-      state: 'failed',
-      detail: `找不到 index.m3u8 (HTTP ${status ?? 'ERR'})`,
+      state: 'ready',
+      detail: `已快速驗證前 ${segmentSampleUrls.length} 個片段`,
       durationMs,
-      httpStatus: status,
+      httpStatus,
       retryAfterMs: null,
     };
   } catch (error) {
+    const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
     if (error?.name === 'AbortError') {
       return {
-        state: 'failed',
-        detail: '逾時，找不到 index.m3u8',
-        durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+        state: phase === 'index' ? 'failed' : 'degraded',
+        detail:
+          phase === 'segment'
+            ? '已找到 index.m3u8，但片段驗證逾時'
+            : phase === 'media'
+              ? '已找到 index.m3u8，但子播放清單驗證逾時'
+              : '逾時，找不到 index.m3u8',
+        durationMs,
         httpStatus: null,
         retryAfterMs: null,
       };
     }
 
     return {
-      state: 'failed',
-      detail: '無法取得 index.m3u8',
-      durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
+      state: phase === 'index' ? 'failed' : 'degraded',
+      detail:
+        phase === 'segment'
+          ? '已找到 index.m3u8，但無法取得媒體片段'
+          : phase === 'media'
+            ? '已找到 index.m3u8，但無法取得子播放清單'
+            : '無法取得 index.m3u8',
+      durationMs,
       httpStatus: null,
       retryAfterMs: null,
     };
@@ -287,6 +333,203 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
+  }
+}
+
+function buildProbeFailureResult(response, durationMs, fallbackDetail, options = {}) {
+  const {
+    defaultState = 'failed',
+    forbiddenDetail = '拒絕存取',
+    timeoutDetail = '來源逾時',
+  } = options;
+  const status = Number.isFinite(response?.status) ? response.status : null;
+
+  if (status === 429) {
+    return {
+      state: 'rate_limited',
+      detail: '暫時限流 (HTTP 429)',
+      durationMs,
+      httpStatus: status,
+      retryAfterMs: parseRetryAfterHeader(response) ?? gatewayRateLimitBackoffMs,
+    };
+  }
+
+  if (status && [301, 302, 307, 308].includes(status)) {
+    return {
+      state: 'redirected',
+      detail: `重新導向 (HTTP ${status})`,
+      durationMs,
+      httpStatus: status,
+      retryAfterMs: null,
+    };
+  }
+
+  if (status === 504) {
+    return {
+      state: defaultState,
+      detail: `${timeoutDetail} (HTTP 504)`,
+      durationMs,
+      httpStatus: status,
+      retryAfterMs: null,
+    };
+  }
+
+  if (status === 403) {
+    return {
+      state: defaultState,
+      detail: `${forbiddenDetail} (HTTP 403)`,
+      durationMs,
+      httpStatus: status,
+      retryAfterMs: null,
+    };
+  }
+
+  return {
+    state: defaultState,
+    detail: `${fallbackDetail} (HTTP ${status ?? 'ERR'})`,
+    durationMs,
+    httpStatus: status,
+    retryAfterMs: null,
+  };
+}
+
+function emitProbeProgress(onProgress, getPayload) {
+  if (typeof onProgress !== 'function') {
+    return;
+  }
+
+  try {
+    onProgress(getPayload());
+  } catch (_) {
+    // Ignore observer errors so probe completion still reflects the fetch result.
+  }
+}
+
+function parseHlsPlaylist(playlistText, baseUrl) {
+  const variantPlaylistUrls = [];
+  const segmentUrls = [];
+  const lines = String(playlistText || '').split(/\r?\n/);
+  let expectsVariantUri = false;
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    const initSegmentUrl = parsePlaylistTagUri(line, '#EXT-X-MAP');
+    if (initSegmentUrl) {
+      const resolvedInitSegmentUrl = resolvePlaylistResourceUrl(baseUrl, initSegmentUrl);
+      if (resolvedInitSegmentUrl) {
+        segmentUrls.push(resolvedInitSegmentUrl);
+      }
+    }
+
+    if (line.startsWith('#EXT-X-STREAM-INF')) {
+      expectsVariantUri = true;
+      return;
+    }
+
+    if (line.startsWith('#')) {
+      return;
+    }
+
+    const resolvedUrl = resolvePlaylistResourceUrl(baseUrl, line);
+    if (!resolvedUrl) {
+      expectsVariantUri = false;
+      return;
+    }
+
+    if (expectsVariantUri || isPlaylistLikeUrl(resolvedUrl)) {
+      variantPlaylistUrls.push(resolvedUrl);
+      expectsVariantUri = false;
+      return;
+    }
+
+    segmentUrls.push(resolvedUrl);
+  });
+
+  return {
+    variantPlaylistUrls: dedupeUrls(variantPlaylistUrls),
+    segmentUrls: dedupeUrls(segmentUrls),
+  };
+}
+
+function dedupeUrls(urls) {
+  return [...new Set(urls.filter(Boolean))];
+}
+
+function parsePlaylistTagUri(line, tagPrefix) {
+  if (!line.startsWith(tagPrefix)) {
+    return '';
+  }
+
+  const match = line.match(/(?:^|,)URI="([^"]+)"/i);
+  return match?.[1] || '';
+}
+
+function resolvePlaylistResourceUrl(baseUrl, resourcePath) {
+  try {
+    return new URL(resourcePath, baseUrl).toString();
+  } catch (_) {
+    return '';
+  }
+}
+
+function isPlaylistLikeUrl(resourceUrl) {
+  try {
+    const { pathname } = new URL(resourceUrl);
+    return /\.m3u8?$/i.test(pathname);
+  } catch (_) {
+    return false;
+  }
+}
+
+function fetchGatewayTextResource(url, fetchImpl, signal) {
+  return fetchImpl(url, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, text/plain;q=0.8, */*;q=0.1',
+    },
+    signal,
+  });
+}
+
+function fetchGatewayMediaResource(url, fetchImpl, signal) {
+  return fetchImpl(url, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      Accept: 'video/mp2t, video/mp4, application/octet-stream;q=0.8, */*;q=0.1',
+    },
+    signal,
+  });
+}
+
+async function readTextResponse(response) {
+  if (typeof response?.text === 'function') {
+    return response.text();
+  }
+
+  return '';
+}
+
+async function readMediaProbeChunk(response) {
+  const reader = response?.body?.getReader?.();
+  if (reader) {
+    try {
+      await reader.read();
+    } finally {
+      try {
+        await reader.cancel();
+      } catch (_) {
+        // Ignore cancellation failures from already-closed streams.
+      }
+    }
+    return;
+  }
+
+  if (typeof response?.arrayBuffer === 'function') {
+    await response.arrayBuffer();
   }
 }
 

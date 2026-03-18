@@ -8,6 +8,7 @@ import {
   publicGatewayOptions,
   readStoredCustomGateway,
 } from '../utils/gateway';
+import { formatGatewayPlaybackText } from '../utils/gatewayStatus';
 
 const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
@@ -305,7 +306,7 @@ function syncSelectionFromGateway(urlStr) {
 function createIdleProbeState(detail = '') {
   return {
     state: 'idle',
-    detail: detail || (currentCidValue.value ? '等待檢查 index.m3u8' : '載入 CID 後可檢查'),
+    detail: detail || (currentCidValue.value ? '等待檢查播放清單與媒體片段' : '載入 CID 後可檢查'),
     durationMs: null,
     httpStatus: null,
     retryAfterMs: null,
@@ -348,7 +349,7 @@ function resetGatewayProbeStates() {
   nextStates[CUSTOM_GATEWAY_ID] =
     currentCidValue.value && customCooldownUntil > now
       ? createRateLimitedProbeState(customCooldownUntil)
-      : createIdleProbeState(customGatewayPreview.value ? '等待檢查 index.m3u8' : '輸入 HTTPS gateway 後可檢查');
+      : createIdleProbeState(customGatewayPreview.value ? '等待檢查播放清單與媒體片段' : '輸入 HTTPS gateway 後可檢查');
 
   gatewayProbeStates.value = nextStates;
 }
@@ -418,7 +419,7 @@ async function runGatewayProbe() {
       clearGatewayCooldown(url);
     }
 
-    setGatewayProbeState(id, 'probing', '正在尋找 index.m3u8');
+    setGatewayProbeState(id, 'probing', '正在驗證播放清單與片段');
     activeCandidates.push({ id, url });
   });
 
@@ -430,7 +431,17 @@ async function runGatewayProbe() {
     activeCandidates.map(async ({ id, url }) => ({
       id,
       url,
-      result: await probeGatewayAvailability(url, cid),
+      result: await probeGatewayAvailability(url, cid, {
+        onProgress(progressState) {
+          if (seq !== gatewayProbeSeq) return;
+
+          setGatewayProbeState(id, progressState.state, progressState.detail, progressState.durationMs, {
+            httpStatus: progressState.httpStatus,
+            retryAfterMs: progressState.retryAfterMs,
+            nextProbeAt: progressState.nextProbeAt ?? null,
+          });
+        },
+      }),
     }))
   );
 
@@ -464,23 +475,7 @@ function gatewaySignalText(id) {
 }
 
 function formatProbeStateText(probeState) {
-  if (probeState.state === 'ready') {
-    return probeState.durationMs != null ? `可用 · ${probeState.durationMs} ms` : '可用';
-  }
-
-  if (probeState.state === 'probing') {
-    return '檢查中';
-  }
-
-  if (probeState.state === 'rate_limited') {
-    return probeState.detail || '暫時限流';
-  }
-
-  if (probeState.state === 'redirected') {
-    return probeState.detail || '重新導向';
-  }
-
-  return probeState.detail;
+  return formatGatewayPlaybackText(probeState);
 }
 
 function isRecommendedGateway(id) {
@@ -489,11 +484,13 @@ function isRecommendedGateway(id) {
 
 function probeSortRank(probeState) {
   if (probeState.state === 'ready') return 0;
-  if (probeState.state === 'probing') return 1;
-  if (probeState.state === 'idle') return 2;
-  if (probeState.state === 'redirected') return 3;
-  if (probeState.state === 'rate_limited') return 4;
-  return 5;
+  if (probeState.state === 'playlist_ready') return 1;
+  if (probeState.state === 'probing') return 2;
+  if (probeState.state === 'degraded') return 3;
+  if (probeState.state === 'idle') return 4;
+  if (probeState.state === 'redirected') return 5;
+  if (probeState.state === 'rate_limited') return 6;
+  return 7;
 }
 
 function createRateLimitedProbeState(nextProbeAt) {
@@ -1264,9 +1261,19 @@ onBeforeUnmount(() => {
   animation: gateway-pulse 1.1s ease-in-out infinite;
 }
 
+.gateway-signal.is-playlist_ready {
+  background: #ffd166;
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.72);
+}
+
 .gateway-signal.is-ready {
   background: #38d39f;
   box-shadow: 0 0 12px rgba(56, 211, 159, 0.75);
+}
+
+.gateway-signal.is-degraded {
+  background: #ff9f43;
+  box-shadow: 0 0 12px rgba(255, 159, 67, 0.72);
 }
 
 .gateway-signal.is-rate_limited {
