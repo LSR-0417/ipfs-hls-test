@@ -25,11 +25,22 @@ export function runShellScript(scriptPath, { args = [], cwd, env, input = '' } =
       stderr += chunk.toString();
     });
 
+    child.stdin.on('error', (error) => {
+      if (error?.code === 'EPIPE' || error?.code === 'ERR_STREAM_DESTROYED') {
+        return;
+      }
+
+      reject(error);
+    });
+
     child.on('error', reject);
     child.on('close', (exitCode) => {
       resolve({ exitCode, stdout, stderr });
     });
 
-    child.stdin.end(input);
+    if (input) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
   });
 }

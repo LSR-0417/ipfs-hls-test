@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildGatewayAssetUrl,
   buildGatewayIndexUrl,
   customGatewayStorageKey,
   gatewayRateLimitBackoffMs,
@@ -127,6 +128,13 @@ describe('normalizeGatewayUrl', () => {
 });
 
 describe('buildGatewayIndexUrl', () => {
+  it('builds sidecar asset URLs from a gateway base and CID', () => {
+    expect(buildGatewayAssetUrl('https://example.com/ipfs/', 'bafy123', 'cover.webp')).toBe(
+      'https://example.com/ipfs/bafy123/cover.webp'
+    );
+    expect(buildGatewayAssetUrl('https://example.com/ipfs/', 'bafy123')).toBe('https://example.com/ipfs/bafy123/');
+  });
+
   it('builds the index.m3u8 URL from a gateway base and CID', () => {
     expect(buildGatewayIndexUrl('https://example.com/ipfs/', 'bafy123')).toBe(
       'https://example.com/ipfs/bafy123/index.m3u8'
