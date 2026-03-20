@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildSidecarAssetUrl,
   createDefaultVideoInfo,
   fetchVideoInfo,
   formatRelativeUploadTime,
@@ -65,6 +66,19 @@ describe('normalizeVideoInfo', () => {
       resolution: '1920x1080',
       fps: 30,
     });
+  });
+});
+
+describe('buildSidecarAssetUrl', () => {
+  it('joins the base URL and sidecar asset path', () => {
+    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', 'cover.webp')).toBe(
+      'https://example.com/ipfs/bafy123/cover.webp'
+    );
+  });
+
+  it('rejects missing or absolute asset paths', () => {
+    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', '')).toBe('');
+    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', 'https://evil.test/cover.webp')).toBe('');
   });
 });
 

@@ -16,7 +16,7 @@ describe('App layout contract', () => {
     const descriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const template = descriptor.template?.content || '';
 
-    const playerTitleIndex = template.indexOf('<div v-if="currentVideoTitle" class="player-title">');
+    const playerTitleIndex = template.indexOf('<div v-if="currentVideoInfo.title" class="player-title">');
     const videoInfoIndex = template.indexOf('<VideoInfo');
 
     expect(playerTitleIndex).toBeGreaterThan(-1);

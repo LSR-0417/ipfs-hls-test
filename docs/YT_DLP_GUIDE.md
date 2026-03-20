@@ -4,11 +4,13 @@
 
 - `script/download_youtube_assets.sh`
 - `script/package_youtube_assets.sh`
+- `script/generate_subtitles_manifest.sh`
 
 用途分成兩段：
 
 - 從 YouTube 下載原始影片與 sidecar 素材
 - 把字幕、精簡版 metadata、封面與頭像整理成固定結構，方便後續播放器或 IPFS 流程使用
+- 在需要時單獨重建 `subtitles.json`
 
 ## 前置需求
 
@@ -47,6 +49,7 @@
 - 找出目前目錄中的第一個 `.info.json`
 - 擷取較適合前端直接使用的欄位，另存為精簡版 `info.json`
 - 複製同影片 basename 的字幕檔，並整理成 `en.vtt`、`zh-TW.vtt` 這種乾淨名稱
+- 根據整理後的字幕檔生成 `subtitles.json`
 - 將影片封面複製為 `cover.<ext>`
 - 優先把 `channel_avatar.<ext>` 複製為 `avatar.<ext>`
 - 保留所有原始檔，不做刪除或覆寫
@@ -69,6 +72,12 @@ cd "./YYYYMMDD_uploader_title_id"
 ```
 
 第二步一定要在下載目錄內執行，因為整理腳本是依照目前目錄中的 `.info.json`、`.vtt`、封面圖與頭像圖來判斷輸入來源。
+
+如果你的 sidecar 資料夾已經存在，只是想依目前的 `*.vtt` 重新產生字幕清單，可直接執行：
+
+```bash
+/Users/iskku/Project/ipfs-hls-test/script/generate_subtitles_manifest.sh /path/to/cid-folder
+```
 
 ## 整理後的資料結構
 
@@ -96,6 +105,7 @@ cd "./YYYYMMDD_uploader_title_id"
 ├── channel_avatar.jpg
 └── Some Title [abc123]/
     ├── info.json
+    ├── subtitles.json
     ├── en.vtt
     ├── zh-TW.vtt
     ├── cover.webp
@@ -110,7 +120,7 @@ cd "./YYYYMMDD_uploader_title_id"
 
 ## 與本專案播放器的關聯
 
-整理後的字幕會變成 `en.vtt`、`zh-TW.vtt` 這類檔名，這和目前播放器對字幕檔名的偵測方式一致。
+整理後的字幕會變成 `en.vtt`、`zh-TW.vtt` 這類檔名，並由 `subtitles.json` 明確列出。播放器不再暴力掃描所有可能語系，而是只讀這份 manifest。
 
 如果接下來要把影片轉成 HLS，請另外使用：
 

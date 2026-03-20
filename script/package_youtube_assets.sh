@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if ! command -v jq >/dev/null 2>&1; then
     echo "❌ 錯誤：系統找不到 jq。"
     echo "💡 Mac 用戶可先執行：brew install jq"
@@ -30,21 +32,6 @@ target_dir="./$source_base"
 mkdir -p "$target_dir"
 echo "📄 使用來源 JSON: $source_json"
 
-jq '{
-  id: .id,
-  title: .title,
-  uploader: .uploader,
-  channel_id: .channel_id,
-  upload_date: .upload_date,
-  duration_string: .duration_string,
-  description: .description,
-  tags: .tags,
-  categories: .categories,
-  resolution: .resolution,
-  fps: .fps
-}' "$source_json" > "$target_dir/info.json"
-echo "✅ 精簡版 JSON 已存入: $target_dir/info.json"
-
 echo "💬 正在整理字幕檔..."
 shopt -s nullglob
 subtitle_found=0
@@ -61,6 +48,7 @@ fi
 
 echo "🎨 正在處理影片封面..."
 cover_source=""
+cover_target_name=""
 for candidate in "${source_base}".webp "${source_base}".jpg "${source_base}".jpeg "${source_base}".png; do
     if [ -f "$candidate" ]; then
         cover_source="$candidate"
@@ -70,14 +58,16 @@ done
 
 if [ -n "$cover_source" ]; then
     cover_ext=".${cover_source##*.}"
-    cp "$cover_source" "$target_dir/cover$cover_ext"
-    echo "   ➡️ 已複製封面: cover$cover_ext"
+    cover_target_name="cover$cover_ext"
+    cp "$cover_source" "$target_dir/$cover_target_name"
+    echo "   ➡️ 已複製封面: $cover_target_name"
 else
     echo "   ℹ️ 沒有找到影片封面。"
 fi
 
 echo "🖼️ 正在處理上傳者頭像..."
 avatar_source=""
+avatar_target_name=""
 for candidate in channel_avatar.* *.jpg *.jpeg *.png *.webp; do
     [ -f "$candidate" ] || continue
 
@@ -98,11 +88,36 @@ shopt -u nullglob
 
 if [ -n "$avatar_source" ]; then
     avatar_ext=".${avatar_source##*.}"
-    cp "$avatar_source" "$target_dir/avatar$avatar_ext"
-    echo "   ➡️ 已複製頭像: avatar$avatar_ext"
+    avatar_target_name="avatar$avatar_ext"
+    cp "$avatar_source" "$target_dir/$avatar_target_name"
+    echo "   ➡️ 已複製頭像: $avatar_target_name"
 else
     echo "   ℹ️ 沒有找到可用的頭像檔。"
 fi
+
+core_info_json="$(
+    jq -c '{
+      id: .id,
+      title: .title,
+      uploader: .uploader,
+      channel_id: .channel_id,
+      upload_date: .upload_date,
+      duration_string: .duration_string,
+      description: .description,
+      tags: .tags,
+      categories: .categories,
+      resolution: .resolution,
+      fps: .fps
+    }' "$source_json"
+)"
+
+core_info_json="${core_info_json//$'\n'/}"
+core_info_json="${core_info_json//$'\r'/}"
+printf '%s\n' "$core_info_json" > "$target_dir/info.json"
+
+echo "✅ 精簡版 JSON 已存入: $target_dir/info.json"
+
+"$script_dir/generate_subtitles_manifest.sh" "$target_dir"
 
 echo
 echo "🎉 全部整理完成！原始檔案皆已保留。"

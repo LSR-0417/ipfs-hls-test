@@ -36,6 +36,15 @@ export function normalizeVideoInfo(payload = {}) {
   };
 }
 
+export function buildSidecarAssetUrl(baseUrl, assetPath) {
+  const normalizedBaseUrl = normalizeString(baseUrl);
+  const normalizedAssetPath = normalizeAssetPath(assetPath);
+
+  if (!normalizedBaseUrl || !normalizedAssetPath) return '';
+
+  return `${normalizedBaseUrl.endsWith('/') ? normalizedBaseUrl : `${normalizedBaseUrl}/`}${normalizedAssetPath}`;
+}
+
 export function formatUploadDate(uploadDate) {
   const normalized = normalizeString(uploadDate);
   if (!/^\d{8}$/.test(normalized)) return normalized;
@@ -116,10 +125,7 @@ export async function fetchVideoInfo(baseUrl, options = {}) {
 }
 
 function buildInfoUrl(baseUrl) {
-  const normalizedBaseUrl = normalizeString(baseUrl);
-  if (!normalizedBaseUrl) return '';
-
-  return `${normalizedBaseUrl.endsWith('/') ? normalizedBaseUrl : `${normalizedBaseUrl}/`}info.json`;
+  return buildSidecarAssetUrl(baseUrl, 'info.json');
 }
 
 function normalizeString(value) {
@@ -159,4 +165,14 @@ function normalizeStringArray(values) {
 function normalizeFps(value) {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function normalizeAssetPath(value) {
+  const normalized = normalizeString(value).replace(/^\/+/, '');
+
+  if (!normalized || normalized.includes('://')) {
+    return '';
+  }
+
+  return normalized;
 }

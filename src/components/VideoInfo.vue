@@ -1,8 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import {
+  buildSidecarAssetUrl,
   createDefaultVideoInfo,
-  fetchVideoInfo,
   formatRelativeUploadTime,
   formatUploadDate,
   formatUploadDateTooltip,
@@ -13,45 +13,43 @@ const defaultDescription =
 const defaultTags = ['IPFS', 'Web3', 'Decentralized'];
 
 const props = defineProps({
-  title: { type: String, default: 'IPFS Video Stream' },
   cid: { type: String, default: '' },
   ipfsBaseUrl: { type: String, default: '' },
+  videoInfo: {
+    type: Object,
+    default: () => createDefaultVideoInfo(),
+  },
 });
-const emit = defineEmits(['metadata-update']);
 
 const shareSuccess = ref(false);
-const videoInfo = ref(createDefaultVideoInfo());
 const avatarLoadFailed = ref(false);
-let metadataRequestSeq = 0;
 
-const displayTitle = computed(() => videoInfo.value.title || props.title);
-const displayUploader = computed(() => videoInfo.value.uploader || 'IPFS Node');
+const displayUploader = computed(() => props.videoInfo.uploader || 'IPFS Node');
 const displayChannelText = computed(() => {
-  if (videoInfo.value.channelId) {
-    return `Channel ID: ${videoInfo.value.channelId}`;
+  if (props.videoInfo.channelId) {
+    return `Channel ID: ${props.videoInfo.channelId}`;
   }
 
-  if (videoInfo.value.categories.length > 0) {
-    return videoInfo.value.categories.join(' • ');
+  if (props.videoInfo.categories.length > 0) {
+    return props.videoInfo.categories.join(' • ');
   }
 
   return 'Decentralized Network';
 });
 const fallbackAvatarUrl = computed(() => {
-  const seed = videoInfo.value.channelId || videoInfo.value.uploader || props.cid || 'IPFS';
+  const seed = props.videoInfo.channelId || props.videoInfo.uploader || props.cid || 'IPFS';
   return `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(seed)}`;
 });
 const avatarUrl = computed(() => {
-  const baseUrl = String(props.ipfsBaseUrl || '').trim();
-  if (!baseUrl || avatarLoadFailed.value) {
+  if (avatarLoadFailed.value) {
     return fallbackAvatarUrl.value;
   }
 
-  return `${baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`}avatar.jpg`;
+  return buildSidecarAssetUrl(props.ipfsBaseUrl, 'avatar.jpg') || fallbackAvatarUrl.value;
 });
-const displayUploadDateTooltip = computed(() => formatUploadDateTooltip(videoInfo.value.uploadDate));
+const displayUploadDateTooltip = computed(() => formatUploadDateTooltip(props.videoInfo.uploadDate));
 const displayRelativeUploadTime = computed(() => {
-  return formatRelativeUploadTime(videoInfo.value.uploadDate) || formatUploadDate(videoInfo.value.uploadDate);
+  return formatRelativeUploadTime(props.videoInfo.uploadDate) || formatUploadDate(props.videoInfo.uploadDate);
 });
 const displayStatsItems = computed(() => {
   const items = [];
@@ -65,19 +63,19 @@ const displayStatsItems = computed(() => {
 
   return items;
 });
-const displayDescription = computed(() => videoInfo.value.description || defaultDescription);
+const displayDescription = computed(() => props.videoInfo.description || defaultDescription);
 const displayTags = computed(() => {
-  const tags = videoInfo.value.tags.length > 0 ? videoInfo.value.tags : defaultTags;
+  const tags = props.videoInfo.tags.length > 0 ? props.videoInfo.tags : defaultTags;
   return tags;
 });
 const metadataItems = computed(() => {
   const items = [
     { label: 'IPFS CID', value: props.cid },
-    { label: 'Video ID', value: videoInfo.value.id },
-    { label: 'Uploader', value: videoInfo.value.uploader },
-    { label: 'Channel ID', value: videoInfo.value.channelId },
-    { label: 'Duration', value: videoInfo.value.durationString },
-    { label: 'Frame Rate', value: videoInfo.value.fps ? `${videoInfo.value.fps} fps` : '' },
+    { label: 'Video ID', value: props.videoInfo.id },
+    { label: 'Uploader', value: props.videoInfo.uploader },
+    { label: 'Channel ID', value: props.videoInfo.channelId },
+    { label: 'Duration', value: props.videoInfo.durationString },
+    { label: 'Frame Rate', value: props.videoInfo.fps ? `${props.videoInfo.fps} fps` : '' },
   ];
 
   return items.filter((item) => item.value);
@@ -85,14 +83,8 @@ const metadataItems = computed(() => {
 
 watch(
   () => [props.cid, props.ipfsBaseUrl],
-  ([nextCid, nextBaseUrl]) => {
-    const requestSeq = ++metadataRequestSeq;
+  () => {
     avatarLoadFailed.value = false;
-    resetVideoInfo();
-
-    if (!nextCid || !nextBaseUrl) return;
-
-    void loadVideoInfo(nextBaseUrl, requestSeq);
   },
   { immediate: true }
 );
@@ -153,26 +145,6 @@ function fallbackCopyTextToClipboard(text, onSuccess) {
     alert(`複製失敗，請手動複製這段網址:\n${text}`);
   }
   document.body.removeChild(textArea);
-}
-
-async function loadVideoInfo(baseUrl, requestSeq) {
-  try {
-    const nextVideoInfo = await fetchVideoInfo(baseUrl);
-    if (requestSeq !== metadataRequestSeq) return;
-
-    videoInfo.value = nextVideoInfo;
-    emit('metadata-update', nextVideoInfo);
-  } catch (error) {
-    if (requestSeq !== metadataRequestSeq) return;
-
-    resetVideoInfo();
-    console.warn('[VideoInfo] metadata detection failed:', error);
-  }
-}
-
-function resetVideoInfo() {
-  videoInfo.value = createDefaultVideoInfo();
-  emit('metadata-update', videoInfo.value);
 }
 
 function formatTag(tag) {

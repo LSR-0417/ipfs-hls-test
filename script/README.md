@@ -1,8 +1,9 @@
 # Script 工具總覽
 
-`script/` 目前有 3 支 shell 腳本，分成兩條流程：
+`script/` 目前有 4 支 shell 腳本，分成三條用途：
 
 - YouTube 來源素材下載與 sidecar 資產整理
+- 已有 CID / sidecar 目錄的字幕 manifest 生成
 - 本地影片轉多解析度 HLS
 
 相關文件：
@@ -42,6 +43,7 @@
 - 在 yt-dlp 下載目錄內尋找第一個 `.info.json`。
 - 產生精簡版 `info.json`。
 - 把同影片 basename 的字幕複製成 `en.vtt`、`zh-TW.vtt` 這類乾淨名稱。
+- 根據整理後的 `*.vtt` 自動生成 `subtitles.json`。
 - 複製封面為 `cover.<ext>`。
 - 優先把 `channel_avatar.<ext>` 複製為 `avatar.<ext>`。
 
@@ -61,7 +63,47 @@ cd "<download-folder>"
 - 這支腳本只整理 sidecar 資產，不會刪除或搬動原始影片檔。
 - 如果同一個目錄有多支影片，只會處理找到的第一個 `.info.json`。
 
-## 3. `multi_resolution_hls.sh`
+## 3. `generate_subtitles_manifest.sh`
+
+用途：
+
+- 掃描指定資料夾中的所有 `*.vtt`
+- 依檔名生成 `subtitles.json`
+- 適合已經有 CID sidecar 目錄，或只想重建字幕 manifest 的情境
+
+執行方式：
+
+```bash
+/Users/iskku/Project/ipfs-hls-test/script/generate_subtitles_manifest.sh /path/to/cid-folder
+```
+
+例如：
+
+```bash
+cd /path/to/cid-folder
+/Users/iskku/Project/ipfs-hls-test/script/generate_subtitles_manifest.sh .
+```
+
+如果資料夾內有：
+
+- `zh-TW.vtt`
+- `zh-CN.vtt`
+- `en.vtt`
+
+就會產生：
+
+```json
+{
+  "version": 1,
+  "tracks": [
+    { "lang": "en", "path": "en.vtt" },
+    { "lang": "zh-CN", "path": "zh-CN.vtt" },
+    { "lang": "zh-TW", "path": "zh-TW.vtt" }
+  ]
+}
+```
+
+## 4. `multi_resolution_hls.sh`
 
 用途：
 
@@ -93,6 +135,7 @@ cd "<download-folder>"
 
 1. 如果來源是 YouTube，先執行 `download_youtube_assets.sh`。
 2. 需要整理 metadata、字幕、封面與頭像時，在下載目錄執行 `package_youtube_assets.sh`。
-3. 需要 HLS 輸出時，對實際影片檔再執行 `multi_resolution_hls.sh`。
+3. 如果只是補或重建字幕清單，直接對 sidecar 資料夾執行 `generate_subtitles_manifest.sh`。
+4. 需要 HLS 輸出時，對實際影片檔再執行 `multi_resolution_hls.sh`。
 
 `multi_resolution_hls.sh` 的詳細輸出結構、命名規則與限制，請以 [`docs/MULTI_RESOLUTION_HLS_SPEC.md`](../docs/MULTI_RESOLUTION_HLS_SPEC.md) 為準。

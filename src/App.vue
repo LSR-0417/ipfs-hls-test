@@ -6,6 +6,8 @@ import VideoPlayer from './components/VideoPlayer.vue';
 import VideoInfo from './components/VideoInfo.vue';
 import VideoGrid from './components/VideoGrid.vue';
 import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
+import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
+import { fetchSubtitleManifest, resolveSubtitleTracks } from './utils/subtitles';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 
@@ -15,7 +17,8 @@ const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
-const currentVideoTitle = ref('');
+const currentVideoInfo = ref(createDefaultVideoInfo());
+const currentSubtitleTracks = ref([]);
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const playerRef = ref(null);
@@ -25,13 +28,16 @@ const currentLoadSequence = ref(0);
 
 let originalPushState = null;
 let originalReplaceState = null;
+let metadataRequestSeq = 0;
 
 function resetPlaybackState() {
+  metadataRequestSeq += 1;
   currentCid.value = '';
   currentM3u8Url.value = '';
   currentIpfsBaseUrl.value = '';
   currentPosterUrl.value = '';
-  currentVideoTitle.value = '';
+  currentVideoInfo.value = createDefaultVideoInfo();
+  currentSubtitleTracks.value = [];
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
   status.value = '準備就緒';
@@ -162,6 +168,7 @@ function onGatewayChange(gateway) {
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
+  const requestSeq = ++metadataRequestSeq;
   currentCid.value = cid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
@@ -175,8 +182,11 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentIpfsBaseUrl.value = ipfsBaseUrl;
   currentM3u8Url.value = m3u8Url;
   currentPosterUrl.value = posterUrl;
+  currentVideoInfo.value = createDefaultVideoInfo();
+  currentSubtitleTracks.value = [];
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
+  void loadSidecarAssets(ipfsBaseUrl, requestSeq);
 
   if (updateUrl) {
     syncPlayerUrl(cid, startTime, 'push');
@@ -189,8 +199,16 @@ function onStatusUpdate(newStatus) {
 
 function onLevelsLoaded(levels) {}
 
-function onMetadataUpdate(videoInfo) {
-  currentVideoTitle.value = videoInfo?.title || '';
+async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
+  const [nextVideoInfo, subtitleManifest] = await Promise.all([
+    fetchVideoInfo(ipfsBaseUrl).catch(() => createDefaultVideoInfo()),
+    fetchSubtitleManifest(ipfsBaseUrl),
+  ]);
+
+  if (requestSeq !== metadataRequestSeq) return;
+
+  currentVideoInfo.value = nextVideoInfo;
+  currentSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
 }
 
 function resolveGateway(candidate) {
@@ -231,17 +249,17 @@ function readConfiguredGateway() {
             <VideoPlayer
               ref="playerRef"
               :m3u8-url="currentM3u8Url"
-              :ipfs-base-url="currentIpfsBaseUrl"
               :poster-url="currentPosterUrl"
+              :subtitles="currentSubtitleTracks"
               :start-time="currentStartTime"
               :should-autoplay="currentShouldAutoplay"
               @status-update="onStatusUpdate"
               @levels-loaded="onLevelsLoaded"
             />
           </div>
-          <div v-if="currentVideoTitle" class="player-title">{{ currentVideoTitle }}</div>
+          <div v-if="currentVideoInfo.title" class="player-title">{{ currentVideoInfo.title }}</div>
 
-          <VideoInfo :cid="currentCid" :ipfs-base-url="currentIpfsBaseUrl" @metadata-update="onMetadataUpdate" />
+          <VideoInfo :cid="currentCid" :ipfs-base-url="currentIpfsBaseUrl" :video-info="currentVideoInfo" />
         </div>
         
         <div class="secondary-column">

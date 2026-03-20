@@ -15,9 +15,13 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import { useSubtitles } from '../composables/useSubtitles';
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey } from '../utils/playback';
+import {
+  persistSubtitlePreference,
+  readStoredSubtitlePreference,
+  reconcileSubtitlePreference,
+} from '../utils/subtitles';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 window.videojs = videojs;
@@ -33,10 +37,9 @@ const props = defineProps({
     required: false,
     default: '',
   },
-  ipfsBaseUrl: {
-    type: String,
-    required: false,
-    default: '',
+  subtitles: {
+    type: Array,
+    default: () => [],
   },
   startTime: {
     type: Number,
@@ -54,8 +57,20 @@ const videoRef = ref(null);
 const SEEK_STEP_SECONDS = 5;
 let player = null;
 let sourceSeq = 0;
+let isApplyingSubtitlePreference = false;
+let textTrackList = null;
 
-const { detectSubtitles } = useSubtitles();
+function resolveSubtitlePreference(subtitles) {
+  const target = typeof window !== 'undefined' ? window : null;
+  const storedPreference = readStoredSubtitlePreference(target);
+  const nextPreference = reconcileSubtitlePreference(storedPreference, subtitles, target?.navigator);
+
+  if (storedPreference.mode !== nextPreference.mode || storedPreference.lang !== nextPreference.lang) {
+    persistSubtitlePreference(nextPreference, target);
+  }
+
+  return nextPreference;
+}
 
 async function resumePlaybackIfNeeded() {
   if (!player || !props.shouldAutoplay) return;
@@ -77,23 +92,77 @@ function beginSourceSwitch() {
   if (!player) return 0;
 
   const seq = ++sourceSeq;
+  isApplyingSubtitlePreference = true;
   player.pause();
   clearTracks();
   player.reset();
   player.poster(props.posterUrl || '');
+  isApplyingSubtitlePreference = false;
   return seq;
 }
 
-async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
+function bindSubtitleTrackChangeListener() {
+  if (!player) return;
+
+  const nextTextTrackList = player.textTracks();
+  if (!nextTextTrackList) return;
+
+  if (textTrackList === nextTextTrackList) {
+    return;
+  }
+
+  if (textTrackList) {
+    textTrackList.removeEventListener('change', handleSubtitleTrackChange);
+  }
+
+  textTrackList = nextTextTrackList;
+  textTrackList.addEventListener('change', handleSubtitleTrackChange);
+}
+
+function applySubtitleTracks(subtitles, seq = sourceSeq) {
+  if (!player || seq !== sourceSeq) return;
+
+  isApplyingSubtitlePreference = true;
+  clearTracks();
+  bindSubtitleTrackChangeListener();
+
+  if (!Array.isArray(subtitles) || subtitles.length === 0) {
+    isApplyingSubtitlePreference = false;
+    return;
+  }
+
+  const subtitlePreference = resolveSubtitlePreference(subtitles);
+
+  subtitles.forEach((sub) => {
+    const shouldShow = subtitlePreference.mode === 'showing' && sub.lang === subtitlePreference.lang;
+    const trackEl = player.addRemoteTextTrack(
+      {
+        kind: 'captions',
+        label: sub.label,
+        srclang: sub.lang,
+        src: sub.src,
+        default: false,
+      },
+      false
+    );
+    if (trackEl && trackEl.track) {
+      trackEl.track.mode = shouldShow ? 'showing' : 'disabled';
+    }
+  });
+
+  isApplyingSubtitlePreference = false;
+}
+
+function setupSourceAndTracks(m3u8Url, subtitles) {
   if (!player) return;
   const seq = beginSourceSwitch();
 
-  // Switch the source first so gateway switching doesn't feel blocked by subtitle detection.
   emit('status-update', '正在載入影片...');
   player.src({
     src: m3u8Url,
     type: 'application/x-mpegURL',
   });
+  applySubtitleTracks(subtitles, seq);
 
   player.one('loadedmetadata', () => {
     if (!player || seq !== sourceSeq) return;
@@ -113,42 +182,6 @@ async function setupSourceAndTracks(m3u8Url, ipfsBaseUrl) {
       emit('status-update', '播放器已就緒');
     }
   });
-
-  // Subtitle detection runs in background; apply only if this is the latest source switch.
-  try {
-    const availableSubtitles = await detectSubtitles(ipfsBaseUrl);
-    if (seq !== sourceSeq) return;
-
-    const oldTracks = player.remoteTextTracks();
-    if (oldTracks) {
-      let i = oldTracks.length;
-      while (i--) {
-        player.removeRemoteTextTrack(oldTracks[i]);
-      }
-    }
-
-    if (availableSubtitles && availableSubtitles.length > 0) {
-      availableSubtitles.forEach((sub) => {
-        const isDefault = sub.lang === 'zh-TW';
-        const trackEl = player.addRemoteTextTrack(
-          {
-            kind: 'captions',
-            label: sub.label,
-            srclang: sub.lang,
-            src: sub.src,
-            default: isDefault,
-          },
-          false
-        );
-        if (isDefault && trackEl && trackEl.track) {
-          trackEl.track.mode = 'showing';
-        }
-      });
-    }
-  } catch (e) {
-    // Subtitle detection failure shouldn't break playback.
-    console.warn('[VideoPlayer] subtitle detection failed:', e);
-  }
 }
 
 function clearTracks() {
@@ -161,6 +194,36 @@ function clearTracks() {
   while (i--) {
     player.removeRemoteTextTrack(oldTracks[i]);
   }
+}
+
+function handleSubtitleTrackChange() {
+  if (!player || isApplyingSubtitlePreference) return;
+
+  const tracks = player.remoteTextTracks();
+  if (!tracks) return;
+
+  let activeLang = '';
+
+  for (let i = 0; i < tracks.length; i += 1) {
+    const track = tracks[i];
+    if (track.mode === 'showing') {
+      activeLang = track.language || track.srclang || '';
+      break;
+    }
+  }
+
+  const target = typeof window !== 'undefined' ? window : null;
+  const currentPreference = readStoredSubtitlePreference(target);
+  const nextPreference = reconcileSubtitlePreference(
+    {
+      mode: activeLang ? 'showing' : 'off',
+      lang: activeLang || currentPreference.lang,
+    },
+    props.subtitles,
+    target?.navigator
+  );
+
+  persistSubtitlePreference(nextPreference, target);
 }
 
 function syncStartTime(startTime) {
@@ -219,7 +282,7 @@ function initPlayer() {
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
-        setupSourceAndTracks(props.m3u8Url, props.ipfsBaseUrl);
+        setupSourceAndTracks(props.m3u8Url, props.subtitles);
       }
     }
   );
@@ -231,8 +294,8 @@ onMounted(() => {
 });
 
 watch(
-  () => [props.m3u8Url, props.ipfsBaseUrl, props.startTime],
-  ([newUrl, newBaseUrl, newStartTime], [oldUrl, oldBaseUrl, oldStartTime] = []) => {
+  () => [props.m3u8Url, props.startTime],
+  ([newUrl, newStartTime], [oldUrl, oldStartTime] = []) => {
     if (!player) return;
 
     if (!newUrl) {
@@ -241,8 +304,8 @@ watch(
       return;
     }
 
-    if (newUrl !== oldUrl || newBaseUrl !== oldBaseUrl) {
-      setupSourceAndTracks(newUrl, newBaseUrl);
+    if (newUrl !== oldUrl) {
+      setupSourceAndTracks(newUrl, props.subtitles);
       return;
     }
 
@@ -258,6 +321,15 @@ watch(
 );
 
 watch(
+  () => props.subtitles,
+  (newSubtitles) => {
+    if (!player || !props.m3u8Url) return;
+    applySubtitleTracks(newSubtitles);
+  },
+  { deep: true }
+);
+
+watch(
   () => props.posterUrl,
   (newPosterUrl) => {
     syncPoster(newPosterUrl);
@@ -266,6 +338,10 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  if (textTrackList) {
+    textTrackList.removeEventListener('change', handleSubtitleTrackChange);
+    textTrackList = null;
+  }
   if (player) {
     player.dispose();
   }

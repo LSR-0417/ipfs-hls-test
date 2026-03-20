@@ -88,6 +88,9 @@ describe('package_youtube_assets.sh', () => {
 
     expect(result.exitCode).toBe(0);
     await expect(readFile(join(targetDir, 'info.json'), 'utf8')).resolves.toBe('{"id":"abc123","title":"Packaged"}\n');
+    await expect(readFile(join(targetDir, 'subtitles.json'), 'utf8')).resolves.toBe(
+      '{\n  "version": 1,\n  "tracks": [\n    {"lang": "en", "path": "en.vtt"},\n    {"lang": "zh-TW", "path": "zh-TW.vtt"}\n  ]\n}\n'
+    );
     await expect(readFile(join(targetDir, 'en.vtt'), 'utf8')).resolves.toBe('WEBVTT EN\n');
     await expect(readFile(join(targetDir, 'zh-TW.vtt'), 'utf8')).resolves.toBe('WEBVTT ZH\n');
     await expect(readFile(join(targetDir, 'cover.webp'), 'utf8')).resolves.toBe('cover');
@@ -111,8 +114,31 @@ describe('package_youtube_assets.sh', () => {
     });
 
     expect(result.exitCode).toBe(0);
+    await expect(readFile(join(targetDir, 'info.json'), 'utf8')).resolves.toBe('{"id":"abc123","title":"Packaged"}\n');
+    await expect(readFile(join(targetDir, 'subtitles.json'), 'utf8')).resolves.toBe(
+      '{\n  "version": 1,\n  "tracks": [\n    {"lang": "en", "path": "en.vtt"}\n  ]\n}\n'
+    );
     await expect(readFile(join(targetDir, 'cover.webp'), 'utf8')).resolves.toBe('cover');
     await expect(stat(join(targetDir, 'avatar.webp'))).rejects.toThrow();
     expect(result.stdout).toContain('沒有找到可用的頭像檔');
+  });
+
+  it('still writes an empty subtitles manifest when no subtitle files exist', async () => {
+    const toolchain = await createToolchain();
+    const baseName = 'Video Title [abc123]';
+    const targetDir = join(toolchain.root, baseName);
+
+    await writeFile(join(toolchain.root, `${baseName}.info.json`), '{"id":"abc123"}\n');
+    await writeFile(join(toolchain.root, `${baseName}.webp`), 'cover');
+
+    const result = await runShellScript(scriptPath, {
+      cwd: toolchain.root,
+      env: toolchain.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    await expect(readFile(join(targetDir, 'subtitles.json'), 'utf8')).resolves.toBe(
+      '{\n  "version": 1,\n  "tracks": [  ]\n}\n'
+    );
   });
 });

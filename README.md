@@ -1,14 +1,14 @@
 # IPFS HLS 播放器
 
-一個基於 Vue 3 + Vite 的 IPFS 多網關 HLS 視頻播放器。支援多質量自適應流媒體播放、字幕切換、時間分享等功能。
+一個基於 Vue 3 + Vite 的 IPFS 多網關 HLS 視頻播放器。支援多質量自適應流媒體播放、字幕切換、時間分享與 sidecar metadata 載入。
 
 ## 🎯 功能特性
 
 - ✨ **IPFS 多網關支持** - 支援多個公開 IPFS 網關，自動容錯
 - 🎬 **HLS 適應性碼率** - 動態切換視頻質量
-- 📝 **多語言字幕** - 自動偵測並加載字幕文件
+- 📝 **多語言字幕** - 從 `subtitles.json` 載入字幕列表，預設關閉並記住使用者偏好
 - 🔗 **分享功能** - 生成包含播放時間的分享連結
-- 🎨 **現代化播放器 UI** - 基於 Plyr 播放器
+- 🎨 **現代化播放器 UI** - 基於 Video.js 播放器
 - 📱 **響應式設計** - 支援各種裝置尺寸
 - ⚡ **快速開發環境** - 基於 Vite 的高效開發體驗
 
@@ -58,13 +58,12 @@ ipfs-hls-test/
 │   │   ├── 網關選擇
 │   │   ├── CID 輸入
 │   │   ├── 播放狀態管理
-│   │   └── 字幕偵測
+│   │   └── sidecar 資產載入
 │   └── components/
 │       └── VideoPlayer.vue          # 視頻播放器元件
-│           ├── HLS.js 集成
-│           ├── Plyr 播放器
+│           ├── HLS.js / Video.js 集成
 │           ├── 質量切換
-│           └── 字幕管理
+│           └── 字幕偏好管理
 ├── index.html                       # HTML 入口
 ├── vite.config.js                   # Vite 配置
 ├── package.json                     # 項目配置與依賴
@@ -78,7 +77,7 @@ ipfs-hls-test/
 | **框架** | Vue 3 | ^3.3.4 |
 | **構建工具** | Vite | ^5.0.0 |
 | **HLS 播放** | HLS.js | ^1.4.0 |
-| **播放器 UI** | Plyr | ^3.7.2 |
+| **播放器 UI** | Video.js | ^8.23.7 |
 | **開發伺服器** | Vite Dev Server | Built-in |
 
 ## 📚 核心組件 API
@@ -90,7 +89,7 @@ ipfs-hls-test/
 - cid: String              // 輸入的 IPFS CID
 - gateway: String          // 選中的 IPFS 網關 URL
 - currentM3u8Url: String   // 構建的 M3U8 播放 URL
-- currentSubtitles: Array  // 偵測到的字幕列表
+- currentSubtitleTracks: Array // 從 subtitles.json 解析出的字幕列表
 - currentStartTime: Number // 從 URL 參數讀取的開始時間
 - status: String           // 當前操作狀態信息
 ```
@@ -109,7 +108,7 @@ onLevelsLoaded(levels)   // 接收視頻質量列表
 ```javascript
 {
   m3u8Url: String,           // HLS 菜單文件 URL
-  subtitles: Array,          // 字幕文件列表 [{ lang, src }]
+  subtitles: Array,          // 字幕文件列表 [{ lang, label, src }]
   startTime: Number          // 起始播放時間 (秒)
 }
 ```
@@ -196,17 +195,51 @@ npm run preview
 
 ### M3U8 播放列表結構
 
-預期的中 IPFS 文件夾結構：
+預期的 IPFS 文件夾結構：
 ```
 QmXxxx.../
-├── index.m3u8          # HLS 主播放列表
-├── segment1.ts          # 視頻分片
-├── segment2.ts
-├── ...
+├── index.m3u8           # HLS 主播放列表
+├── 1080p/
+├── 720p/
+├── info.json            # 影片 metadata
+├── subtitles.json       # 字幕 manifest
+├── cover.webp           # 封面，固定檔名
+├── avatar.jpg           # 頭像，固定檔名
 ├── zh-TW.vtt            # 繁體中文字幕 (可選)
-├── en-US.vtt            # 英文字幕 (可選)
-└── ja-JP.vtt            # 日文字幕 (可選)
+├── zh-CN.vtt            # 簡體中文字幕 (可選)
+└── en.vtt               # 英文字幕 (可選)
 ```
+
+### `subtitles.json` 格式
+
+播放器不再暴力掃描 `*.vtt`，而是只讀 `subtitles.json`：
+
+```json
+{
+  "version": 1,
+  "tracks": [
+    { "lang": "zh-TW", "path": "zh-TW.vtt" },
+    { "lang": "en", "path": "en.vtt" }
+  ]
+}
+```
+
+說明：
+
+- `lang` 會對應字幕語系代碼，例如 `zh-TW`、`zh-CN`、`en`
+- `path` 是字幕檔相對路徑
+- 前端會依 `navigator.languages` / `navigator.language` 挑出最接近的語系，但首次載入仍維持字幕關閉
+- 使用者之後在播放器內切換字幕開關或語系，偏好會寫入瀏覽器 `localStorage`
+
+### 產生字幕 manifest
+
+若你的 CID 資料夾內已經有整理好的 `zh-TW.vtt`、`zh-CN.vtt`、`en.vtt` 這類字幕檔，可直接執行：
+
+```bash
+bash /Users/iskku/Project/ipfs-hls-test/script/generate_subtitles_manifest.sh /path/to/cid-folder
+```
+
+這支腳本會掃描指定資料夾中的所有 `*.vtt`，並生成 `subtitles.json`。
 
 ### 分享連結格式
 
@@ -240,14 +273,16 @@ http://localhost:5173/?cid=QmXxxx...&t=120
 ### Q: 字幕為什麼未顯示？
 
 **可能原因：**
-1. 字幕文件命名不符合規範
-2. 字幕編碼問題
-3. Plyr 播放器未正確加載字幕
+1. 缺少 `subtitles.json`
+2. `subtitles.json` 內的 `path` 與實際檔名不一致
+3. 字幕目前被使用者設定為關閉
+4. 字幕編碼或格式有問題
 
 **解決方案：**
 - 確保字幕文件名格式：`{language-code}.vtt`（如 `zh-TW.vtt`）
+- 先執行 `script/generate_subtitles_manifest.sh` 生成 `subtitles.json`
 - 使用 UTF-8 編碼的 WebVTT 格式
-- 檢查瀏覽器開發者工具的網絡標籤
+- 檢查瀏覽器開發者工具的網路標籤，確認 `subtitles.json` 與 `*.vtt` 都有成功載入
 
 ### Q: 如何支援本地 IPFS 節點？
 
