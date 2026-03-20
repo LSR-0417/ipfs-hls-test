@@ -87,13 +87,21 @@ describe('VideoInfo layout contract', () => {
     expect(script).toContain("const responsiveActionOrder = [shareActionId];");
     expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
     expect(script).toContain("const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));");
-    expect(script).toContain('function resolveHiddenActionIds()');
+    expect(script).toContain('function resolveLayout()');
     expect(script).toContain('const availableActionsWidth = Math.max(0, infoRowWidth - creatorWidth - infoGap);');
 
     expect(style).toContain('.actions-wrapped');
     expect(style).toContain('.action-measure');
     expect(style).toContain('.actions-menu');
     expect(style).toContain('justify-content: flex-start;');
+  });
+
+  it('places dynamically collapsed items at the top of the overflow menu (e.g. share before download)', () => {
+    const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
+    const script = descriptor.scriptSetup?.content || '';
+
+    // Verify the overflow action order array places share before download
+    expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
   });
 
   it('collapses the description by default and exposes explicit expand and collapse controls', () => {
