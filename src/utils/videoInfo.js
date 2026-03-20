@@ -12,6 +12,9 @@ const defaultVideoInfo = Object.freeze({
   fps: null,
 });
 
+const descriptionUrlPattern = /\b(?:https?:\/\/|www\.)[^\s<]+/gi;
+const descriptionHashtagPattern = /(^|[\s([{<"'`「『（【])#([\p{L}\p{N}_][\p{L}\p{N}\p{M}_-]*)/gu;
+
 export function createDefaultVideoInfo() {
   return {
     ...defaultVideoInfo,
@@ -91,6 +94,80 @@ export function formatRelativeUploadTime(uploadDate, options = {}) {
   return `${Math.max(1, Math.floor(diffMs / yearMs))} 年前`;
 }
 
+export function linkifyDescription(text) {
+  const source = typeof text === 'string' ? text : '';
+  if (!source) return [];
+
+  const segments = [];
+  let lastIndex = 0;
+
+  for (const match of source.matchAll(descriptionUrlPattern)) {
+    const rawMatch = match[0];
+    const matchIndex = match.index ?? 0;
+
+    if (matchIndex > lastIndex) {
+      segments.push({
+        type: 'text',
+        text: source.slice(lastIndex, matchIndex),
+      });
+    }
+
+    const { urlText, trailingText } = splitUrlToken(rawMatch);
+
+    if (urlText) {
+      segments.push({
+        type: 'link',
+        text: urlText,
+        href: normalizeDescriptionHref(urlText),
+      });
+    } else {
+      segments.push({
+        type: 'text',
+        text: rawMatch,
+      });
+    }
+
+    if (trailingText) {
+      segments.push({
+        type: 'text',
+        text: trailingText,
+      });
+    }
+
+    lastIndex = matchIndex + rawMatch.length;
+  }
+
+  if (lastIndex < source.length) {
+    segments.push({
+      type: 'text',
+      text: source.slice(lastIndex),
+    });
+  }
+
+  return mergeDescriptionSegments(segments);
+}
+
+export function extractDescriptionHashtags(text, options = {}) {
+  const source = typeof text === 'string' ? text : '';
+  const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 3;
+  const hashtags = [];
+  const seen = new Set();
+
+  for (const match of source.matchAll(descriptionHashtagPattern)) {
+    const tag = String(match[2] || '').trim();
+    const normalizedTag = tag.toLowerCase();
+
+    if (!tag || seen.has(normalizedTag)) continue;
+
+    seen.add(normalizedTag);
+    hashtags.push(tag);
+
+    if (hashtags.length >= limit) break;
+  }
+
+  return hashtags;
+}
+
 export async function fetchVideoInfo(baseUrl, options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const infoUrl = buildInfoUrl(baseUrl);
@@ -130,6 +207,70 @@ function buildInfoUrl(baseUrl) {
 
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function splitUrlToken(value) {
+  let urlText = String(value || '');
+  let trailingText = '';
+
+  while (urlText) {
+    const lastChar = urlText.slice(-1);
+
+    if (/[.,!?;:，。！？；：'"`]/.test(lastChar)) {
+      trailingText = `${lastChar}${trailingText}`;
+      urlText = urlText.slice(0, -1);
+      continue;
+    }
+
+    if (/[)\]}]/.test(lastChar) && hasMoreClosingDelimiters(urlText, lastChar)) {
+      trailingText = `${lastChar}${trailingText}`;
+      urlText = urlText.slice(0, -1);
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    urlText,
+    trailingText,
+  };
+}
+
+function hasMoreClosingDelimiters(value, closer) {
+  const opener = { ')': '(', ']': '[', '}': '{' }[closer];
+  if (!opener) return false;
+
+  return countCharacters(value, closer) > countCharacters(value, opener);
+}
+
+function countCharacters(value, character) {
+  return Array.from(String(value || '')).filter((item) => item === character).length;
+}
+
+function normalizeDescriptionHref(value) {
+  const urlText = String(value || '');
+  if (urlText.toLowerCase().startsWith('www.')) {
+    return `https://${urlText}`;
+  }
+
+  return urlText;
+}
+
+function mergeDescriptionSegments(segments) {
+  return segments
+    .filter((segment) => segment.text)
+    .reduce((merged, segment) => {
+      const previousSegment = merged[merged.length - 1];
+
+      if (previousSegment?.type === 'text' && segment.type === 'text') {
+        previousSegment.text += segment.text;
+        return merged;
+      }
+
+      merged.push({ ...segment });
+      return merged;
+    }, []);
 }
 
 function parseUploadDate(value) {

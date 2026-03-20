@@ -13,7 +13,7 @@
   - **Primary Column**: VideoPlayer (播放器) + Player Title + VideoInfo。
   - **Secondary Column**: VideoGrid (推薦影片列表)。
 
-- **Player Title Row**: `App.vue` 透過 `currentVideoTitle` 接收 `VideoInfo` 發出的 metadata，將 `info.json.title` 放在播放器正下方，取代舊的播放狀態文字列。
+- **Player Title Row**: `App.vue` 維護 `currentVideoInfo`，在 `loadSidecarAssets()` 成功後直接以 `currentVideoInfo.title` 渲染播放器正下方標題列，取代舊的播放狀態文字列。
 
 ### 經過優化的關鍵元件
 #### 2.1 Header.vue (整合搜尋與網關設定)
@@ -29,10 +29,13 @@
 - **空白鍵事件消耗**: 當空白鍵確實被播放器接手時，需呼叫 `preventDefault()`，避免頁面捲動與播放器控制行為互相競爭。
 
 #### 2.3 VideoInfo.vue (metadata 與互動資訊列)
-- **Sidecar Metadata 載入**: `VideoInfo.vue` 會以與 `index.m3u8` 相同的 base URL 請求 `info.json` 與 `avatar.jpg`。資料正規化由 `src/utils/videoInfo.js` 負責。
-- **標題責任拆分**: `VideoInfo.vue` 不再自行渲染最上方標題，而是透過 `metadata-update` event 將 metadata 往上送，由 `App.vue` 控制播放器下方的標題列。
+- **Sidecar Metadata 所有權**: `App.vue` 會在載入影片時讀取 `info.json` 與字幕 manifest，將 metadata 保存於 `currentVideoInfo`、字幕軌保存於 `currentSubtitleTracks`；`VideoInfo.vue` 改以 `video-info` prop 消費這份狀態。頭像則仍由 `VideoInfo.vue` 透過 `avatar.jpg` 路徑渲染，失敗時退回 identicon。
+- **標題責任拆分**: `VideoInfo.vue` 不再自行渲染最上方標題；播放器正下方標題列與描述卡片共用 `App.vue` 持有的 metadata 狀態，避免資訊不同步。
 - **上傳者列 / 按鈕列**: 標題下方第一列為「左側上傳者資訊、右側互動按鈕」的雙欄結構。按鈕列使用 `margin-left: auto` 與 `justify-content: flex-end` 保持右對齊。
 - **Description Card**: 說明、metadata grid 與 tags 置於下一層獨立玻璃卡片，與上傳者列分離，避免資訊區塊過度擁擠。
+- **Description Summary Row**: 卡片頂部摘要列左側顯示相對上傳時間，右側顯示從描述文字抽出的前 `3` 個 `#tag`。這些 tag 為純文字樣式，不使用膠囊泡泡；過長時必須以省略號截斷，避免撐爆卡片寬度。
+- **Description Collapse Pattern**: 說明卡片在有額外內容時預設收合。收合預覽最多 `3` 行，最後一行文字寬度會壓到卡片寬度一半內，並在同一行尾端接上 `... 更多資訊`。點擊後展開完整描述、metadata grid、tags，並在卡片內底部提供 `只顯示部分資訊`。
+- **Description Linkify**: 說明文字保留原始換行，並將 `http://`、`https://`、`www.` 自動轉為可點選超連結。實作採文字片段渲染，不直接注入 HTML。
 - **Share Icon (分享按鈕)**: 分享按鈕仍整合於 `VideoInfo` 的動作列。點擊時提供 `Copied!` 微互動，且分享 URL 僅承載 `cid` 與播放進度 `t` (`?cid=&t=`)。
 - **Fallback 策略**: `avatar.jpg` 載入失敗時退回 identicon；`info.json` 不可用時退回預設文案，但不影響播放器與分享功能。
 
@@ -62,8 +65,10 @@
 ## 5. 測試設計對應
 - 播放時間讀取、seek clamp 與鍵盤快捷鍵事件過濾邏輯集中於 `src/utils/playback.js`，以便使用 Vitest 進行純單元測試。
 - 左右鍵 `±5` 秒 seek、空白鍵播放 / 暫停切換、輸入框忽略規則與 seek 邊界條件，皆需在 `src/utils/playback.spec.js` 內有明確案例。
-- `src/utils/videoInfo.spec.js` 負責覆蓋 `info.json` 的欄位正規化、日期格式化與讀取 fallback。
+- `src/utils/videoInfo.spec.js` 負責覆蓋 `info.json` 的欄位正規化、日期格式化、描述網址 linkify 與描述 `#tag` 擷取規則。
 - `src/components/video_layout.spec.js` 以 SFC template / style regression 測試保護以下契約：
   - 播放器下方標題列由 `App.vue` 控制
   - `VideoInfo` 內部為「上傳者左、按鈕右」的同列布局
   - description / metadata 區塊位於獨立玻璃卡片中
+  - 說明卡片的 `更多資訊` / `只顯示部分資訊` 互動入口存在於正確位置
+  - 摘要列的描述 `#tag` 與長文字截斷樣式契約存在

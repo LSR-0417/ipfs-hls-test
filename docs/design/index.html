@@ -123,9 +123,14 @@
         .action-group { display: flex; align-items: center; padding: 0; overflow: hidden; border-radius: 20px; }
         .action-group button { background: transparent; border: none; color: inherit; padding: 8px 16px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;}
         .action-group .divider { width: 1px; height: 20px; background: rgba(255,255,255,0.2); }
+        .description-shell { display: flex; flex-direction: column; gap: 8px; }
         .description { padding: 16px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); }
-        .stats { font-weight: 600; margin-bottom: 8px; }
+        .stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text-secondary); }
+        .stats-tags { display: inline-flex; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+        .stats-hashtag { display: inline-block; max-width: 18ch; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
         .desc-text { color: var(--text-secondary); white-space: pre-line; }
+        .desc-link { color: var(--accent-cyan); text-decoration: none; }
+        .description-toggle-bottom { margin-top: 16px; border: none; background: transparent; color: #fff; font-size: 0.9rem; font-weight: 700; padding: 0; cursor: pointer; }
         .metadata-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
         .metadata-item { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
         .metadata-label { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); }
@@ -291,36 +296,47 @@
                             </div>
                         </div>
 
-                        <div class="description glass-panel">
-                            <p class="stats">10:16 • 2026-03-07 • 1920x1080 • 30fps • News &amp; Politics</p>
-                            <p class="desc-text">【新手YTR必修課⚡️】
-https://www.atogaacademy.com/courses/youtuberbasics
+                        <div class="description-shell">
+                            <div class="description glass-panel">
+                                <div class="stats">
+                                    <span>12 天前</span>
+                                    <span>•</span>
+                                    <span class="stats-tags">
+                                        <span class="stats-hashtag" title="#台灣主權">#台灣主權</span>
+                                        <span class="stats-hashtag" title="#台灣認同">#台灣認同</span>
+                                        <span class="stats-hashtag" title="#去中心化影音平台實驗記錄很長很長">#去中心化影音平台實驗記錄很長很長</span>
+                                    </span>
+                                </div>
+                                <p class="desc-text">【新手YTR必修課⚡️】
+<a class="desc-link" href="https://www.atogaacademy.com/courses/youtuberbasics">https://www.atogaacademy.com/courses/youtuberbasics</a>
 
 我是黑素斯，OG YTR，西班牙出生的台灣魂。本頻道專注於台灣主權、台灣認同與台灣民主自由。</p>
-                            <div class="metadata-grid">
-                                <div class="metadata-item">
-                                    <span class="metadata-label">IPFS CID</span>
-                                    <span class="metadata-value">bafy...demo</span>
+                                <div class="metadata-grid">
+                                    <div class="metadata-item">
+                                        <span class="metadata-label">IPFS CID</span>
+                                        <span class="metadata-value">bafy...demo</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label">Video ID</span>
+                                        <span class="metadata-value">UdGk5Qv0C1M</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label">Channel ID</span>
+                                        <span class="metadata-value">UCYgpfeq5JyEo_pPmu-4VLiA</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label">Categories</span>
+                                        <span class="metadata-value">News &amp; Politics</span>
+                                    </div>
                                 </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label">Video ID</span>
-                                    <span class="metadata-value">UdGk5Qv0C1M</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label">Channel ID</span>
-                                    <span class="metadata-value">UCYgpfeq5JyEo_pPmu-4VLiA</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label">Categories</span>
-                                    <span class="metadata-value">News &amp; Politics</span>
-                                </div>
+                                <p class="tag-list">
+                                    <span class="hashtag">#中國</span>
+                                    <span class="hashtag">#台灣</span>
+                                    <span class="hashtag">#兩岸</span>
+                                    <span class="hashtag">#黑素斯</span>
+                                </p>
+                                <button class="description-toggle-bottom">只顯示部分資訊</button>
                             </div>
-                            <p class="tag-list">
-                                <span class="hashtag">#中國</span>
-                                <span class="hashtag">#台灣</span>
-                                <span class="hashtag">#兩岸</span>
-                                <span class="hashtag">#黑素斯</span>
-                            </p>
                         </div>
                     </div>
                 </div>
