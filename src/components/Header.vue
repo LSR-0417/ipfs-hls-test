@@ -601,8 +601,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="header glass-panel">
-    <div class="logo-area">
+  <header class="header glass-panel" data-testid="app-header">
+    <div class="logo-area" data-testid="header-logo-area">
       <div class="hamburger">
         <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
       </div>
@@ -612,8 +612,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="search-area">
-      <div class="search-bar">
+    <div class="search-area" data-testid="header-search-area">
+      <div class="search-bar" data-testid="header-search-bar">
         <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
         <input 
           type="text" 
@@ -627,7 +627,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="actions-area">
+    <div class="actions-area" data-testid="header-actions-area">
       <button
         class="action-btn gateway-btn"
         @click="openSettings"
@@ -635,6 +635,7 @@ onBeforeUnmount(() => {
         :aria-expanded="settingsOpen ? 'true' : 'false'"
         :aria-label="`Switch gateway. Current gateway: ${currentGatewayName}`"
         :title="currentGatewayValue || currentGatewayName"
+        data-testid="gateway-button"
       >
         <span class="gateway-btn-visual" :class="`is-${currentGatewayKind}`" aria-hidden="true">
           <svg class="gateway-btn-icon" viewBox="0 0 24 24">
@@ -656,8 +657,8 @@ onBeforeUnmount(() => {
     </div>
   </header>
 
-  <div v-if="settingsOpen" class="gateway-backdrop" @click.self="settingsOpen = false">
-    <div class="gateway-dialog" role="dialog" aria-modal="true" aria-labelledby="gatewayTitle">
+  <div v-if="settingsOpen" class="gateway-backdrop" data-testid="gateway-backdrop" @click.self="settingsOpen = false">
+    <div class="gateway-dialog" role="dialog" aria-modal="true" aria-labelledby="gatewayTitle" data-testid="gateway-dialog">
       <div class="gateway-header">
         <div>
           <h3 id="gatewayTitle">Gateway Settings</h3>

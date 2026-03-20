@@ -8,13 +8,14 @@ const menuItems = [
 </script>
 
 <template>
-  <nav class="sidebar glass-panel">
-    <div class="menu">
+  <nav class="sidebar glass-panel" data-testid="app-sidebar">
+    <div class="menu" data-testid="sidebar-menu">
       <div 
         v-for="item in menuItems" 
         :key="item.id" 
         class="menu-item"
         :class="{ active: item.id === 'home' }"
+        :data-testid="`sidebar-item-${item.id}`"
       >
         <div class="icon-container">
           <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" :d="item.icon"/></svg>

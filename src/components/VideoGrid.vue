@@ -3,7 +3,7 @@ import VideoCard from './VideoCard.vue';
 </script>
 
 <template>
-  <div class="video-grid">
+  <div class="video-grid" data-testid="video-grid">
     <VideoCard 
       thumbnail="https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=400&h=225&auto=format&fit=crop"
       title="Cybernetic Dreams: The AI Awakening"
