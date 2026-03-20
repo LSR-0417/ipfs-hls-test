@@ -26,6 +26,7 @@ const gatewayProbeRefreshMs = 180000;
 const props = defineProps({
   currentGateway: { type: String, default: '' },
   currentCid: { type: String, default: '' },
+  currentLoadSequence: { type: Number, default: 0 },
 });
 const emit = defineEmits(['search', 'gateway-change']);
 
@@ -38,6 +39,7 @@ const customGateway = ref('');
 const gatewayError = ref('');
 const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
+const isGatewayProbeRunning = ref(false);
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
@@ -174,9 +176,10 @@ watch(
 );
 
 watch(
-  () => currentCidValue.value,
-  (cid) => {
+  () => [currentCidValue.value, props.currentLoadSequence],
+  ([cid]) => {
     gatewayProbeSeq += 1;
+    isGatewayProbeRunning.value = false;
     cancelScheduledGatewayProbe();
 
     if (!cid) {
@@ -185,23 +188,11 @@ watch(
       return;
     }
 
-    startGatewayProbeLoop();
+    restartGatewayProbeLoop();
     resetGatewayProbeStates();
     scheduleGatewayProbe(0);
   },
   { immediate: true }
-);
-
-watch(
-  () => [localGatewayUrl.value, customGatewayPreview.value],
-  () => {
-    if (!currentCidValue.value) {
-      resetGatewayProbeStates();
-      return;
-    }
-
-    scheduleGatewayProbe();
-  }
 );
 
 function onSearch() {
@@ -247,10 +238,6 @@ function openSettings() {
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
   settingsOpen.value = true;
-
-  if (currentCidValue.value) {
-    scheduleGatewayProbe(0);
-  }
 }
 
 function applyGateway() {
@@ -377,6 +364,11 @@ function startGatewayProbeLoop() {
   }, gatewayProbeRefreshMs);
 }
 
+function restartGatewayProbeLoop() {
+  stopGatewayProbeLoop();
+  startGatewayProbeLoop();
+}
+
 function stopGatewayProbeLoop() {
   if (!gatewayProbeInterval) return;
   clearInterval(gatewayProbeInterval);
@@ -386,7 +378,12 @@ function stopGatewayProbeLoop() {
 async function runGatewayProbe() {
   const cid = currentCidValue.value;
   const seq = ++gatewayProbeSeq;
-  if (!cid) return;
+  if (!cid) {
+    isGatewayProbeRunning.value = false;
+    return;
+  }
+
+  isGatewayProbeRunning.value = true;
 
   const candidates = builtInGateways.map((gateway) => ({
     id: gateway.id,
@@ -424,46 +421,63 @@ async function runGatewayProbe() {
   });
 
   if (!activeCandidates.length) {
+    if (seq === gatewayProbeSeq) {
+      isGatewayProbeRunning.value = false;
+    }
     return;
   }
 
-  const results = await Promise.all(
-    activeCandidates.map(async ({ id, url }) => ({
-      id,
-      url,
-      result: await probeGatewayAvailability(url, cid, {
-        onProgress(progressState) {
-          if (seq !== gatewayProbeSeq) return;
+  try {
+    const results = await Promise.all(
+      activeCandidates.map(async ({ id, url }) => ({
+        id,
+        url,
+        result: await probeGatewayAvailability(url, cid, {
+          onProgress(progressState) {
+            if (seq !== gatewayProbeSeq) return;
 
-          setGatewayProbeState(id, progressState.state, progressState.detail, progressState.durationMs, {
-            httpStatus: progressState.httpStatus,
-            retryAfterMs: progressState.retryAfterMs,
-            nextProbeAt: progressState.nextProbeAt ?? null,
-          });
-        },
-      }),
-    }))
-  );
+            setGatewayProbeState(id, progressState.state, progressState.detail, progressState.durationMs, {
+              httpStatus: progressState.httpStatus,
+              retryAfterMs: progressState.retryAfterMs,
+              nextProbeAt: progressState.nextProbeAt ?? null,
+            });
+          },
+        }),
+      }))
+    );
 
-  if (seq !== gatewayProbeSeq) return;
+    if (seq !== gatewayProbeSeq) return;
 
-  results.forEach(({ id, url, result }) => {
-    if (result.state === 'rate_limited') {
-      const nextProbeAt = setGatewayCooldown(url, result.retryAfterMs);
-      setGatewayProbeState(id, result.state, formatRateLimitedDetail(nextProbeAt), result.durationMs, {
+    results.forEach(({ id, url, result }) => {
+      if (result.state === 'rate_limited') {
+        const nextProbeAt = setGatewayCooldown(url, result.retryAfterMs);
+        setGatewayProbeState(id, result.state, formatRateLimitedDetail(nextProbeAt), result.durationMs, {
+          httpStatus: result.httpStatus,
+          retryAfterMs: result.retryAfterMs,
+          nextProbeAt,
+        });
+        return;
+      }
+
+      clearGatewayCooldown(url);
+      setGatewayProbeState(id, result.state, result.detail, result.durationMs, {
         httpStatus: result.httpStatus,
         retryAfterMs: result.retryAfterMs,
-        nextProbeAt,
       });
-      return;
-    }
-
-    clearGatewayCooldown(url);
-    setGatewayProbeState(id, result.state, result.detail, result.durationMs, {
-      httpStatus: result.httpStatus,
-      retryAfterMs: result.retryAfterMs,
     });
-  });
+  } finally {
+    if (seq === gatewayProbeSeq) {
+      isGatewayProbeRunning.value = false;
+    }
+  }
+}
+
+function forceGatewayProbe() {
+  if (!currentCidValue.value || isGatewayProbeRunning.value) return;
+
+  cancelScheduledGatewayProbe();
+  restartGatewayProbeLoop();
+  void runGatewayProbe();
 }
 
 function gatewaySignalClass(id) {
@@ -581,6 +595,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopGatewayProbeLoop();
   cancelScheduledGatewayProbe();
+  isGatewayProbeRunning.value = false;
   gatewayProbeSeq += 1;
 });
 </script>
@@ -660,6 +675,13 @@ onBeforeUnmount(() => {
           <span class="value">{{ currentGateway }}</span>
         </div>
         <span class="gateway-status-text">{{ formatProbeStateText(currentGatewayProbeState) }}</span>
+      </div>
+
+      <div class="gateway-probe-toolbar">
+        <div class="gateway-probe-note">Showing the latest background ranking. Recheck manually when needed.</div>
+        <button class="ghost-btn gateway-refresh-btn" :disabled="!currentCidValue || isGatewayProbeRunning" @click="forceGatewayProbe">
+          {{ isGatewayProbeRunning ? 'Checking...' : 'Recheck Now' }}
+        </button>
       </div>
 
       <div class="gateway-list">
@@ -1162,6 +1184,25 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.gateway-probe-toolbar {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gateway-probe-note {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.gateway-refresh-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .gateway-option {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1337,6 +1378,13 @@ onBeforeUnmount(() => {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+.ghost-btn:disabled,
+.primary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
 .primary-btn {
   background: rgba(0, 210, 255, 0.18);
   border: 1px solid rgba(0, 210, 255, 0.4);
@@ -1471,6 +1519,10 @@ onBeforeUnmount(() => {
   }
   .gateway-current {
     padding: 8px 10px;
+  }
+  .gateway-probe-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
   .gateway-option {
     grid-template-columns: auto 1fr;

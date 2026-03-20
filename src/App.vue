@@ -21,6 +21,7 @@ const currentShouldAutoplay = ref(false);
 const playerRef = ref(null);
 const currentCid = ref('');
 const currentGateway = ref(DEFAULT_GATEWAY);
+const currentLoadSequence = ref(0);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -163,6 +164,7 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   currentCid.value = cid;
   currentGateway.value = nextGateway;
+  currentLoadSequence.value += 1;
   persistGateway(nextGateway, window);
 
   const ipfsBaseUrl = buildGatewayAssetUrl(nextGateway, cid);
@@ -216,6 +218,7 @@ function readConfiguredGateway() {
     @search="onSearchCid"
     :current-gateway="currentGateway"
     :current-cid="currentCid"
+    :current-load-sequence="currentLoadSequence"
     @gateway-change="onGatewayChange"
   />
   <div class="app-container">
