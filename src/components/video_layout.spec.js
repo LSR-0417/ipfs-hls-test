@@ -31,12 +31,12 @@ describe('VideoInfo layout contract', () => {
     const template = descriptor.template?.content || '';
     const style = getFirstStyleContent(descriptor);
 
-    const infoRowIndex = template.indexOf('<div class="info-row">');
-    const creatorInfoIndex = template.indexOf('<div class="creator-info">');
-    const actionsIndex = template.indexOf('<div class="actions">');
+    const infoRowIndex = template.indexOf('<div ref="infoRowRef" class="info-row" data-testid="video-info-row">');
+    const creatorInfoIndex = template.indexOf('<div ref="creatorInfoRef" class="creator-info" data-testid="video-info-creator">');
+    const actionsIndex = template.indexOf('<div ref="actionsRef" class="actions" :class="{ \'actions-wrapped\': actionsWrapped }" data-testid="video-info-actions">');
     const descriptionIndex = template.indexOf('<div class="description glass-panel">');
 
-    expect(template).toContain('<div class="video-info">');
+    expect(template).toContain('<div class="video-info" data-testid="video-info">');
     expect(template).not.toContain('<div class="video-info glass-panel">');
     expect(infoRowIndex).toBeGreaterThan(-1);
     expect(creatorInfoIndex).toBeGreaterThan(infoRowIndex);
@@ -70,6 +70,30 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('text-overflow: ellipsis;');
     expect(style).toContain('border-radius: 12px;');
     expect(style).toContain('.stats-panel:hover .stats-tooltip');
+  });
+
+  it('moves download into an overflow menu and lets share collapse before like or dislike', () => {
+    const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<div ref="moreMenuRef" class="more-actions" data-action-item data-testid="video-info-more-actions">');
+    expect(template).toContain('class="actions-menu glass-panel" role="menu"');
+    expect(template).toContain('v-for="item in overflowMenuItems"');
+    expect(template).toContain("v-if=\"showShareButton\"");
+    expect(template).toContain('class="action-group glass-btn" data-action-item');
+
+    expect(script).toContain("const responsiveActionOrder = [shareActionId];");
+    expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
+    expect(script).toContain("const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));");
+    expect(script).toContain('function resolveHiddenActionIds()');
+    expect(script).toContain('const availableActionsWidth = Math.max(0, infoRowWidth - creatorWidth - infoGap);');
+
+    expect(style).toContain('.actions-wrapped');
+    expect(style).toContain('.action-measure');
+    expect(style).toContain('.actions-menu');
+    expect(style).toContain('justify-content: flex-start;');
   });
 
   it('collapses the description by default and exposes explicit expand and collapse controls', () => {

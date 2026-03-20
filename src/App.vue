@@ -241,11 +241,11 @@ function readConfiguredGateway() {
   />
   <div class="app-container">
     <Sidebar />
-    <main class="main-content">
+    <main class="main-content" data-testid="main-content">
       
-      <div class="video-layout">
-        <div class="primary-column">
-          <div class="player-container glass-panel">
+      <div class="video-layout" data-testid="video-layout">
+        <div class="primary-column" data-testid="primary-column">
+          <div class="player-container glass-panel" data-testid="player-container">
             <VideoPlayer
               ref="playerRef"
               :m3u8-url="currentM3u8Url"
@@ -262,8 +262,8 @@ function readConfiguredGateway() {
           <VideoInfo :cid="currentCid" :ipfs-base-url="currentIpfsBaseUrl" :video-info="currentVideoInfo" />
         </div>
         
-        <div class="secondary-column">
-          <div class="recommendations-title">Recommended Next</div>
+        <div class="secondary-column" data-testid="secondary-column">
+          <div class="recommendations-title" data-testid="recommendations-title">Recommended Next</div>
           <VideoGrid />
         </div>
       </div>
