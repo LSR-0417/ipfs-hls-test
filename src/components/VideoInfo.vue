@@ -1,11 +1,13 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   buildSidecarAssetUrl,
   createDefaultVideoInfo,
+  extractDescriptionHashtags,
   formatRelativeUploadTime,
   formatUploadDate,
   formatUploadDateTooltip,
+  linkifyDescription,
 } from '../utils/videoInfo';
 
 const defaultDescription =
@@ -23,6 +25,11 @@ const props = defineProps({
 
 const shareSuccess = ref(false);
 const avatarLoadFailed = ref(false);
+const isDescriptionExpanded = ref(false);
+const collapsedDescription = ref('');
+const descriptionMeasureText = ref('');
+const descriptionMeasureRef = ref(null);
+const descriptionMeasureTextRef = ref(null);
 
 const displayUploader = computed(() => props.videoInfo.uploader || 'IPFS Node');
 const displayChannelText = computed(() => {
@@ -51,19 +58,8 @@ const displayUploadDateTooltip = computed(() => formatUploadDateTooltip(props.vi
 const displayRelativeUploadTime = computed(() => {
   return formatRelativeUploadTime(props.videoInfo.uploadDate) || formatUploadDate(props.videoInfo.uploadDate);
 });
-const displayStatsItems = computed(() => {
-  const items = [];
-
-  if (displayRelativeUploadTime.value) {
-    items.push({
-      value: displayRelativeUploadTime.value,
-      className: 'stats-upload-time',
-    });
-  }
-
-  return items;
-});
 const displayDescription = computed(() => props.videoInfo.description || defaultDescription);
+const descriptionHashtags = computed(() => extractDescriptionHashtags(displayDescription.value, { limit: 3 }));
 const displayTags = computed(() => {
   const tags = props.videoInfo.tags.length > 0 ? props.videoInfo.tags : defaultTags;
   return tags;
@@ -80,11 +76,36 @@ const metadataItems = computed(() => {
 
   return items.filter((item) => item.value);
 });
+const hasExpandableDescription = computed(() => {
+  const description = displayDescription.value;
+
+  return (
+    metadataItems.value.length > 0 ||
+    props.videoInfo.tags.length > 0 ||
+    description.length > 180 ||
+    description.includes('\n')
+  );
+});
+const showFullDescription = computed(() => isDescriptionExpanded.value || !hasExpandableDescription.value);
+const showStatsPanel = computed(() => Boolean(displayRelativeUploadTime.value) || descriptionHashtags.value.length > 0);
+const fullDescriptionSegments = computed(() => linkifyDescription(displayDescription.value));
+const collapsedDescriptionSegments = computed(() => linkifyDescription(collapsedDescription.value));
+let descriptionMeasureSeq = 0;
 
 watch(
   () => [props.cid, props.ipfsBaseUrl],
   () => {
     avatarLoadFailed.value = false;
+    isDescriptionExpanded.value = false;
+    void updateCollapsedDescription();
+  },
+  { immediate: true }
+);
+
+watch(
+  [displayDescription, metadataItems, () => props.videoInfo.tags.join('|')],
+  () => {
+    void updateCollapsedDescription();
   },
   { immediate: true }
 );
@@ -154,6 +175,159 @@ function formatTag(tag) {
 function handleAvatarError() {
   avatarLoadFailed.value = true;
 }
+
+function expandDescription() {
+  isDescriptionExpanded.value = true;
+}
+
+function collapseDescription() {
+  isDescriptionExpanded.value = false;
+}
+
+function descriptionSegmentKey(segment, index) {
+  return `${segment.type}-${segment.text}-${index}`;
+}
+
+function normalizeCollapsedDescription(text) {
+  return String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function trimCollapsedDescription(text, length) {
+  const sliced = text.slice(0, length).trimEnd();
+
+  if (length >= text.length) return sliced;
+
+  const boundaryIndex = Math.max(
+    sliced.lastIndexOf('\n'),
+    sliced.lastIndexOf(' '),
+    sliced.lastIndexOf('。'),
+    sliced.lastIndexOf('，'),
+    sliced.lastIndexOf('、'),
+    sliced.lastIndexOf(','),
+    sliced.lastIndexOf('.'),
+    sliced.lastIndexOf('!'),
+    sliced.lastIndexOf('?'),
+    sliced.lastIndexOf('；'),
+    sliced.lastIndexOf(';')
+  );
+
+  if (boundaryIndex >= Math.floor(sliced.length * 0.6)) {
+    return sliced.slice(0, boundaryIndex).trimEnd();
+  }
+
+  return sliced;
+}
+
+async function measureCollapsedDescription(text, maxHeight, seq) {
+  descriptionMeasureText.value = text;
+  await nextTick();
+
+  if (seq !== descriptionMeasureSeq) return false;
+
+  const measureEl = descriptionMeasureRef.value;
+  const measureTextEl = descriptionMeasureTextRef.value;
+  if (!measureEl || !measureTextEl) return false;
+
+  if (measureEl.scrollHeight > maxHeight) return false;
+
+  const lineRects = getLineRects(measureTextEl);
+  if (lineRects.length < 3) return true;
+
+  const lastLineRect = lineRects[lineRects.length - 1];
+  return lastLineRect.width <= measureEl.clientWidth / 2 + 1;
+}
+
+async function updateCollapsedDescription() {
+  const seq = ++descriptionMeasureSeq;
+  const normalizedDescription = normalizeCollapsedDescription(displayDescription.value);
+
+  collapsedDescription.value = normalizedDescription;
+  descriptionMeasureText.value = normalizedDescription;
+
+  if (!hasExpandableDescription.value) return;
+
+  await nextTick();
+  if (seq !== descriptionMeasureSeq) return;
+
+  const measureEl = descriptionMeasureRef.value;
+  if (!measureEl) return;
+
+  const lineHeight = parseFloat(window.getComputedStyle(measureEl).lineHeight) || 22;
+  const maxHeight = lineHeight * 3 + 1;
+
+  if (await measureCollapsedDescription(normalizedDescription, maxHeight, seq)) {
+    collapsedDescription.value = normalizedDescription;
+    return;
+  }
+
+  let low = 0;
+  let high = normalizedDescription.length;
+  let best = '';
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = trimCollapsedDescription(normalizedDescription, mid);
+    const fits = candidate && (await measureCollapsedDescription(candidate, maxHeight, seq));
+
+    if (seq !== descriptionMeasureSeq) return;
+
+    if (fits) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  collapsedDescription.value = best || normalizedDescription.slice(0, 1);
+}
+
+function handleWindowResize() {
+  void updateCollapsedDescription();
+}
+
+function getLineRects(element) {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+
+  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  const lines = [];
+
+  for (const rect of rects) {
+    const existingLine = lines.find((line) => Math.abs(line.top - rect.top) < 1);
+
+    if (existingLine) {
+      existingLine.left = Math.min(existingLine.left, rect.left);
+      existingLine.right = Math.max(existingLine.right, rect.right);
+      existingLine.width = existingLine.right - existingLine.left;
+      continue;
+    }
+
+    lines.push({
+      top: rect.top,
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+    });
+  }
+
+  return lines.sort((a, b) => a.top - b.top);
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleWindowResize);
+  void updateCollapsedDescription();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleWindowResize);
+});
 </script>
 
 <template>
@@ -190,26 +364,83 @@ function handleAvatarError() {
       </div>
     </div>
 
-    <div class="description glass-panel">
-      <div v-if="displayStatsItems.length > 0" class="stats-panel">
-        <p class="stats">
-          <template v-for="(item, index) in displayStatsItems" :key="`${item.value}-${index}`">
-            <span v-if="index > 0" class="stats-separator">•</span>
-            <span class="stats-item" :class="item.className">{{ item.value }}</span>
-          </template>
-        </p>
-        <span v-if="displayUploadDateTooltip" class="stats-tooltip">{{ displayUploadDateTooltip }}</span>
-      </div>
-      <p class="desc-text">{{ displayDescription }}</p>
-      <div v-if="metadataItems.length > 0" class="metadata-grid">
-        <div v-for="item in metadataItems" :key="item.label" class="metadata-item">
-          <span class="metadata-label">{{ item.label }}</span>
-          <span class="metadata-value">{{ item.value }}</span>
+    <div class="description-shell">
+      <div class="description glass-panel">
+        <div v-if="showStatsPanel" class="stats-panel">
+          <div class="stats">
+            <span v-if="displayRelativeUploadTime" class="stats-item stats-upload-time">{{ displayRelativeUploadTime }}</span>
+            <span v-if="displayRelativeUploadTime && descriptionHashtags.length > 0" class="stats-separator">•</span>
+            <span v-if="descriptionHashtags.length > 0" class="stats-tags">
+              <span
+                v-for="tag in descriptionHashtags"
+                :key="tag"
+                class="stats-hashtag"
+                :title="`#${tag}`"
+              >#{{ tag }}</span>
+            </span>
+          </div>
+          <span v-if="displayUploadDateTooltip" class="stats-tooltip">{{ displayUploadDateTooltip }}</span>
         </div>
+        <p v-if="showFullDescription" class="desc-text">
+          <component
+            :is="segment.type === 'link' ? 'a' : 'span'"
+            v-for="(segment, index) in fullDescriptionSegments"
+            :key="descriptionSegmentKey(segment, index)"
+            :class="{ 'desc-link': segment.type === 'link' }"
+            :href="segment.type === 'link' ? segment.href : undefined"
+            :target="segment.type === 'link' ? '_blank' : undefined"
+            :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
+          >{{ segment.text }}</component>
+        </p>
+        <p v-else class="desc-text desc-text-collapsed-inline">
+          <component
+            :is="segment.type === 'link' ? 'a' : 'span'"
+            v-for="(segment, index) in collapsedDescriptionSegments"
+            :key="descriptionSegmentKey(segment, index)"
+            :class="{ 'desc-link': segment.type === 'link' }"
+            :href="segment.type === 'link' ? segment.href : undefined"
+            :target="segment.type === 'link' ? '_blank' : undefined"
+            :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
+          >{{ segment.text }}</component>
+          <span class="desc-inline-ellipsis">...</span>
+          <button
+            type="button"
+            class="description-toggle description-toggle-inline-text"
+            :aria-expanded="isDescriptionExpanded"
+            @click="expandDescription"
+          >
+            更多資訊
+          </button>
+        </p>
+        <p
+          v-if="hasExpandableDescription && !isDescriptionExpanded"
+          ref="descriptionMeasureRef"
+          aria-hidden="true"
+          class="desc-text desc-text-measure"
+        >
+          <span ref="descriptionMeasureTextRef">{{ descriptionMeasureText }}</span>
+          <span class="desc-inline-ellipsis">...</span>
+          <span class="description-toggle-inline-text">更多資訊</span>
+        </p>
+        <div v-if="showFullDescription && metadataItems.length > 0" class="metadata-grid">
+          <div v-for="item in metadataItems" :key="item.label" class="metadata-item">
+            <span class="metadata-label">{{ item.label }}</span>
+            <span class="metadata-value">{{ item.value }}</span>
+          </div>
+        </div>
+        <p v-if="showFullDescription" class="tag-list">
+          <span v-for="(tag, index) in displayTags" :key="`${tag}-${index}`" class="hashtag">#{{ formatTag(tag) }}</span>
+        </p>
+        <button
+          v-if="hasExpandableDescription && isDescriptionExpanded"
+          type="button"
+          class="description-toggle description-toggle-bottom"
+          :aria-expanded="isDescriptionExpanded"
+          @click="collapseDescription"
+        >
+          只顯示部分資訊
+        </button>
       </div>
-      <p class="tag-list">
-        <span v-for="(tag, index) in displayTags" :key="`${tag}-${index}`" class="hashtag">#{{ formatTag(tag) }}</span>
-      </p>
     </div>
   </div>
 </template>
@@ -352,6 +583,12 @@ function handleAvatarError() {
   color: var(--text-primary);
 }
 
+.description-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .stats-panel {
   width: 100%;
   padding: 0;
@@ -400,6 +637,26 @@ function handleAvatarError() {
   color: inherit;
 }
 
+.stats-tags {
+  display: inline-flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.stats-hashtag {
+  display: inline-block;
+  max-width: min(18ch, 28vw);
+  color: var(--accent-cyan);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .stats-upload-time {
   text-decoration: none;
 }
@@ -410,8 +667,61 @@ function handleAvatarError() {
 
 .desc-text {
   color: var(--text-secondary);
+  margin: 12px 0 0;
   white-space: pre-line;
   overflow-wrap: anywhere;
+}
+
+.desc-link {
+  color: var(--accent-cyan);
+  text-decoration: none;
+}
+
+.desc-link:hover {
+  text-decoration: underline;
+}
+
+.description-toggle {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.description-toggle:hover {
+  text-decoration: underline;
+}
+
+.description-toggle-bottom {
+  margin-top: 16px;
+  align-self: flex-start;
+}
+
+.description-toggle-inline-text {
+  display: inline;
+  margin-left: 6px;
+  vertical-align: baseline;
+}
+
+.desc-text-collapsed-inline {
+  line-height: 1.5;
+}
+
+.desc-inline-ellipsis {
+  display: inline;
+}
+
+.desc-text-measure {
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .metadata-grid {
@@ -491,6 +801,10 @@ function handleAvatarError() {
 
   .hide-mobile {
     display: none;
+  }
+
+  .stats-hashtag {
+    max-width: min(16ch, 44vw);
   }
 }
 </style>

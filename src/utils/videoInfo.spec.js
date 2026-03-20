@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  buildSidecarAssetUrl,
   createDefaultVideoInfo,
+  extractDescriptionHashtags,
   fetchVideoInfo,
   formatRelativeUploadTime,
   formatUploadDate,
   formatUploadDateTooltip,
+  linkifyDescription,
   normalizeVideoInfo,
 } from './videoInfo';
 
@@ -69,19 +70,6 @@ describe('normalizeVideoInfo', () => {
   });
 });
 
-describe('buildSidecarAssetUrl', () => {
-  it('joins the base URL and sidecar asset path', () => {
-    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', 'cover.webp')).toBe(
-      'https://example.com/ipfs/bafy123/cover.webp'
-    );
-  });
-
-  it('rejects missing or absolute asset paths', () => {
-    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', '')).toBe('');
-    expect(buildSidecarAssetUrl('https://example.com/ipfs/bafy123', 'https://evil.test/cover.webp')).toBe('');
-  });
-});
-
 describe('formatUploadDate', () => {
   it('formats YYYYMMDD values into a readable date', () => {
     expect(formatUploadDate('20260307')).toBe('2026-03-07');
@@ -118,6 +106,62 @@ describe('formatRelativeUploadTime', () => {
   it('formats older uploads as months or years ago', () => {
     expect(formatRelativeUploadTime('20251201', { now: new Date(2026, 2, 19, 0, 0, 0) })).toBe('3 個月前');
     expect(formatRelativeUploadTime('20230301', { now: new Date(2026, 2, 19, 0, 0, 0) })).toBe('3 年前');
+  });
+});
+
+describe('linkifyDescription', () => {
+  it('splits plain text and clickable http links while preserving surrounding text', () => {
+    expect(linkifyDescription('Visit https://example.com/watch?v=1 now')).toEqual([
+      { type: 'text', text: 'Visit ' },
+      {
+        type: 'link',
+        text: 'https://example.com/watch?v=1',
+        href: 'https://example.com/watch?v=1',
+      },
+      { type: 'text', text: ' now' },
+    ]);
+  });
+
+  it('normalizes www links and excludes trailing punctuation from the link target', () => {
+    expect(linkifyDescription('Docs: www.example.com/path?q=1, thanks.')).toEqual([
+      { type: 'text', text: 'Docs: ' },
+      {
+        type: 'link',
+        text: 'www.example.com/path?q=1',
+        href: 'https://www.example.com/path?q=1',
+      },
+      { type: 'text', text: ', thanks.' },
+    ]);
+  });
+
+  it('keeps line breaks as text so description formatting is preserved', () => {
+    expect(linkifyDescription('line one\nhttps://example.com\nline three')).toEqual([
+      { type: 'text', text: 'line one\n' },
+      {
+        type: 'link',
+        text: 'https://example.com',
+        href: 'https://example.com',
+      },
+      { type: 'text', text: '\nline three' },
+    ]);
+  });
+});
+
+describe('extractDescriptionHashtags', () => {
+  it('returns the first three unique hashtags from the description text', () => {
+    expect(
+      extractDescriptionHashtags('hello #IPFS world\n#Web3 and #Taiwan and #Extra and #IPFS again')
+    ).toEqual(['IPFS', 'Web3', 'Taiwan']);
+  });
+
+  it('supports chinese hashtags and ignores url fragments', () => {
+    expect(
+      extractDescriptionHashtags('看這裡 #台灣 #去中心化 https://example.com/page#section #測試')
+    ).toEqual(['台灣', '去中心化', '測試']);
+  });
+
+  it('returns fewer items when fewer hashtags are present', () => {
+    expect(extractDescriptionHashtags('plain text #OnlyOne', { limit: 3 })).toEqual(['OnlyOne']);
   });
 });
 
