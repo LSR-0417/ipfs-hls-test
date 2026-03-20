@@ -178,34 +178,7 @@ function areActionIdsEqual(currentIds, nextIds) {
   return currentIds.every((id, index) => id === nextIds[index]);
 }
 
-function isCreatorAndActionsSeparated() {
-  const creatorRect = creatorInfoRef.value?.getBoundingClientRect();
-  const actionsRect = actionsRef.value?.getBoundingClientRect();
-
-  if (!creatorRect || !actionsRect) {
-    return false;
-  }
-
-  return actionsRect.top >= creatorRect.bottom - 1;
-}
-
-function areActionItemsWrapped() {
-  if (!actionsRef.value) return false;
-
-  const actionItems = Array.from(actionsRef.value.querySelectorAll('[data-action-item]'));
-  if (actionItems.length < 2) {
-    return false;
-  }
-
-  const firstTop = actionItems[0].getBoundingClientRect().top;
-  return actionItems.slice(1).some((item) => item.getBoundingClientRect().top - firstTop > 1);
-}
-
-function hasWrappedActions() {
-  return isCreatorAndActionsSeparated() || areActionItemsWrapped();
-}
-
-function resolveHiddenActionIds() {
+function resolveLayout() {
   const infoRowWidth = getElementWidth(infoRowRef.value);
   const creatorWidth = getElementWidth(creatorInfoRef.value);
   const actionGroupWidth = getElementWidth(actionGroupRef.value);
@@ -215,7 +188,7 @@ function resolveHiddenActionIds() {
   const actionsGap = getFlexGap(actionsRef.value);
 
   if (!infoRowWidth || !creatorWidth || !actionGroupWidth || !moreActionsWidth) {
-    return hiddenActionIds.value;
+    return { hiddenActionIds: hiddenActionIds.value, actionsWrapped: actionsWrapped.value };
   }
 
   const availableActionsWidth = Math.max(0, infoRowWidth - creatorWidth - infoGap);
@@ -234,7 +207,18 @@ function resolveHiddenActionIds() {
     nextHiddenActionIds.push(actionId);
   }
 
-  return nextHiddenActionIds;
+  let totalVisibleWidth = actionGroupWidth;
+  for (const actionId of responsiveActionOrder) {
+    if (!nextHiddenActionIds.includes(actionId)) {
+      totalVisibleWidth += actionsGap + (actionId === shareActionId ? shareWidth : 0);
+    }
+  }
+  // The 'more' menu is always present because 'download' is always in the overflow menu
+  totalVisibleWidth += actionsGap + moreActionsWidth;
+
+  const isWrapped = totalVisibleWidth > availableActionsWidth + 1;
+
+  return { hiddenActionIds: nextHiddenActionIds, actionsWrapped: isWrapped };
 }
 
 async function syncActionLayout() {
@@ -246,16 +230,23 @@ async function syncActionLayout() {
   }
 
   syncInProgress = true;
-  const nextHiddenActionIds = resolveHiddenActionIds();
-  if (!areActionIdsEqual(hiddenActionIds.value, nextHiddenActionIds)) {
-    hiddenActionIds.value = nextHiddenActionIds;
-  }
-  await nextTick();
+  const layout = resolveLayout();
+  let layoutChanged = false;
 
-  const wrapped = hasWrappedActions();
-  if (actionsWrapped.value !== wrapped) {
-    actionsWrapped.value = wrapped;
+  if (!areActionIdsEqual(hiddenActionIds.value, layout.hiddenActionIds)) {
+    hiddenActionIds.value = layout.hiddenActionIds;
+    layoutChanged = true;
   }
+
+  if (actionsWrapped.value !== layout.actionsWrapped) {
+    actionsWrapped.value = layout.actionsWrapped;
+    layoutChanged = true;
+  }
+
+  if (layoutChanged) {
+    await nextTick();
+  }
+  
   syncInProgress = false;
 
   if (syncPending) {
