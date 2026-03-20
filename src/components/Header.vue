@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
+  isDisabledGatewayInput,
   isPrivateHostname,
   normalizeGatewayUrl,
   persistCustomGateway,
@@ -235,6 +236,10 @@ function openSettings() {
     syncLocalFromGateway(props.currentGateway);
   }
   customGateway.value = readStoredCustomGateway(window) || customGateway.value;
+  if (isDisabledGatewayInput(customGateway.value)) {
+    customGateway.value = '';
+    persistCustomGateway('', window);
+  }
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
   settingsOpen.value = true;
@@ -256,6 +261,10 @@ function applyGateway() {
       persistLocalGateway();
     }
   } else if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
+    if (isDisabledGatewayInput(customGateway.value)) {
+      gatewayError.value = 'Pinata gateway has been removed. Please choose another gateway.';
+      return;
+    }
     nextGateway = normalizeGatewayUrl(customGateway.value);
     if (!nextGateway) {
       gatewayError.value = 'Enter a valid public HTTPS gateway URL that ends with /ipfs/.';
@@ -589,6 +598,10 @@ onMounted(() => {
     restoreLocalGateway();
   }
   customGateway.value = readStoredCustomGateway(window);
+  if (isDisabledGatewayInput(customGateway.value)) {
+    customGateway.value = '';
+    persistCustomGateway('', window);
+  }
   resetGatewayProbeStates();
 });
 
@@ -646,9 +659,6 @@ onBeforeUnmount(() => {
           <span class="gateway-btn-action">Gateway</span>
           <span class="gateway-btn-name">{{ currentGatewayName }}</span>
         </span>
-      </button>
-      <button class="action-btn icon-btn" title="Notifications">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
       </button>
       <div class="avatar">
         <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=b6e3f4" alt="User" />

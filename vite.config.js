@@ -1,11 +1,40 @@
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+
+const packageJson = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+);
+
+function readGitMeta(command, fallback = '') {
+  try {
+    return execSync(command, {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim();
+  } catch (_) {
+    return fallback;
+  }
+}
+
+const worktreeRoot =
+  readGitMeta('git rev-parse --show-toplevel', process.cwd()) || process.cwd();
+const branchName = readGitMeta('git rev-parse --abbrev-ref HEAD');
+const worktreeName = path.basename(worktreeRoot);
 
 export default defineConfig({
   server: {
     host: true, // Listen on all local IPs
   },
   plugins: [vue()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+    __APP_BRANCH__: JSON.stringify(branchName),
+    __APP_WORKTREE__: JSON.stringify(worktreeName),
+  },
   base: '/ipfs-hls-test/',
   resolve: {
     alias: {

@@ -4,13 +4,8 @@ export const gatewayProbeTimeoutMs = 5000;
 export const gatewayRateLimitBackoffMs = 30 * 60 * 1000;
 export const gatewayProbeSegmentSampleCount = 3;
 export const gatewayProbeReadyThresholdMs = 2000;
+const disabledGatewayHostnames = new Set(['gateway.pinata.cloud']);
 export const publicGatewayOptions = [
-  {
-    id: 'pinata',
-    label: 'Pinata',
-    desc: 'Reliable and usually fast',
-    url: 'https://gateway.pinata.cloud/ipfs/',
-  },
   {
     id: 'dweb',
     label: 'dweb.link',
@@ -92,10 +87,7 @@ function persistStoredValue(key, value, target) {
 }
 
 export function isPrivateHostname(hostname) {
-  const normalized = String(hostname || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^\[|\]$/g, '');
+  const normalized = normalizeHostname(hostname);
 
   if (!normalized) return false;
   if (normalized === 'localhost' || normalized === '::1') return true;
@@ -105,6 +97,23 @@ export function isPrivateHostname(hostname) {
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)) return true;
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
   return false;
+}
+
+export function isDisabledGatewayInput(input, options = {}) {
+  const { defaultProtocol = 'https:' } = options;
+  const trimmed = typeof input === 'string' ? input.trim() : '';
+  if (!trimmed) return false;
+
+  const candidate =
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `${defaultProtocol}//${trimmed.replace(/^\/\//, '')}`;
+
+  try {
+    return disabledGatewayHostnames.has(normalizeHostname(new URL(candidate).hostname));
+  } catch (_) {
+    return false;
+  }
 }
 
 export function normalizeGatewayUrl(input, options = {}) {
@@ -121,6 +130,10 @@ export function normalizeGatewayUrl(input, options = {}) {
   try {
     parsed = new URL(candidate);
   } catch (_) {
+    return '';
+  }
+
+  if (disabledGatewayHostnames.has(normalizeHostname(parsed.hostname))) {
     return '';
   }
 
@@ -571,4 +584,11 @@ function defaultNow() {
   }
 
   return Date.now();
+}
+
+function normalizeHostname(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
 }
