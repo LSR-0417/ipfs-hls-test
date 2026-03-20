@@ -65,7 +65,7 @@ ipfs-hls-test/
 │           ├── 質量切換
 │           └── 字幕偏好管理
 ├── index.html                       # HTML 入口
-├── vite.config.js                   # Vite 配置
+├── vite.config.mjs                  # Vite 配置
 ├── package.json                     # 項目配置與依賴
 └── README.md                        # 本文件
 ```
@@ -182,10 +182,6 @@ npm run preview
 {
   label: "ipfs.io",
   url: "https://ipfs.io"
-},
-{
-  label: "gateway.pinata.cloud",
-  url: "https://gateway.pinata.cloud"
 }
 ```
 

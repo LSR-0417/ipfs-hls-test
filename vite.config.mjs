@@ -14,7 +14,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['video.js', 'videojs-contrib-quality-levels'],
+    include: ['video.js'],
     esbuildOptions: {
       sourcemap: false,
     },

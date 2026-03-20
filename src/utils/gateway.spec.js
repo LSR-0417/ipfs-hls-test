@@ -6,6 +6,7 @@ import {
   gatewayRateLimitBackoffMs,
   gatewayProbeSegmentSampleCount,
   gatewayStorageKey,
+  isDisabledGatewayInput,
   isPrivateHostname,
   normalizeGatewayUrl,
   persistCustomGateway,
@@ -153,6 +154,11 @@ describe('normalizeGatewayUrl', () => {
     expect(normalizeGatewayUrl('https://example.com/')).toBe('https://example.com/ipfs/');
     expect(normalizeGatewayUrl('https://example.com/ipns/')).toBe('');
     expect(normalizeGatewayUrl('https://example.com/ipfs/some-cid')).toBe('');
+  });
+
+  it('rejects disabled gateways such as Pinata', () => {
+    expect(isDisabledGatewayInput('https://gateway.pinata.cloud/ipfs/')).toBe(true);
+    expect(normalizeGatewayUrl('https://gateway.pinata.cloud/ipfs/')).toBe('');
   });
 });
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
+  isDisabledGatewayInput,
   isPrivateHostname,
   normalizeGatewayUrl,
   persistCustomGateway,
@@ -235,6 +236,10 @@ function openSettings() {
     syncLocalFromGateway(props.currentGateway);
   }
   customGateway.value = readStoredCustomGateway(window) || customGateway.value;
+  if (isDisabledGatewayInput(customGateway.value)) {
+    customGateway.value = '';
+    persistCustomGateway('', window);
+  }
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
   settingsOpen.value = true;
@@ -256,6 +261,10 @@ function applyGateway() {
       persistLocalGateway();
     }
   } else if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
+    if (isDisabledGatewayInput(customGateway.value)) {
+      gatewayError.value = 'Pinata gateway has been removed. Please choose another gateway.';
+      return;
+    }
     nextGateway = normalizeGatewayUrl(customGateway.value);
     if (!nextGateway) {
       gatewayError.value = 'Enter a valid public HTTPS gateway URL that ends with /ipfs/.';
@@ -589,6 +598,10 @@ onMounted(() => {
     restoreLocalGateway();
   }
   customGateway.value = readStoredCustomGateway(window);
+  if (isDisabledGatewayInput(customGateway.value)) {
+    customGateway.value = '';
+    persistCustomGateway('', window);
+  }
   resetGatewayProbeStates();
 });
 

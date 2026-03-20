@@ -51,7 +51,7 @@ curl http://127.0.0.1:8080/ipfs/QmUvC2Fe... (替換為實際的CID)
 
 1. 確保運行了 `npm run dev`
 2. 應用應該自動通過Vite代理連接到本地網關
-3. 代理路由配置在 `vite.config.js` 中
+3. 代理路由配置在 `vite.config.mjs` 中
 
 **方法B：配置IPFS網關CORS**
 編輯IPFS配置文件 (~/.ipfs/config)：

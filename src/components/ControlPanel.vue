@@ -11,7 +11,6 @@ const settingsOpen = ref(false);
 
 const gateways = [
   { url: 'http://127.0.0.1:8080/ipfs/', label: '本地 (最穩定/測試首選)' },
-  { url: 'https://gateway.pinata.cloud/ipfs/', label: 'Pinata (速度快/推薦)' },
   { url: 'https://dweb.link/ipfs/', label: 'DWeb.link (官方推薦)' },
   { url: 'https://ipfs.io/ipfs/', label: 'IPFS.io (標準網關)' },
 ];

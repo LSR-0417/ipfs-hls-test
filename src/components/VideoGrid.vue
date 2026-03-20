@@ -9,7 +9,7 @@ import VideoCard from './VideoCard.vue';
       title="Cybernetic Dreams: The AI Awakening"
       duration="22:40"
       views="1.5M views"
-      isNeon="true"
+      :is-neon="true"
     />
     <VideoCard 
       thumbnail="https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=400&h=225&auto=format&fit=crop"
