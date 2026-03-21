@@ -93,6 +93,7 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('.actions-wrapped');
     expect(style).toContain('.action-measure');
     expect(style).toContain('.actions-menu');
+    expect(style).toContain('border-radius: 20px;');
     expect(style).toContain('justify-content: flex-start;');
   });
 
