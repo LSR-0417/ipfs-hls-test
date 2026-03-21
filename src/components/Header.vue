@@ -28,7 +28,7 @@ const props = defineProps({
   currentGateway: { type: String, default: '' },
   currentCid: { type: String, default: '' },
   currentLoadSequence: { type: Number, default: 0 },
-  sidebarCollapsed: { type: Boolean, default: false },
+  sidebarOpen: { type: Boolean, default: false },
 });
 const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);
 
@@ -835,9 +835,10 @@ onBeforeUnmount(() => {
         type="button"
         class="hamburger"
         @click="toggleSidebar"
-        :aria-label="sidebarCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'"
-        :aria-pressed="sidebarCollapsed ? 'true' : 'false'"
-        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        aria-controls="app-sidebar"
+        :aria-expanded="sidebarOpen ? 'true' : 'false'"
+        :aria-label="sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'"
+        :title="sidebarOpen ? 'Close menu' : 'Open menu'"
         data-testid="header-sidebar-toggle"
       >
         <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>

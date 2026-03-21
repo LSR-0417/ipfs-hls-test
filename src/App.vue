@@ -42,7 +42,7 @@ const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
 const activeView = ref('home');
 const historyItems = ref([]);
-const isSidebarCollapsed = ref(false);
+const isSidebarOpen = ref(false);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -403,6 +403,7 @@ function onViewSelect(nextView) {
     persistCurrentHistory();
     refreshHistory();
     activeView.value = 'history';
+    closeSidebar();
     return;
   }
 
@@ -420,6 +421,7 @@ function onViewSelect(nextView) {
   }
 
   activeView.value = 'home';
+  closeSidebar();
 }
 
 function onHistorySelect(item) {
@@ -442,7 +444,11 @@ function onPlaybackSnapshot(snapshot) {
 }
 
 function toggleSidebar() {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+  isSidebarOpen.value = !isSidebarOpen.value;
+}
+
+function closeSidebar() {
+  isSidebarOpen.value = false;
 }
 </script>
 
@@ -452,12 +458,20 @@ function toggleSidebar() {
     :current-gateway="currentGateway"
     :current-cid="currentCid"
     :current-load-sequence="currentLoadSequence"
-    :sidebar-collapsed="isSidebarCollapsed"
+    :sidebar-open="isSidebarOpen"
     @gateway-change="onGatewayChange"
     @toggle-sidebar="toggleSidebar"
   />
   <div class="app-container">
-    <Sidebar :active-view="activeView" :collapsed="isSidebarCollapsed" @view-select="onViewSelect" />
+    <button
+      v-if="isSidebarOpen"
+      type="button"
+      class="sidebar-backdrop"
+      aria-label="Close navigation menu"
+      data-testid="sidebar-backdrop"
+      @click="closeSidebar"
+    ></button>
+    <Sidebar :active-view="activeView" :open="isSidebarOpen" @view-select="onViewSelect" />
     <main class="main-content" data-testid="main-content">
       <template v-if="activeView === 'history'">
         <HistoryPage

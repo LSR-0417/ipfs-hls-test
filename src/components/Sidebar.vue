@@ -6,7 +6,7 @@ const props = defineProps({
     type: String,
     default: 'home',
   },
-  collapsed: {
+  open: {
     type: Boolean,
     default: false,
   },
@@ -52,7 +52,7 @@ function handleMenuItemClick(item) {
 </script>
 
 <template>
-  <nav class="sidebar glass-panel" :class="{ 'is-collapsed': collapsed }" data-testid="app-sidebar">
+  <nav id="app-sidebar" class="sidebar glass-panel" :class="{ 'is-open': open }" data-testid="app-sidebar">
     <div class="menu" data-testid="sidebar-menu">
       <button
         v-for="item in menuItems" 
@@ -61,7 +61,6 @@ function handleMenuItemClick(item) {
         :class="{ active: isMenuItemActive(item), 'is-disabled': !item.targetView }"
         :data-testid="`sidebar-item-${item.id}`"
         type="button"
-        :title="collapsed ? item.label : undefined"
         :disabled="!item.targetView"
         @click="handleMenuItemClick(item)"
       >
@@ -90,18 +89,34 @@ function handleMenuItemClick(item) {
 <style scoped>
 .sidebar {
   width: clamp(212px, 20vw, var(--sidebar-width));
-  height: 100%;
-  border-radius: 0;
+  height: calc(100vh - var(--header-height));
+  position: fixed;
+  top: var(--header-height);
+  left: 0;
+  border-radius: 0 20px 20px 0;
   border-top: none;
   border-left: none;
   border-bottom: none;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 16px 12px;
-  z-index: 90;
+  padding: 18px 12px 16px;
+  z-index: 110;
   overflow: hidden;
-  transition: width 0.24s ease, padding 0.24s ease;
+  transform: translateX(calc(-100% - 18px));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.28s ease,
+    opacity 0.2s ease,
+    box-shadow 0.24s ease;
+}
+
+.sidebar.is-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 28px 56px rgba(0, 0, 0, 0.34);
 }
 
 .menu {
@@ -152,7 +167,6 @@ function handleMenuItemClick(item) {
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: gap 0.24s ease, justify-content 0.24s ease;
 }
 
 .icon-container {
@@ -175,9 +189,6 @@ function handleMenuItemClick(item) {
 .label {
   display: block;
   font-size: 1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.18s ease, width 0.24s ease;
 }
 
 .sidebar-build-info {
@@ -186,13 +197,6 @@ function handleMenuItemClick(item) {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: grid;
   gap: 10px;
-  max-height: 200px;
-  overflow: hidden;
-  transition:
-    opacity 0.18s ease,
-    max-height 0.24s ease,
-    padding 0.24s ease,
-    border-color 0.24s ease;
 }
 
 .sidebar-build-info.is-dev {
@@ -220,47 +224,26 @@ function handleMenuItemClick(item) {
   word-break: break-word;
 }
 
-.sidebar.is-collapsed {
-  width: var(--sidebar-collapsed-width);
-  padding: 16px 10px;
-}
-
-.sidebar.is-collapsed .menu-item {
-  padding: 12px;
-}
-
-.sidebar.is-collapsed .menu-item-main {
-  justify-content: center;
-  gap: 0;
-}
-
-.sidebar.is-collapsed .label {
-  opacity: 0;
-  width: 0;
-}
-
-.sidebar.is-collapsed .sidebar-build-info {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  border-top-color: transparent;
-  pointer-events: none;
-}
-
 @media (max-width: 768px) {
   .sidebar {
     position: fixed;
+    top: auto;
     bottom: 0;
     left: 0;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
     width: 100%;
     height: 60px;
     flex-direction: row;
     padding: 0;
+    border-radius: 0;
     border-right: none;
     border-top: 1px solid var(--panel-border);
     justify-content: center;
     background: rgba(13, 15, 26, 0.9);
     backdrop-filter: blur(20px);
+    box-shadow: none;
   }
 
   .menu {
@@ -284,25 +267,6 @@ function handleMenuItemClick(item) {
   
   .label {
     font-size: 0.65rem;
-  }
-
-  .sidebar.is-collapsed {
-    width: 100%;
-    padding: 0;
-  }
-
-  .sidebar.is-collapsed .menu-item {
-    padding: 4px;
-  }
-
-  .sidebar.is-collapsed .menu-item-main {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .sidebar.is-collapsed .label {
-    opacity: 1;
-    width: auto;
   }
 
   .sidebar-build-info {

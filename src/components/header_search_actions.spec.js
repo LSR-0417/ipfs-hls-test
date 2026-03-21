@@ -49,7 +49,7 @@ describe('Header search action button', () => {
 });
 
 describe('Sidebar toggle contract', () => {
-  it('wires the header hamburger button to the collapsible sidebar state', () => {
+  it('wires the header hamburger button to a left drawer sidebar state', () => {
     const appDescriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const headerDescriptor = readDescriptor(new URL('./Header.vue', import.meta.url));
     const sidebarDescriptor = readDescriptor(new URL('./Sidebar.vue', import.meta.url));
@@ -63,25 +63,30 @@ describe('Sidebar toggle contract', () => {
     const sidebarScript = sidebarDescriptor.scriptSetup?.content || '';
     const sidebarStyle = getStyleContent(sidebarDescriptor);
 
-    expect(appScript).toContain('const isSidebarCollapsed = ref(false);');
+    expect(appScript).toContain('const isSidebarOpen = ref(false);');
     expect(appScript).toContain('function toggleSidebar() {');
-    expect(appScript).toContain('isSidebarCollapsed.value = !isSidebarCollapsed.value;');
-    expect(appTemplate).toContain(':sidebar-collapsed="isSidebarCollapsed"');
+    expect(appScript).toContain('isSidebarOpen.value = !isSidebarOpen.value;');
+    expect(appScript).toContain('function closeSidebar() {');
+    expect(appScript).toContain('isSidebarOpen.value = false;');
+    expect(appTemplate).toContain('class="sidebar-backdrop"');
+    expect(appTemplate).toContain('data-testid="sidebar-backdrop"');
+    expect(appTemplate).toContain(':sidebar-open="isSidebarOpen"');
     expect(appTemplate).toContain('@toggle-sidebar="toggleSidebar"');
-    expect(appTemplate).toContain('<Sidebar :active-view="activeView" :collapsed="isSidebarCollapsed" @view-select="onViewSelect" />');
+    expect(appTemplate).toContain('<Sidebar :active-view="activeView" :open="isSidebarOpen" @view-select="onViewSelect" />');
 
-    expect(headerScript).toContain("sidebarCollapsed: { type: Boolean, default: false },");
+    expect(headerScript).toContain("sidebarOpen: { type: Boolean, default: false },");
     expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);");
     expect(headerScript).toContain('function toggleSidebar() {');
+    expect(headerTemplate).toContain('aria-controls="app-sidebar"');
     expect(headerTemplate).toContain('data-testid="header-sidebar-toggle"');
     expect(headerTemplate).toContain('@click="toggleSidebar"');
-    expect(headerTemplate).toContain(":aria-pressed=\"sidebarCollapsed ? 'true' : 'false'\"");
+    expect(headerTemplate).toContain(":aria-expanded=\"sidebarOpen ? 'true' : 'false'\"");
     expect(headerStyle).toContain('.hamburger:focus-visible');
 
-    expect(sidebarScript).toContain("collapsed: {\n    type: Boolean,\n    default: false,\n  },");
-    expect(sidebarTemplate).toContain(":class=\"{ 'is-collapsed': collapsed }\"");
-    expect(sidebarTemplate).toContain(':title="collapsed ? item.label : undefined"');
-    expect(sidebarStyle).toContain('.sidebar.is-collapsed');
-    expect(sidebarStyle).toContain('.sidebar.is-collapsed .label');
+    expect(sidebarScript).toContain("open: {\n    type: Boolean,\n    default: false,\n  },");
+    expect(sidebarTemplate).toContain('id="app-sidebar"');
+    expect(sidebarTemplate).toContain(":class=\"{ 'is-open': open }\"");
+    expect(sidebarStyle).toContain('.sidebar.is-open');
+    expect(sidebarStyle).toContain('transform: translateX(calc(-100% - 18px));');
   });
 });
