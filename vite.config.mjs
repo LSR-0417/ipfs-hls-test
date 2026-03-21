@@ -1,8 +1,8 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const packageJson = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8')
@@ -47,5 +47,8 @@ export default defineConfig({
     esbuildOptions: {
       sourcemap: false,
     },
+  },
+  test: {
+    exclude: [...configDefaults.exclude, '.worktrees/**'],
   },
 });
