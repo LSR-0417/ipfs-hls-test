@@ -2,9 +2,8 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
-import VideoPlayer from './components/VideoPlayer.vue';
-import VideoInfo from './components/VideoInfo.vue';
-import VideoGrid from './components/VideoGrid.vue';
+import WatchPage from './components/WatchPage.vue';
+import RecommendationsPage from './components/RecommendationsPage.vue';
 import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
 import { fetchSubtitleManifest, resolveSubtitleTracks } from './utils/subtitles';
@@ -21,7 +20,6 @@ const currentVideoInfo = ref(createDefaultVideoInfo());
 const currentSubtitleTracks = ref([]);
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
-const playerRef = ref(null);
 const currentCid = ref('');
 const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
@@ -242,103 +240,21 @@ function readConfiguredGateway() {
   <div class="app-container">
     <Sidebar />
     <main class="main-content" data-testid="main-content">
-      
-      <div class="video-layout" data-testid="video-layout">
-        <div class="primary-column" data-testid="primary-column">
-          <div class="player-container glass-panel" data-testid="player-container">
-            <VideoPlayer
-              ref="playerRef"
-              :m3u8-url="currentM3u8Url"
-              :poster-url="currentPosterUrl"
-              :subtitles="currentSubtitleTracks"
-              :start-time="currentStartTime"
-              :should-autoplay="currentShouldAutoplay"
-              @status-update="onStatusUpdate"
-              @levels-loaded="onLevelsLoaded"
-            />
-          </div>
-          <div v-if="currentVideoInfo.title" class="player-title">{{ currentVideoInfo.title }}</div>
-
-          <VideoInfo :cid="currentCid" :ipfs-base-url="currentIpfsBaseUrl" :video-info="currentVideoInfo" />
-        </div>
-        
-        <div class="secondary-column" data-testid="secondary-column">
-          <div class="recommendations-title" data-testid="recommendations-title">Recommended Next</div>
-          <VideoGrid />
-        </div>
-      </div>
-
+      <WatchPage
+        :cid="currentCid"
+        :ipfs-base-url="currentIpfsBaseUrl"
+        :m3u8-url="currentM3u8Url"
+        :poster-url="currentPosterUrl"
+        :subtitles="currentSubtitleTracks"
+        :start-time="currentStartTime"
+        :should-autoplay="currentShouldAutoplay"
+        :video-info="currentVideoInfo"
+        @status-update="onStatusUpdate"
+        @levels-loaded="onLevelsLoaded"
+      />
+      <RecommendationsPage />
     </main>
   </div>
 </template>
 
 <style src="./App.css"></style>
-<style scoped>
-.video-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-@media (min-width: 1024px) {
-  .video-layout {
-    flex-direction: row;
-    align-items: flex-start;
-  }
-}
-
-.primary-column {
-  flex: 1;
-  min-width: 0; /* allows text truncation if needed inside */
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.secondary-column {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-@media (min-width: 1024px) {
-  .secondary-column {
-    width: 380px;
-    flex-shrink: 0;
-  }
-}
-
-.player-container {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 12px;
-  background: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.player-container :deep(> div) {
-  width: 100%;
-  height: 100%;
-}
-
-.player-title {
-  color: var(--text-primary);
-  font-size: 1.2rem;
-  font-weight: 700;
-  line-height: 1.35;
-  padding: 0 4px;
-}
-
-.recommendations-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-</style>

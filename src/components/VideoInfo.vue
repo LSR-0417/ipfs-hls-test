@@ -681,83 +681,81 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="description-shell">
-      <div class="description glass-panel">
-        <div v-if="showStatsPanel" class="stats-panel">
-          <div class="stats">
-            <span v-if="displayRelativeUploadTime" class="stats-item stats-upload-time">{{ displayRelativeUploadTime }}</span>
-            <span v-if="displayRelativeUploadTime && descriptionHashtags.length > 0" class="stats-separator">•</span>
-            <span v-if="descriptionHashtags.length > 0" class="stats-tags">
-              <span
-                v-for="tag in descriptionHashtags"
-                :key="tag"
-                class="stats-hashtag"
-                :title="`#${tag}`"
-              >#{{ tag }}</span>
-            </span>
-          </div>
-          <span v-if="displayUploadDateTooltip" class="stats-tooltip">{{ displayUploadDateTooltip }}</span>
+    <div class="description glass-panel">
+      <div v-if="showStatsPanel" class="stats-panel">
+        <div class="stats">
+          <span v-if="displayRelativeUploadTime" class="stats-item stats-upload-time">{{ displayRelativeUploadTime }}</span>
+          <span v-if="displayRelativeUploadTime && descriptionHashtags.length > 0" class="stats-separator">•</span>
+          <span v-if="descriptionHashtags.length > 0" class="stats-tags">
+            <span
+              v-for="tag in descriptionHashtags"
+              :key="tag"
+              class="stats-hashtag"
+              :title="`#${tag}`"
+            >#{{ tag }}</span>
+          </span>
         </div>
-        <p v-if="showFullDescription" class="desc-text">
-          <component
-            :is="segment.type === 'link' ? 'a' : 'span'"
-            v-for="(segment, index) in fullDescriptionSegments"
-            :key="descriptionSegmentKey(segment, index)"
-            :class="{ 'desc-link': segment.type === 'link' }"
-            :href="segment.type === 'link' ? segment.href : undefined"
-            :target="segment.type === 'link' ? '_blank' : undefined"
-            :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
-          >{{ segment.text }}</component>
-        </p>
-        <p v-else class="desc-text desc-text-collapsed-inline">
-          <component
-            :is="segment.type === 'link' ? 'a' : 'span'"
-            v-for="(segment, index) in collapsedDescriptionSegments"
-            :key="descriptionSegmentKey(segment, index)"
-            :class="{ 'desc-link': segment.type === 'link' }"
-            :href="segment.type === 'link' ? segment.href : undefined"
-            :target="segment.type === 'link' ? '_blank' : undefined"
-            :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
-          >{{ segment.text }}</component>
-          <span class="desc-inline-ellipsis">...</span>
-          <button
-            type="button"
-            class="description-toggle description-toggle-inline-text"
-            :aria-expanded="isDescriptionExpanded"
-            @click="expandDescription"
-          >
-            更多資訊
-          </button>
-        </p>
-        <p
-          v-if="hasExpandableDescription && !isDescriptionExpanded"
-          ref="descriptionMeasureRef"
-          aria-hidden="true"
-          class="desc-text desc-text-measure"
-        >
-          <span ref="descriptionMeasureTextRef">{{ descriptionMeasureText }}</span>
-          <span class="desc-inline-ellipsis">...</span>
-          <span class="description-toggle-inline-text">更多資訊</span>
-        </p>
-        <div v-if="showFullDescription && metadataItems.length > 0" class="metadata-grid">
-          <div v-for="item in metadataItems" :key="item.label" class="metadata-item">
-            <span class="metadata-label">{{ item.label }}</span>
-            <span class="metadata-value">{{ item.value }}</span>
-          </div>
-        </div>
-        <p v-if="showFullDescription" class="tag-list">
-          <span v-for="(tag, index) in displayTags" :key="`${tag}-${index}`" class="hashtag">#{{ formatTag(tag) }}</span>
-        </p>
-        <button
-          v-if="hasExpandableDescription && isDescriptionExpanded"
-          type="button"
-          class="description-toggle description-toggle-bottom"
-          :aria-expanded="isDescriptionExpanded"
-          @click="collapseDescription"
-        >
-          只顯示部分資訊
-        </button>
+        <span v-if="displayUploadDateTooltip" class="stats-tooltip">{{ displayUploadDateTooltip }}</span>
       </div>
+      <p v-if="showFullDescription" class="desc-text">
+        <component
+          :is="segment.type === 'link' ? 'a' : 'span'"
+          v-for="(segment, index) in fullDescriptionSegments"
+          :key="descriptionSegmentKey(segment, index)"
+          :class="{ 'desc-link': segment.type === 'link' }"
+          :href="segment.type === 'link' ? segment.href : undefined"
+          :target="segment.type === 'link' ? '_blank' : undefined"
+          :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
+        >{{ segment.text }}</component>
+      </p>
+      <p v-else class="desc-text desc-text-collapsed-inline">
+        <component
+          :is="segment.type === 'link' ? 'a' : 'span'"
+          v-for="(segment, index) in collapsedDescriptionSegments"
+          :key="descriptionSegmentKey(segment, index)"
+          :class="{ 'desc-link': segment.type === 'link' }"
+          :href="segment.type === 'link' ? segment.href : undefined"
+          :target="segment.type === 'link' ? '_blank' : undefined"
+          :rel="segment.type === 'link' ? 'noopener noreferrer nofollow' : undefined"
+        >{{ segment.text }}</component>
+        <span class="desc-inline-ellipsis">...</span>
+        <button
+          type="button"
+          class="description-toggle description-toggle-inline-text"
+          :aria-expanded="isDescriptionExpanded"
+          @click="expandDescription"
+        >
+          更多資訊
+        </button>
+      </p>
+      <p
+        v-if="hasExpandableDescription && !isDescriptionExpanded"
+        ref="descriptionMeasureRef"
+        aria-hidden="true"
+        class="desc-text desc-text-measure"
+      >
+        <span ref="descriptionMeasureTextRef">{{ descriptionMeasureText }}</span>
+        <span class="desc-inline-ellipsis">...</span>
+        <span class="description-toggle-inline-text">更多資訊</span>
+      </p>
+      <div v-if="showFullDescription && metadataItems.length > 0" class="metadata-grid">
+        <div v-for="item in metadataItems" :key="item.label" class="metadata-item">
+          <span class="metadata-label">{{ item.label }}</span>
+          <span class="metadata-value">{{ item.value }}</span>
+        </div>
+      </div>
+      <p v-if="showFullDescription" class="tag-list">
+        <span v-for="(tag, index) in displayTags" :key="`${tag}-${index}`" class="hashtag">#{{ formatTag(tag) }}</span>
+      </p>
+      <button
+        v-if="hasExpandableDescription && isDescriptionExpanded"
+        type="button"
+        class="description-toggle description-toggle-bottom"
+        :aria-expanded="isDescriptionExpanded"
+        @click="collapseDescription"
+      >
+        只顯示部分資訊
+      </button>
     </div>
 
     <div ref="creatorTextMeasureRef" class="creator-text creator-text-measure" aria-hidden="true">
@@ -1001,12 +999,6 @@ onBeforeUnmount(() => {
   font-size: 0.95rem;
   line-height: 1.5;
   color: var(--text-primary);
-}
-
-.description-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .stats-panel {

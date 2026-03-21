@@ -12,16 +12,83 @@ function getFirstStyleContent(descriptor) {
 }
 
 describe('App layout contract', () => {
-  it('renders the player title row before VideoInfo and no longer uses the old status message slot', () => {
+  it('renders watch and recommendations directly inside main-content and no longer uses the old status message slot', () => {
     const descriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const template = descriptor.template?.content || '';
+    const appStyle = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
-    const playerTitleIndex = template.indexOf('<div v-if="currentVideoInfo.title" class="player-title">');
-    const videoInfoIndex = template.indexOf('<VideoInfo');
+    const watchPageIndex = template.indexOf('<WatchPage');
+    const recommendationsPageIndex = template.indexOf('<RecommendationsPage');
 
-    expect(playerTitleIndex).toBeGreaterThan(-1);
-    expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
+    expect(template).toContain('<main class="main-content" data-testid="main-content">');
+    expect(watchPageIndex).toBeGreaterThan(-1);
+    expect(recommendationsPageIndex).toBeGreaterThan(watchPageIndex);
     expect(template).not.toContain('id="status"');
+    expect(template).not.toContain('class="video-layout"');
+    expect(template).not.toContain('data-testid="primary-column"');
+    expect(template).not.toContain('data-testid="secondary-column"');
+    expect(template).not.toContain('data-testid="page-shell"');
+    expect(appStyle).toContain('.main-content');
+    expect(appStyle).toContain('padding: 0;');
+    expect(appStyle).toContain('flex-direction: column;');
+    expect(appStyle).toContain('gap: 0;');
+    expect(appStyle).toContain('@media (min-width: 1024px)');
+    expect(appStyle).toContain('align-items: flex-start;');
+  });
+});
+
+describe('WatchPage layout contract', () => {
+  it('keeps the player, title, and video info inside a dedicated watch page container', () => {
+    const descriptor = readDescriptor(new URL('./WatchPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    const playerContainerIndex = template.indexOf('<VideoPlayer');
+    const playerTitleIndex = template.indexOf('<h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>');
+    const videoInfoIndex = template.indexOf('<VideoInfo :cid="cid" :ipfs-base-url="ipfsBaseUrl" :video-info="videoInfo" />');
+
+    expect(template).toContain('<section class="watch-page" data-testid="watch-page">');
+    expect(template).toContain('class="player-container glass-panel"');
+    expect(template).toContain('data-testid="player-container"');
+    expect(playerContainerIndex).toBeGreaterThan(-1);
+    expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
+    expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
+    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded']);");
+    expect(script).toContain("import VideoPlayer from './VideoPlayer.vue';");
+    expect(script).toContain("import VideoInfo from './VideoInfo.vue';");
+    expect(style).toContain('.watch-page');
+    expect(style).toContain('flex: 1;');
+    expect(style).toContain('min-width: 0;');
+    expect(style).toContain('margin: 0 0 0 16px;');
+    expect(style).toContain('padding: 12px 16px 0 0;');
+    expect(style).toContain('.watch-page > *');
+    expect(style).toContain('width: 100%;');
+    expect(style).toContain('.player-container');
+    expect(style).toContain('.player-title');
+    expect(style).toContain('padding: 0;');
+  });
+});
+
+describe('RecommendationsPage layout contract', () => {
+  it('keeps the recommendations list inside its own page container', () => {
+    const descriptor = readDescriptor(new URL('./RecommendationsPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<section class="recommendations-page" data-testid="recommendations-page">');
+    expect(template).toContain('<h2 class="recommendations-title" data-testid="recommendations-title">Recommended Next</h2>');
+    expect(template).toContain('<VideoGrid />');
+    expect(script).toContain("import VideoGrid from './VideoGrid.vue';");
+    expect(style).toContain('.recommendations-page');
+    expect(style).toContain('flex-direction: column;');
+    expect(style).toContain('margin: 0 0 0 16px;');
+    expect(style).toContain('padding: 12px 16px 0 0;');
+    expect(style).toContain('.recommendations-page > *');
+    expect(style).toContain('width: 100%;');
+    expect(style).toContain('flex: 0 0 380px;');
+    expect(style).toContain('.recommendations-title');
   });
 });
 
@@ -134,7 +201,7 @@ describe('VideoInfo layout contract', () => {
     const tagListIndex = template.indexOf('<p v-if="showFullDescription" class="tag-list">');
     const collapseButtonIndex = template.indexOf('class="description-toggle description-toggle-bottom"');
 
-    expect(template).toContain('<div class="description-shell">');
+    expect(template).not.toContain('<div class="description-shell">');
     expect(template).toContain("v-if=\"hasExpandableDescription && !isDescriptionExpanded\"");
     expect(template).toContain("v-if=\"hasExpandableDescription && isDescriptionExpanded\"");
     expect(template).toContain('<span class="desc-inline-ellipsis">...</span>');
@@ -159,7 +226,6 @@ describe('VideoInfo layout contract', () => {
     expect(script).toContain('function expandDescription() {');
     expect(script).toContain('function collapseDescription() {');
 
-    expect(style).toContain('.description-shell');
     expect(style).toContain('.desc-text-collapsed-inline');
     expect(style).toContain('.desc-inline-ellipsis');
     expect(style).toContain('.desc-text-measure');

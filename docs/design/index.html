@@ -36,6 +36,48 @@
             overflow: hidden;
         }
 
+        .doc-notice {
+            padding: 12px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .doc-notice.historical {
+            background: #4c2328;
+            color: #fff;
+        }
+
+        .doc-notice.current-docs {
+            background: rgba(0, 210, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .doc-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .doc-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(0, 210, 255, 0.28);
+            background: rgba(0, 210, 255, 0.08);
+            color: var(--accent-cyan);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .doc-link:hover {
+            background: rgba(0, 210, 255, 0.16);
+            border-color: rgba(0, 210, 255, 0.42);
+        }
+
         /* Utility */
         .glass-panel {
             background: var(--panel-bg);
@@ -202,8 +244,16 @@
     </style>
 </head>
 <body>
-    <div style="padding:12px 24px; background:#4c2328; color:#fff; font-size:0.9rem; line-height:1.5; border-bottom:1px solid rgba(255,255,255,0.1);">
+    <div class="doc-notice historical">
         Historical mockup only. The current implementation differs in several places: gateway switching uses generic player status text, Local Node settings are dev-only, and no dedicated gateway-switch overlay is implemented.
+    </div>
+    <div class="doc-notice current-docs">
+        Current design references for the implemented player page:
+        <div class="doc-links">
+            <a class="doc-link" href="../PLAYER_PAGE_DESIGN_GUIDELINES.md">Player Page Design Guidelines</a>
+            <a class="doc-link" href="../CONTAINER_DESIGN_GUIDELINES.md">Container Design Guidelines</a>
+            <a class="doc-link" href="../PLAYER_SRS.md">Player SRS</a>
+        </div>
     </div>
     <header class="header glass-panel">
         <div class="logo-area">

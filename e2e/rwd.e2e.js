@@ -51,16 +51,16 @@ test.describe('Responsive Page Shell', () => {
       const playerRatio = playerBox.width / playerBox.height;
       expect(Math.abs(playerRatio - 16 / 9)).toBeLessThan(0.08);
 
-      const primaryBox = await getBox(page.getByTestId('primary-column'));
-      const secondaryBox = await getBox(page.getByTestId('secondary-column'));
+      const watchBox = await getBox(page.getByTestId('watch-page'));
+      const recommendationsBox = await getBox(page.getByTestId('recommendations-page'));
 
       if (viewport.desktop) {
-        expect(secondaryBox.x).toBeGreaterThan(primaryBox.x + primaryBox.width * 0.55);
-        expect(Math.abs(secondaryBox.y - primaryBox.y)).toBeLessThanOrEqual(24);
-        expect(secondaryBox.width).toBeGreaterThan(340);
-        expect(secondaryBox.width).toBeLessThan(420);
+        expect(recommendationsBox.x).toBeGreaterThan(watchBox.x + watchBox.width * 0.55);
+        expect(Math.abs(recommendationsBox.y - watchBox.y)).toBeLessThanOrEqual(24);
+        expect(recommendationsBox.width).toBeGreaterThan(340);
+        expect(recommendationsBox.width).toBeLessThan(420);
       } else {
-        expect(secondaryBox.y).toBeGreaterThan(primaryBox.y + primaryBox.height - 4);
+        expect(recommendationsBox.y).toBeGreaterThan(watchBox.y + watchBox.height - 4);
       }
 
       const sidebarStyle = await page.getByTestId('app-sidebar').evaluate((node) => {
