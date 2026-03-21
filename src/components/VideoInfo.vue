@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import SubtitleDialog from './SubtitleDialog.vue';
 import {
   buildSidecarAssetUrl,
   createDefaultVideoInfo,
@@ -19,15 +20,26 @@ const defaultTags = ['IPFS', 'Web3', 'Decentralized'];
 const props = defineProps({
   cid: { type: String, default: '' },
   ipfsBaseUrl: { type: String, default: '' },
+  remoteSubtitles: {
+    type: Array,
+    default: () => [],
+  },
+  importedSubtitles: {
+    type: Array,
+    default: () => [],
+  },
   videoInfo: {
     type: Object,
     default: () => createDefaultVideoInfo(),
   },
 });
 
+const emit = defineEmits(['subtitle-import', 'subtitle-remove']);
+
 const shareDialogRef = ref(null);
 const shareUrlInputRef = ref(null);
 const isShareDialogOpen = ref(false);
+const isSubtitleDialogOpen = ref(false);
 const shareIncludeTime = ref(false);
 const sharePlaybackTime = ref(0);
 const shareUrlText = ref('');
@@ -58,9 +70,10 @@ let syncPending = false;
 let shareCopySuccessTimeout = 0;
 
 const shareActionId = 'share';
+const subtitleActionId = 'subtitles';
 const downloadActionId = 'download';
 const responsiveActionOrder = [shareActionId];
-const overflowActionOrder = [shareActionId, downloadActionId];
+const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];
 
 const displayUploader = computed(() => props.videoInfo.uploader || 'IPFS Node');
 const displayChannelText = computed(() => {
@@ -94,10 +107,16 @@ const downloadUrl = computed(() => buildSidecarAssetUrl(props.ipfsBaseUrl, 'inde
 const shareTimeLabel = computed(() => formatShareStartTime(sharePlaybackTime.value));
 const overflowMenuItems = computed(() => {
   return overflowActionOrder
-    .filter((actionId) => actionId === downloadActionId || hiddenActionIds.value.includes(actionId))
+    .filter(
+      (actionId) =>
+        actionId === subtitleActionId ||
+        actionId === downloadActionId ||
+        hiddenActionIds.value.includes(actionId)
+    )
     .map((actionId) => ({
       id: actionId,
-      label: actionId === shareActionId ? 'Share' : 'Download',
+      label:
+        actionId === shareActionId ? 'Share' : actionId === subtitleActionId ? 'Subtitles' : 'Download',
       disabled: actionId === downloadActionId && !downloadUrl.value,
     }));
 });
@@ -142,6 +161,7 @@ watch(
     isDescriptionExpanded.value = false;
     isMoreMenuOpen.value = false;
     closeShareDialog();
+    closeSubtitleDialog();
     sharePlaybackTime.value = 0;
     shareIncludeTime.value = false;
     void updateCollapsedDescription();
@@ -346,6 +366,11 @@ function handleDocumentPointerDown(event) {
 
 function handleDocumentKeydown(event) {
   if (event.key === 'Escape') {
+    if (isSubtitleDialogOpen.value) {
+      closeSubtitleDialog();
+      return;
+    }
+
     if (isShareDialogOpen.value) {
       closeShareDialog();
       return;
@@ -373,6 +398,11 @@ function handleOverflowAction(actionId) {
 
   if (actionId === shareActionId) {
     openShareDialog();
+    return;
+  }
+
+  if (actionId === subtitleActionId) {
+    openSubtitleDialog();
     return;
   }
 
@@ -408,6 +438,24 @@ function closeShareDialog() {
   clearShareCopySuccessTimeout();
 }
 
+function closeSubtitleDialog() {
+  isSubtitleDialogOpen.value = false;
+}
+
+function openSubtitleDialog() {
+  closeMoreMenu();
+  closeShareDialog();
+  isSubtitleDialogOpen.value = true;
+}
+
+function handleSubtitleImport(importedTrack) {
+  emit('subtitle-import', importedTrack);
+}
+
+function handleSubtitleRemove(trackId) {
+  emit('subtitle-remove', trackId);
+}
+
 function openShareDialog() {
   if (!props.cid) {
     alert('無有效的 CID！');
@@ -415,6 +463,7 @@ function openShareDialog() {
   }
 
   closeMoreMenu();
+  closeSubtitleDialog();
   sharePlaybackTime.value = getCurrentPlaybackTime(window);
   shareIncludeTime.value = sharePlaybackTime.value > 0;
   shareCopySuccess.value = false;
@@ -738,6 +787,7 @@ onBeforeUnmount(() => {
               @click="handleOverflowAction(item.id)"
             >
               <svg v-if="item.id === shareActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+              <svg v-else-if="item.id === subtitleActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 5h16v10H7.17L4 18.17V5zm2 2v6.34L6.34 13H18V7H6zm2 1h8v2H8V8zm0 3h5v2H8v-2z"/></svg>
               <svg v-else class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 6.83V16h2V6.83l3.09 3.08 1.41-1.41L12 2z"/></svg>
               <span class="menu-item-label">{{ item.label }}</span>
             </button>
@@ -827,6 +877,15 @@ onBeforeUnmount(() => {
       <div class="creator-name">{{ displayUploader }} <svg viewBox="0 0 24 24" width="16" height="16" class="verified"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div>
       <div class="subscribers">{{ displayChannelText }}</div>
     </div>
+
+    <SubtitleDialog
+      :open="isSubtitleDialogOpen"
+      :remote-subtitles="remoteSubtitles"
+      :imported-subtitles="importedSubtitles"
+      @close="closeSubtitleDialog"
+      @subtitle-import="handleSubtitleImport"
+      @subtitle-remove="handleSubtitleRemove"
+    />
 
     <div
       v-if="isShareDialogOpen"

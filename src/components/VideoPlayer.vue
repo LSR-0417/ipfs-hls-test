@@ -68,14 +68,14 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import { applyPlaybackHotkey } from '../utils/playback';
+import { formatTime } from '../utils/time';
+import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
   resolveToggledSubtitlePreference,
 } from '../utils/subtitles';
-import { formatTime } from '../utils/time';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 if (typeof window !== 'undefined') {
@@ -111,10 +111,11 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded']);
+const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);
 
 const SEEK_STEP_SECONDS = 5;
 const LONG_SEEK_STEP_SECONDS = 10;
+const PROGRESS_EMIT_STEP_SECONDS = 5;
 
 const hotkeyHelpSections = Object.freeze([
   {
@@ -188,12 +189,13 @@ const hotkeyHelpSections = Object.freeze([
 const hotkeyHelpDialogRef = ref(null);
 const isHotkeyHelpOpen = ref(false);
 const videoRef = ref(null);
-
 let player = null;
 let sourceSeq = 0;
 let isApplyingSubtitlePreference = false;
 let textTrackList = null;
 let lastFocusedElement = null;
+let isSwitchingSource = false;
+let lastProgressSnapshotTime = -1;
 
 function isHelpHotkeyEvent(event) {
   return event?.key === '?' || (event?.code === 'Slash' && event?.shiftKey === true);
@@ -347,6 +349,8 @@ function beginSourceSwitch() {
   if (!player) return 0;
 
   const seq = ++sourceSeq;
+  isSwitchingSource = true;
+  resetSnapshotTracking();
   isApplyingSubtitlePreference = true;
   player.pause();
   clearTracks();
@@ -425,6 +429,8 @@ function setupSourceAndTracks(m3u8Url, subtitles) {
     if (props.startTime > 0) {
       player.currentTime(props.startTime);
     }
+    isSwitchingSource = false;
+    emitPlaybackSnapshot('loadedmetadata', { force: true });
     if (props.shouldAutoplay) {
       player.one('canplay', () => {
         if (!player || seq !== sourceSeq) return;
@@ -510,6 +516,60 @@ function handleGlobalKeydown(event) {
   });
 }
 
+function resetSnapshotTracking() {
+  lastProgressSnapshotTime = -1;
+}
+
+function emitPlaybackSnapshot(reason, options = {}) {
+  if (!player || isSwitchingSource) return;
+
+  const snapshot = getPlayerPlaybackSnapshot(player);
+  if (!options.force && reason === 'timeupdate') {
+    if (snapshot.hasEnded || snapshot.time <= 0) {
+      return;
+    }
+
+    if (lastProgressSnapshotTime >= 0 && snapshot.time - lastProgressSnapshotTime < PROGRESS_EMIT_STEP_SECONDS) {
+      return;
+    }
+  }
+
+  if (reason === 'timeupdate') {
+    lastProgressSnapshotTime = snapshot.time;
+  } else if (snapshot.time > 0 || snapshot.hasEnded) {
+    lastProgressSnapshotTime = snapshot.time;
+  }
+
+  emit('playback-snapshot', {
+    ...snapshot,
+  });
+}
+
+function handlePauseSnapshot() {
+  emitPlaybackSnapshot('pause', { force: true });
+}
+
+function handleEndedSnapshot() {
+  emitPlaybackSnapshot('ended', { force: true });
+}
+
+function handleSeekedSnapshot() {
+  emitPlaybackSnapshot('seeked', { force: true });
+}
+
+function handleTimeupdateSnapshot() {
+  emitPlaybackSnapshot('timeupdate');
+}
+
+function bindPlaybackSnapshotListeners() {
+  if (!player) return;
+
+  player.on('pause', handlePauseSnapshot);
+  player.on('ended', handleEndedSnapshot);
+  player.on('seeked', handleSeekedSnapshot);
+  player.on('timeupdate', handleTimeupdateSnapshot);
+}
+
 function syncPoster(posterUrl) {
   if (!player) return;
 
@@ -540,6 +600,7 @@ function initPlayer() {
       },
     },
     () => {
+      bindPlaybackSnapshotListeners();
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
@@ -604,6 +665,7 @@ onBeforeUnmount(() => {
     textTrackList = null;
   }
   if (player) {
+    emitPlaybackSnapshot('before-unmount', { force: true });
     player.dispose();
   }
 });

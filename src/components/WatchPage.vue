@@ -24,6 +24,14 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  remoteSubtitles: {
+    type: Array,
+    default: () => [],
+  },
+  importedSubtitles: {
+    type: Array,
+    default: () => [],
+  },
   startTime: {
     type: Number,
     default: 0,
@@ -38,7 +46,7 @@ defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded']);
+const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-import', 'subtitle-remove']);
 
 function handleStatusUpdate(nextStatus) {
   emit('status-update', nextStatus);
@@ -46,6 +54,18 @@ function handleStatusUpdate(nextStatus) {
 
 function handleLevelsLoaded(levels) {
   emit('levels-loaded', levels);
+}
+
+function handlePlaybackSnapshot(snapshot) {
+  emit('playback-snapshot', snapshot);
+}
+
+function handleSubtitleImport(importedTrack) {
+  emit('subtitle-import', importedTrack);
+}
+
+function handleSubtitleRemove(trackId) {
+  emit('subtitle-remove', trackId);
 }
 </script>
 
@@ -62,9 +82,18 @@ function handleLevelsLoaded(levels) {
       :should-autoplay="shouldAutoplay"
       @status-update="handleStatusUpdate"
       @levels-loaded="handleLevelsLoaded"
+      @playback-snapshot="handlePlaybackSnapshot"
     />
     <h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>
-    <VideoInfo :cid="cid" :ipfs-base-url="ipfsBaseUrl" :video-info="videoInfo" />
+    <VideoInfo
+      :cid="cid"
+      :ipfs-base-url="ipfsBaseUrl"
+      :video-info="videoInfo"
+      :remote-subtitles="remoteSubtitles"
+      :imported-subtitles="importedSubtitles"
+      @subtitle-import="handleSubtitleImport"
+      @subtitle-remove="handleSubtitleRemove"
+    />
   </section>
 </template>
 

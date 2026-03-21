@@ -46,7 +46,7 @@ describe('WatchPage layout contract', () => {
 
     const playerContainerIndex = template.indexOf('<VideoPlayer');
     const playerTitleIndex = template.indexOf('<h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>');
-    const videoInfoIndex = template.indexOf('<VideoInfo :cid="cid" :ipfs-base-url="ipfsBaseUrl" :video-info="videoInfo" />');
+    const videoInfoIndex = template.indexOf('<VideoInfo');
 
     expect(template).toContain('<section class="watch-page" data-testid="watch-page">');
     expect(template).toContain('class="player-container glass-panel"');
@@ -55,9 +55,17 @@ describe('WatchPage layout contract', () => {
     expect(playerContainerIndex).toBeGreaterThan(-1);
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
-    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded']);");
+    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-import', 'subtitle-remove']);");
     expect(script).toContain("import VideoPlayer from './VideoPlayer.vue';");
     expect(script).toContain("import VideoInfo from './VideoInfo.vue';");
+    expect(template).toContain('@playback-snapshot="handlePlaybackSnapshot"');
+    expect(template).toContain(':remote-subtitles="remoteSubtitles"');
+    expect(template).toContain(':imported-subtitles="importedSubtitles"');
+    expect(template).toContain('@subtitle-import="handleSubtitleImport"');
+    expect(template).toContain('@subtitle-remove="handleSubtitleRemove"');
+    expect(script).toContain("function handlePlaybackSnapshot(snapshot) {");
+    expect(script).toContain("function handleSubtitleImport(importedTrack) {");
+    expect(script).toContain("function handleSubtitleRemove(trackId) {");
     expect(style).toContain('.watch-page');
     expect(style).toContain('flex: 1;');
     expect(style).toContain('min-width: 0;');
@@ -97,6 +105,50 @@ describe('VideoPlayer hotkey contract', () => {
     expect(style).toContain('.hotkey-help-row');
     expect(style).toContain('.hotkey-help-detail');
     expect(style).toContain('.hotkey-chip');
+  });
+});
+
+describe('VideoPlayer playback persistence contract', () => {
+  it('emits player-driven playback snapshots on key lifecycle events', () => {
+    const descriptor = readDescriptor(new URL('./VideoPlayer.vue', import.meta.url));
+    const script = descriptor.scriptSetup?.content || '';
+
+    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);");
+    expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
+    expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
+    expect(script).toContain("player.on('pause', handlePauseSnapshot);");
+    expect(script).toContain("player.on('ended', handleEndedSnapshot);");
+    expect(script).toContain("player.on('seeked', handleSeekedSnapshot);");
+    expect(script).toContain("player.on('timeupdate', handleTimeupdateSnapshot);");
+    expect(script).toContain("emit('playback-snapshot', {");
+  });
+});
+
+describe('HistoryPage status contract', () => {
+  it('renders clear visual states for new, in-progress, and completed entries', () => {
+    const descriptor = readDescriptor(new URL('./HistoryPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+    expect(template).toContain('class="history-status-badge"');
+    expect(template).toContain('class="history-open-label"');
+    expect(template).toContain(':class="`is-${item.playbackState.id}`"');
+    expect(template).toContain('{{ item.playbackState.statusLabel }}');
+    expect(template).toContain('{{ item.playbackState.actionLabel }}');
+    expect(template).toContain('{{ item.playbackState.progressLabel }}');
+
+    expect(script).toContain('const HISTORY_COMPLETED_MIN_PERCENT = 95;');
+    expect(script).toContain('const HISTORY_COMPLETED_MAX_REMAINING_SECONDS = 5;');
+    expect(script).toContain('function getPlaybackState(item) {');
+    expect(script).toContain("statusLabel: '已看完'");
+    expect(script).toContain("statusLabel: '繼續觀看'");
+    expect(script).toContain("statusLabel: '尚未開始'");
+
+    expect(style).toContain('.history-state-row');
+    expect(style).toContain('.history-status-badge.is-resume');
+    expect(style).toContain('.history-status-badge.is-completed');
+    expect(style).toContain('.history-progress.is-completed');
+    expect(style).toContain('.history-item.is-completed .history-progress-bar span');
   });
 });
 
@@ -182,9 +234,11 @@ describe('VideoInfo layout contract', () => {
     expect(template).toContain('v-for="item in overflowMenuItems"');
     expect(template).toContain("v-if=\"showShareButton\"");
     expect(template).toContain('class="action-group glass-btn" data-action-item');
+    expect(template).toContain('item.id === subtitleActionId');
+    expect(template).toContain('<SubtitleDialog');
 
     expect(script).toContain("const responsiveActionOrder = [shareActionId];");
-    expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
+    expect(script).toContain("const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];");
     expect(script).toContain("const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));");
     expect(script).toContain('function resolveLayout()');
     expect(script).toContain('const nextCreatorTextHidden = fullCreatorWidth > infoRowWidth + 1;');
@@ -261,8 +315,8 @@ describe('VideoInfo layout contract', () => {
     const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
     const script = descriptor.scriptSetup?.content || '';
 
-    // Verify the overflow action order array places share before download
-    expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
+    // Verify the overflow action order array places share before subtitles and download
+    expect(script).toContain("const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];");
   });
 
   it('collapses the description by default and exposes explicit expand and collapse controls', () => {
@@ -304,5 +358,29 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('.description-toggle-inline-text');
     expect(style).toContain('.description-toggle-bottom');
     expect(style).toContain('align-self: flex-start;');
+  });
+});
+
+describe('SubtitleDialog contract', () => {
+  it('focuses on imported subtitles and exposes a right-side session status summary', () => {
+    const descriptor = readDescriptor(new URL('./SubtitleDialog.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).not.toContain('Available in CID');
+    expect(template).not.toContain('subtitle-dialog-remote-empty');
+    expect(template).toContain('data-testid="subtitle-dialog-session-status"');
+    expect(template).toContain('Imported in this browser');
+    expect(template).toContain('Local subtitles temporarily override same-language CID tracks.');
+    expect(template).toContain('data-testid="subtitle-dialog-imported-list"');
+    expect(script).toContain("const toolbarStatusLabel = computed(() => {");
+    expect(script).toContain("const toolbarStatusValue = computed(() => {");
+    expect(script).toContain("return hasImportedSubtitles.value ? 'Session active' : 'Ready';");
+    expect(style).toContain('.subtitle-toolbar-status');
+    expect(style).toContain('.subtitle-toolbar-status-label');
+    expect(style).toContain('.subtitle-toolbar-status-value');
+    expect(style).toContain('.subtitle-section-copy');
+    expect(style).toContain('.subtitle-section-caption');
   });
 });

@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   choosePreferredSubtitleLanguage,
+  convertSrtToVtt,
+  createImportedSubtitleTrack,
   createDefaultSubtitlePreference,
+  downloadSubtitleTrack,
   fetchSubtitleManifest,
+  mergeSubtitleTracks,
   normalizeSubtitleManifest,
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
   resolveToggledSubtitlePreference,
+  revokeImportedSubtitleTracks,
   resolveSubtitleTracks,
   subtitleManifestFileName,
 } from './subtitles';
@@ -34,6 +39,46 @@ function createHeaders(values = {}) {
   return {
     get(name) {
       return entries.get(String(name).toLowerCase()) ?? null;
+    },
+  };
+}
+
+class FakeBlob {
+  constructor(parts = [], options = {}) {
+    this.parts = parts;
+    this.type = options.type || '';
+  }
+}
+
+function createDownloadDocument() {
+  const appended = [];
+  let lastCreated = null;
+
+  const body = {
+    appendChild: vi.fn((node) => {
+      appended.push(node);
+    }),
+    removeChild: vi.fn((node) => {
+      const index = appended.indexOf(node);
+      if (index >= 0) {
+        appended.splice(index, 1);
+      }
+    }),
+  };
+
+  return {
+    appended,
+    body,
+    createElement(tag) {
+      expect(tag).toBe('a');
+      lastCreated = {
+        click: vi.fn(),
+      };
+
+      return lastCreated;
+    },
+    getLastCreated() {
+      return lastCreated;
     },
   };
 }
@@ -109,15 +154,207 @@ describe('resolveSubtitleTracks', () => {
         lang: 'en',
         label: 'English',
         src: 'https://example.com/ipfs/bafy123/en.vtt',
+        path: 'en.vtt',
+        fileName: 'en.vtt',
         order: 1,
+        source: 'remote',
       },
       {
         lang: 'zh-TW',
         label: '繁體中文',
         src: 'https://example.com/ipfs/bafy123/zh-TW.vtt',
+        path: 'zh-TW.vtt',
+        fileName: 'zh-TW.vtt',
         order: 2,
+        source: 'remote',
       },
     ]);
+  });
+});
+
+describe('convertSrtToVtt', () => {
+  it('converts SRT timestamps to WebVTT', () => {
+    expect(
+      convertSrtToVtt('1\r\n00:00:01,000 --> 00:00:02,500\r\nHello world\r\n')
+    ).toBe('WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello world\n');
+  });
+});
+
+describe('createImportedSubtitleTrack', () => {
+  it('creates a local VTT track from an imported SRT file', async () => {
+    let capturedBlob = null;
+    const createObjectURL = vi.fn().mockImplementation((blob) => {
+      capturedBlob = blob;
+      return 'blob:subtitle-local';
+    });
+
+    await expect(
+      createImportedSubtitleTrack(
+        {
+          name: 'movie.zh-TW.srt',
+          text: async () => '1\n00:00:01,000 --> 00:00:02,500\n你好\n',
+        },
+        { order: 4 },
+        { createObjectURL, BlobImpl: FakeBlob }
+      )
+    ).resolves.toEqual(
+      expect.objectContaining({
+        lang: 'zh-TW',
+        label: '繁體中文 (Local)',
+        src: 'blob:subtitle-local',
+        order: 4,
+        source: 'local',
+        fileName: 'movie.zh-TW.vtt',
+      })
+    );
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(capturedBlob).toBeInstanceOf(FakeBlob);
+    expect(capturedBlob.parts.join('')).toBe('WEBVTT\n\n00:00:01.000 --> 00:00:02.500\n你好\n');
+  });
+
+  it('rejects unsupported subtitle formats', async () => {
+    await expect(
+      createImportedSubtitleTrack(
+        {
+          name: 'movie.ass',
+          text: async () => '[Script Info]',
+        },
+        {},
+        { createObjectURL: vi.fn(), BlobImpl: FakeBlob }
+      )
+    ).rejects.toThrow('目前只支援 .vtt 與 .srt 字幕檔。');
+  });
+});
+
+describe('mergeSubtitleTracks', () => {
+  it('lets imported subtitles override remote tracks of the same language', () => {
+    expect(
+      mergeSubtitleTracks(
+        [
+          {
+            lang: 'en',
+            label: 'English',
+            src: 'https://example.com/ipfs/bafy123/en.vtt',
+            path: 'en.vtt',
+            fileName: 'en.vtt',
+            order: 0,
+            source: 'remote',
+          },
+          {
+            lang: 'zh-TW',
+            label: '繁體中文',
+            src: 'https://example.com/ipfs/bafy123/zh-TW.vtt',
+            path: 'zh-TW.vtt',
+            fileName: 'zh-TW.vtt',
+            order: 1,
+            source: 'remote',
+          },
+        ],
+        [
+          {
+            id: 'local:en',
+            lang: 'en',
+            label: 'English (Local)',
+            src: 'blob:en',
+            order: 0,
+            source: 'local',
+            fileName: 'english.vtt',
+          },
+        ]
+      )
+    ).toEqual([
+      {
+        id: 'local:en',
+        lang: 'en',
+        label: 'English (Local)',
+        src: 'blob:en',
+        order: 0,
+        source: 'local',
+        fileName: 'english.vtt',
+      },
+      {
+        lang: 'zh-TW',
+        label: '繁體中文',
+        src: 'https://example.com/ipfs/bafy123/zh-TW.vtt',
+        path: 'zh-TW.vtt',
+        fileName: 'zh-TW.vtt',
+        order: 1,
+        source: 'remote',
+      },
+    ]);
+  });
+});
+
+describe('downloadSubtitleTrack', () => {
+  it('downloads remote subtitles through a blob URL with a stable filename', async () => {
+    vi.useFakeTimers();
+    const documentLike = createDownloadDocument();
+    const createObjectURL = vi.fn().mockReturnValue('blob:download');
+    const revokeObjectURL = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(new FakeBlob(['WEBVTT\n'], { type: 'text/vtt' })),
+    });
+
+    try {
+      await downloadSubtitleTrack(
+        {
+          lang: 'en',
+          src: 'https://example.com/ipfs/bafy123/en.vtt',
+          fileName: 'en.vtt',
+          source: 'remote',
+        },
+        {
+          fetchImpl,
+          createObjectURL,
+          revokeObjectURL,
+          documentLike,
+        }
+      );
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://example.com/ipfs/bafy123/en.vtt',
+        expect.objectContaining({
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-store',
+        })
+      );
+      expect(documentLike.appended).toHaveLength(0);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(documentLike.body.appendChild).toHaveBeenCalledTimes(1);
+      expect(documentLike.body.removeChild).toHaveBeenCalledTimes(1);
+      expect(documentLike.getLastCreated()).toEqual(
+        expect.objectContaining({
+          href: 'blob:download',
+          download: 'en.vtt',
+        })
+      );
+      expect(documentLike.getLastCreated().click).toHaveBeenCalledTimes(1);
+
+      vi.runAllTimers();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:download');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('revokes imported blob URLs when tracks are cleared', () => {
+    const revokeObjectURL = vi.fn();
+
+    revokeImportedSubtitleTracks(
+      [
+        { source: 'local', src: 'blob:first' },
+        { source: 'remote', src: 'https://example.com/en.vtt' },
+        { source: 'local', src: 'blob:second' },
+      ],
+      { revokeObjectURL }
+    );
+
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).toHaveBeenNthCalledWith(1, 'blob:first');
+    expect(revokeObjectURL).toHaveBeenNthCalledWith(2, 'blob:second');
   });
 });
 

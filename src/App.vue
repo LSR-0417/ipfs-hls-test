@@ -1,14 +1,27 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
+import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
 import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
-import { fetchSubtitleManifest, resolveSubtitleTracks } from './utils/subtitles';
+import {
+  fetchSubtitleManifest,
+  mergeSubtitleTracks,
+  persistSubtitlePreference,
+  resolveSubtitleTracks,
+  revokeImportedSubtitleTracks,
+} from './utils/subtitles';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
+import {
+  clearHistory as clearStoredHistory,
+  readStoredHistory,
+  removeHistoryEntry,
+  upsertHistoryEntry,
+} from './utils/history';
 
 const allowPrivateGateways = import.meta.env.DEV;
 const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
@@ -17,12 +30,18 @@ const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
 const currentVideoInfo = ref(createDefaultVideoInfo());
-const currentSubtitleTracks = ref([]);
+const currentRemoteSubtitleTracks = ref([]);
+const currentImportedSubtitleTracks = ref([]);
+const currentSubtitleTracks = computed(() =>
+  mergeSubtitleTracks(currentRemoteSubtitleTracks.value, currentImportedSubtitleTracks.value)
+);
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const currentCid = ref('');
 const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
+const activeView = ref('home');
+const historyItems = ref([]);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -35,10 +54,36 @@ function resetPlaybackState() {
   currentIpfsBaseUrl.value = '';
   currentPosterUrl.value = '';
   currentVideoInfo.value = createDefaultVideoInfo();
-  currentSubtitleTracks.value = [];
+  clearImportedSubtitles();
+  currentRemoteSubtitleTracks.value = [];
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
   status.value = '準備就緒';
+}
+
+function normalizeLocale(value) {
+  return typeof value === 'string' ? value.trim().replace(/_/g, '-').toLowerCase() : '';
+}
+
+function clearImportedSubtitles() {
+  revokeImportedSubtitleTracks(currentImportedSubtitleTracks.value);
+  currentImportedSubtitleTracks.value = [];
+}
+
+function replaceImportedSubtitle(nextTrack) {
+  const nextLocale = normalizeLocale(nextTrack?.lang);
+  const remainingTracks = [];
+
+  currentImportedSubtitleTracks.value.forEach((track) => {
+    if (normalizeLocale(track?.lang) === nextLocale) {
+      revokeImportedSubtitleTracks([track]);
+      return;
+    }
+
+    remainingTracks.push(track);
+  });
+
+  currentImportedSubtitleTracks.value = [...remainingTracks, nextTrack].sort((left, right) => left.order - right.order);
 }
 
 function commitHistoryUrl(mode, url) {
@@ -94,6 +139,7 @@ function syncFromUrl() {
     if (shouldReload) {
       loadVideo(cid, nextGateway, time, { updateUrl: false });
     }
+    activeView.value = 'home';
     return;
   }
 
@@ -136,37 +182,46 @@ function stopUrlSync() {
 }
 
 onMounted(() => {
+  refreshHistory();
   startUrlSync();
   syncFromUrl();
+  startHistorySync();
 });
 
 onBeforeUnmount(() => {
+  stopHistorySync();
   stopUrlSync();
+  clearImportedSubtitles();
 });
 
 function onSearchCid(cid, time = 0) {
   if (!cid) return;
-  currentCid.value = cid;
   loadVideo(cid, currentGateway.value, time, { updateUrl: true });
+  activeView.value = 'home';
 }
 
 function onGatewayChange(gateway) {
   const nextGateway = resolveGateway(gateway);
-  currentGateway.value = nextGateway;
-  persistGateway(nextGateway, window);
-  if (currentCid.value) {
+  if (currentCid.value && activeView.value === 'home') {
     const snapshot = getPlaybackSnapshot(window);
     loadVideo(currentCid.value, nextGateway, snapshot.time, {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
     });
+    return;
   }
+
+  currentGateway.value = nextGateway;
+  persistGateway(nextGateway, window);
 }
 
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   const requestSeq = ++metadataRequestSeq;
+
+  persistCurrentHistory();
+  const shouldClearImportedSubtitles = currentCid.value && currentCid.value !== cid;
   currentCid.value = cid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
@@ -181,9 +236,19 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentM3u8Url.value = m3u8Url;
   currentPosterUrl.value = posterUrl;
   currentVideoInfo.value = createDefaultVideoInfo();
-  currentSubtitleTracks.value = [];
+  if (shouldClearImportedSubtitles) {
+    clearImportedSubtitles();
+  }
+  currentRemoteSubtitleTracks.value = [];
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
+  persistHistoryEntry({
+    cid,
+    posterUrl,
+    gateway: nextGateway,
+    progressSeconds: startTime,
+    lastWatchedAt: Date.now(),
+  });
   void loadSidecarAssets(ipfsBaseUrl, requestSeq);
 
   if (updateUrl) {
@@ -197,6 +262,36 @@ function onStatusUpdate(newStatus) {
 
 function onLevelsLoaded(levels) {}
 
+function onSubtitleImport(importedTrack) {
+  if (!importedTrack) {
+    return;
+  }
+
+  replaceImportedSubtitle(importedTrack);
+  persistSubtitlePreference(
+    {
+      mode: 'showing',
+      lang: importedTrack.lang,
+    },
+    window
+  );
+}
+
+function onSubtitleRemove(trackId) {
+  const nextImportedTracks = [];
+
+  currentImportedSubtitleTracks.value.forEach((track) => {
+    if (track.id === trackId) {
+      revokeImportedSubtitleTracks([track]);
+      return;
+    }
+
+    nextImportedTracks.push(track);
+  });
+
+  currentImportedSubtitleTracks.value = nextImportedTracks;
+}
+
 async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
   const [nextVideoInfo, subtitleManifest] = await Promise.all([
     fetchVideoInfo(ipfsBaseUrl).catch(() => createDefaultVideoInfo()),
@@ -206,7 +301,20 @@ async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
   if (requestSeq !== metadataRequestSeq) return;
 
   currentVideoInfo.value = nextVideoInfo;
-  currentSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
+  currentRemoteSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
+  const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
+  persistHistoryEntry({
+    cid: currentCid.value,
+    title: nextVideoInfo.title,
+    uploader: nextVideoInfo.uploader,
+    posterUrl: currentPosterUrl.value,
+    gateway: currentGateway.value,
+    durationString: nextVideoInfo.durationString,
+    durationSeconds: snapshot?.duration ?? 0,
+    progressSeconds: snapshot?.hasEnded && snapshot.duration > 0 ? snapshot.duration : snapshot?.time ?? 0,
+    lastWatchedAt: Date.now(),
+  });
+  persistCurrentHistory();
 }
 
 function resolveGateway(candidate) {
@@ -227,6 +335,110 @@ function readConfiguredGateway() {
 
   return '';
 }
+
+function refreshHistory() {
+  historyItems.value = readStoredHistory(window);
+}
+
+function findHistoryEntry(cid) {
+  const normalizedCid = typeof cid === 'string' ? cid.trim() : '';
+  if (!normalizedCid) return null;
+
+  return historyItems.value.find((item) => item.cid === normalizedCid) || null;
+}
+
+function persistHistoryEntry(entry) {
+  historyItems.value = upsertHistoryEntry(entry, window);
+}
+
+function persistCurrentHistory(options = {}) {
+  const { snapshot = null } = options;
+  if (activeView.value !== 'home') return;
+
+  const cid = currentCid.value.trim();
+  if (!cid) return;
+
+  const currentSnapshot = snapshot || getPlaybackSnapshot(window);
+  const progressSeconds =
+    currentSnapshot.hasEnded && currentSnapshot.duration > 0 ? currentSnapshot.duration : currentSnapshot.time;
+
+  persistHistoryEntry({
+    cid,
+    title: currentVideoInfo.value.title,
+    uploader: currentVideoInfo.value.uploader,
+    posterUrl: currentPosterUrl.value,
+    gateway: currentGateway.value,
+    durationString: currentVideoInfo.value.durationString,
+    durationSeconds: currentSnapshot.duration,
+    progressSeconds,
+    lastWatchedAt: Date.now(),
+  });
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    persistCurrentHistory();
+  }
+}
+
+function handlePageHide() {
+  persistCurrentHistory();
+}
+
+function startHistorySync() {
+  window.addEventListener('beforeunload', handlePageHide);
+  window.addEventListener('pagehide', handlePageHide);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+}
+
+function stopHistorySync() {
+  window.removeEventListener('beforeunload', handlePageHide);
+  window.removeEventListener('pagehide', handlePageHide);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+}
+
+function onViewSelect(nextView) {
+  if (nextView === 'history') {
+    persistCurrentHistory();
+    refreshHistory();
+    activeView.value = 'history';
+    return;
+  }
+
+  if (activeView.value === 'history' && currentCid.value) {
+    const currentHistoryEntry = findHistoryEntry(currentCid.value);
+    const resumeTime =
+      Number.isFinite(currentHistoryEntry?.progressSeconds) && currentHistoryEntry.progressSeconds > 0
+        ? currentHistoryEntry.progressSeconds
+        : currentStartTime.value;
+
+    loadVideo(currentCid.value, currentGateway.value, resumeTime, {
+      updateUrl: false,
+      shouldAutoplay: false,
+    });
+  }
+
+  activeView.value = 'home';
+}
+
+function onHistorySelect(item) {
+  if (!item?.cid) return;
+  loadVideo(item.cid, currentGateway.value, item.progressSeconds || 0, { updateUrl: true });
+  activeView.value = 'home';
+}
+
+function onHistoryRemove(cid) {
+  historyItems.value = removeHistoryEntry(cid, window);
+}
+
+function onHistoryClear() {
+  historyItems.value = clearStoredHistory(window);
+}
+
+function onPlaybackSnapshot(snapshot) {
+  if (!snapshot || activeView.value !== 'home') return;
+  persistCurrentHistory({ snapshot });
+}
 </script>
 
 <template>
@@ -238,21 +450,36 @@ function readConfiguredGateway() {
     @gateway-change="onGatewayChange"
   />
   <div class="app-container">
-    <Sidebar />
+    <Sidebar :active-view="activeView" @view-select="onViewSelect" />
     <main class="main-content" data-testid="main-content">
-      <WatchPage
-        :cid="currentCid"
-        :ipfs-base-url="currentIpfsBaseUrl"
-        :m3u8-url="currentM3u8Url"
-        :poster-url="currentPosterUrl"
-        :subtitles="currentSubtitleTracks"
-        :start-time="currentStartTime"
-        :should-autoplay="currentShouldAutoplay"
-        :video-info="currentVideoInfo"
-        @status-update="onStatusUpdate"
-        @levels-loaded="onLevelsLoaded"
-      />
-      <RecommendationsPage />
+      <template v-if="activeView === 'history'">
+        <HistoryPage
+          :items="historyItems"
+          @select="onHistorySelect"
+          @remove="onHistoryRemove"
+          @clear="onHistoryClear"
+        />
+      </template>
+      <template v-else>
+        <WatchPage
+          :cid="currentCid"
+          :ipfs-base-url="currentIpfsBaseUrl"
+          :m3u8-url="currentM3u8Url"
+          :poster-url="currentPosterUrl"
+          :subtitles="currentSubtitleTracks"
+          :remote-subtitles="currentRemoteSubtitleTracks"
+          :imported-subtitles="currentImportedSubtitleTracks"
+          :start-time="currentStartTime"
+          :should-autoplay="currentShouldAutoplay"
+          :video-info="currentVideoInfo"
+          @status-update="onStatusUpdate"
+          @levels-loaded="onLevelsLoaded"
+          @playback-snapshot="onPlaybackSnapshot"
+          @subtitle-import="onSubtitleImport"
+          @subtitle-remove="onSubtitleRemove"
+        />
+        <RecommendationsPage />
+      </template>
     </main>
   </div>
 </template>
