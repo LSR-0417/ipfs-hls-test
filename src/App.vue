@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
@@ -16,11 +16,15 @@ import {
 } from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
 import {
-  fetchSubtitleManifest,
+  createDefaultSubtitlePreference,
+  fetchSubtitleCatalog,
   mergeSubtitleTracks,
   persistSubtitlePreference,
+  readStoredSubtitlePreference,
+  reconcileSubtitlePreference,
   resolveSubtitleTracks,
   revokeImportedSubtitleTracks,
+  subtitleCatalogStatus,
 } from './utils/subtitles';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
@@ -39,10 +43,12 @@ const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
 const currentVideoInfo = ref(createDefaultVideoInfo());
 const currentRemoteSubtitleTracks = ref([]);
+const currentRemoteSubtitleStatus = ref(subtitleCatalogStatus.idle);
 const currentImportedSubtitleTracks = ref([]);
 const currentSubtitleTracks = computed(() =>
   mergeSubtitleTracks(currentRemoteSubtitleTracks.value, currentImportedSubtitleTracks.value)
 );
+const currentSubtitleSelection = ref(createDefaultSubtitlePreference());
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const currentCid = ref('');
@@ -65,6 +71,7 @@ function resetPlaybackState() {
   currentVideoInfo.value = createDefaultVideoInfo();
   clearImportedSubtitles();
   currentRemoteSubtitleTracks.value = [];
+  currentRemoteSubtitleStatus.value = subtitleCatalogStatus.idle;
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
   status.value = '準備就緒';
@@ -93,6 +100,29 @@ function replaceImportedSubtitle(nextTrack) {
   });
 
   currentImportedSubtitleTracks.value = [...remainingTracks, nextTrack].sort((left, right) => left.order - right.order);
+}
+
+function hasSubtitleSelectionChanged(left, right) {
+  return (
+    left?.mode !== right?.mode ||
+    left?.primaryLang !== right?.primaryLang ||
+    left?.secondaryLang !== right?.secondaryLang
+  );
+}
+
+function setSubtitleSelection(nextSelection) {
+  if (typeof window === 'undefined') {
+    currentSubtitleSelection.value = nextSelection;
+    return;
+  }
+
+  const reconciledSelection = reconcileSubtitlePreference(nextSelection, currentSubtitleTracks.value, window.navigator);
+  if (!hasSubtitleSelectionChanged(currentSubtitleSelection.value, reconciledSelection)) {
+    return;
+  }
+
+  currentSubtitleSelection.value = reconciledSelection;
+  persistSubtitlePreference(reconciledSelection, window);
 }
 
 function commitHistoryUrl(mode, url) {
@@ -191,6 +221,8 @@ function stopUrlSync() {
 }
 
 onMounted(() => {
+  currentSubtitleSelection.value =
+    typeof window === 'undefined' ? createDefaultSubtitlePreference() : readStoredSubtitlePreference(window);
   refreshHistory();
   startUrlSync();
   syncFromUrl();
@@ -249,6 +281,7 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
     clearImportedSubtitles();
   }
   currentRemoteSubtitleTracks.value = [];
+  currentRemoteSubtitleStatus.value = subtitleCatalogStatus.loading;
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
   persistHistoryEntry({
@@ -291,13 +324,18 @@ function onSubtitleImport(importedTrack) {
   }
 
   replaceImportedSubtitle(importedTrack);
-  persistSubtitlePreference(
-    {
-      mode: 'showing',
-      lang: importedTrack.lang,
-    },
-    window
-  );
+  if (currentSubtitleSelection.value.mode === 'showing' && currentSubtitleSelection.value.primaryLang) {
+    return;
+  }
+
+  setSubtitleSelection({
+    mode: 'showing',
+    primaryLang: importedTrack.lang,
+    secondaryLang:
+      normalizeLocale(currentSubtitleSelection.value.secondaryLang) === normalizeLocale(importedTrack.lang)
+        ? ''
+        : currentSubtitleSelection.value.secondaryLang,
+  });
 }
 
 function onSubtitleRemove(trackId) {
@@ -315,16 +353,25 @@ function onSubtitleRemove(trackId) {
   currentImportedSubtitleTracks.value = nextImportedTracks;
 }
 
+function onSubtitleSelectionChange(nextSelection) {
+  if (!nextSelection) {
+    return;
+  }
+
+  setSubtitleSelection(nextSelection);
+}
+
 async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
-  const [nextVideoInfo, subtitleManifest] = await Promise.all([
+  const [nextVideoInfo, subtitleCatalog] = await Promise.all([
     fetchVideoInfo(ipfsBaseUrl).catch(() => createDefaultVideoInfo()),
-    fetchSubtitleManifest(ipfsBaseUrl),
+    fetchSubtitleCatalog(ipfsBaseUrl),
   ]);
 
   if (requestSeq !== metadataRequestSeq) return;
 
   currentVideoInfo.value = nextVideoInfo;
-  currentRemoteSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
+  currentRemoteSubtitleStatus.value = subtitleCatalog.status;
+  currentRemoteSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleCatalog.tracks);
   const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
   persistHistoryEntry({
     cid: currentCid.value,
@@ -472,6 +519,24 @@ function toggleSidebar() {
 function closeSidebar() {
   isSidebarOpen.value = false;
 }
+
+watch(
+  currentSubtitleTracks,
+  (nextTracks) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const reconciledSelection = reconcileSubtitlePreference(currentSubtitleSelection.value, nextTracks, window.navigator);
+    if (!hasSubtitleSelectionChanged(currentSubtitleSelection.value, reconciledSelection)) {
+      return;
+    }
+
+    currentSubtitleSelection.value = reconciledSelection;
+    persistSubtitlePreference(reconciledSelection, window);
+  },
+  { deep: true }
+);
 </script>
 
 <template>
@@ -511,6 +576,8 @@ function closeSidebar() {
           :m3u8-url="currentM3u8Url"
           :poster-url="currentPosterUrl"
           :subtitles="currentSubtitleTracks"
+          :subtitle-selection="currentSubtitleSelection"
+          :remote-subtitle-status="currentRemoteSubtitleStatus"
           :remote-subtitles="currentRemoteSubtitleTracks"
           :imported-subtitles="currentImportedSubtitleTracks"
           :start-time="currentStartTime"
@@ -522,6 +589,7 @@ function closeSidebar() {
           @playback-snapshot="onPlaybackSnapshot"
           @subtitle-import="onSubtitleImport"
           @subtitle-remove="onSubtitleRemove"
+          @subtitle-selection-change="onSubtitleSelectionChange"
         />
         <RecommendationsPage />
       </template>

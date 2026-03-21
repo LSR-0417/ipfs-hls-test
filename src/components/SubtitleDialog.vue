@@ -7,6 +7,22 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  subtitles: {
+    type: Array,
+    default: () => [],
+  },
+  subtitleSelection: {
+    type: Object,
+    default: () => ({
+      mode: 'off',
+      primaryLang: '',
+      secondaryLang: '',
+    }),
+  },
+  remoteSubtitleStatus: {
+    type: String,
+    default: 'idle',
+  },
   remoteSubtitles: {
     type: Array,
     default: () => [],
@@ -17,7 +33,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['close', 'subtitle-import', 'subtitle-remove']);
+const emit = defineEmits(['close', 'subtitle-import', 'subtitle-remove', 'subtitle-selection-change']);
 
 const subtitleDialogRef = ref(null);
 const subtitleFileInputRef = ref(null);
@@ -26,6 +42,28 @@ const subtitleStatusText = ref('');
 const subtitleStatusTone = ref('neutral');
 
 const hasImportedSubtitles = computed(() => props.importedSubtitles.length > 0);
+const currentPrimaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.primaryLang));
+const currentSecondaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.secondaryLang));
+const hasPrimarySubtitle = computed(() => Boolean(currentPrimaryTrack.value));
+const hasAvailableTracks = computed(() => props.subtitles.length > 0);
+const secondarySubtitleOptions = computed(() =>
+  props.subtitles.filter((track) => normalizeLocale(track?.lang) !== normalizeLocale(props.subtitleSelection.primaryLang))
+);
+const selectionEmptyStateText = computed(() => {
+  if (hasAvailableTracks.value) {
+    return '';
+  }
+
+  if (props.remoteSubtitleStatus === 'loading') {
+    return '正在載入字幕清單...';
+  }
+
+  if (props.remoteSubtitleStatus === 'error') {
+    return '字幕清單載入失敗。你仍可匯入本機字幕。';
+  }
+
+  return '這支影片目前沒有可用字幕。';
+});
 const toolbarStatusLabel = computed(() => {
   if (isImportingSubtitle.value) {
     return 'Importing';
@@ -88,6 +126,19 @@ function normalizeLocale(value) {
   return typeof value === 'string' ? value.trim().replace(/_/g, '-').toLowerCase() : '';
 }
 
+function normalizeSelectionLanguage(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function findTrackByLanguage(lang) {
+  const targetLocale = normalizeLocale(lang);
+  if (!targetLocale) {
+    return null;
+  }
+
+  return props.subtitles.find((track) => normalizeLocale(track?.lang) === targetLocale) || null;
+}
+
 function isOverridingCidTrack(track) {
   const targetLocale = normalizeLocale(track?.lang);
   if (!targetLocale) {
@@ -106,6 +157,39 @@ function resolveImportedSubtitleOrder(nextTrack) {
   }
 
   return props.remoteSubtitles.length + props.importedSubtitles.length;
+}
+
+function emitSubtitleSelectionChange(nextSelection) {
+  emit('subtitle-selection-change', nextSelection);
+}
+
+function handleSecondarySubtitleChange(event) {
+  const nextSecondaryLang = normalizeSelectionLanguage(event?.target?.value);
+
+  if (!hasPrimarySubtitle.value) {
+    return;
+  }
+
+  emitSubtitleSelectionChange({
+    mode: 'showing',
+    primaryLang: props.subtitleSelection.primaryLang,
+    secondaryLang: nextSecondaryLang,
+  });
+  setStatus(
+    nextSecondaryLang
+      ? `次要字幕已切換為 ${findTrackByLanguage(nextSecondaryLang)?.label || nextSecondaryLang}`
+      : '已清除次要字幕。',
+    'success'
+  );
+}
+
+function clearSecondarySubtitle() {
+  emitSubtitleSelectionChange({
+    mode: hasPrimarySubtitle.value ? 'showing' : 'off',
+    primaryLang: props.subtitleSelection.primaryLang,
+    secondaryLang: '',
+  });
+  setStatus('已清除次要字幕。', 'success');
 }
 
 async function handleSubtitleFileChange(event) {
@@ -241,6 +325,75 @@ function handleRemoveImportedSubtitle(track) {
           </svg>
           <span>{{ subtitleStatusText }}</span>
         </p>
+
+        <div class="subtitle-section">
+          <div class="subtitle-section-header">
+            <div class="subtitle-section-copy">
+              <h4>Secondary subtitle</h4>
+              <p class="subtitle-section-caption">主字幕請用播放器上的字幕按鈕切換。這裡只控制較小字體顯示的次要字幕。</p>
+            </div>
+            <button
+              type="button"
+              class="glass-btn subtitle-row-btn"
+              :disabled="!subtitleSelection.secondaryLang"
+              data-testid="subtitle-dialog-clear-secondary"
+              @click="clearSecondarySubtitle"
+            >
+              Clear secondary
+            </button>
+          </div>
+
+          <div
+            v-if="hasAvailableTracks"
+            class="subtitle-selection-grid"
+            data-testid="subtitle-dialog-selection-grid"
+          >
+            <label class="subtitle-select-field">
+              <span class="subtitle-select-label">Secondary subtitle</span>
+              <select
+                class="subtitle-select-input"
+                data-testid="subtitle-dialog-secondary-select"
+                :value="subtitleSelection.secondaryLang"
+                :disabled="!hasPrimarySubtitle"
+                @change="handleSecondarySubtitleChange"
+              >
+                <option value="">None</option>
+                <option
+                  v-for="track in secondarySubtitleOptions"
+                  :key="`secondary-${track.lang}`"
+                  :value="track.lang"
+                >
+                  {{ track.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div v-if="hasAvailableTracks" class="subtitle-role-summary">
+            <span class="subtitle-role-pill subtitle-role-pill-primary">
+              Primary: {{ currentPrimaryTrack?.label || 'Off' }}
+            </span>
+            <span class="subtitle-role-pill subtitle-role-pill-secondary">
+              Secondary: {{ currentSecondaryTrack?.label || 'None' }}
+            </span>
+          </div>
+
+          <p
+            v-if="hasAvailableTracks && !hasPrimarySubtitle"
+            class="subtitle-empty-state"
+            data-testid="subtitle-dialog-primary-helper"
+          >
+            先用播放器上的字幕按鈕選一個主字幕，才能開啟次要字幕。
+          </p>
+
+          <p
+            v-else-if="!hasAvailableTracks"
+            class="subtitle-empty-state"
+            data-testid="subtitle-dialog-selection-empty"
+          >
+            {{ selectionEmptyStateText }}
+          </p>
+        </div>
 
         <div class="subtitle-section">
           <div class="subtitle-section-header">
@@ -518,6 +671,69 @@ function handleRemoveImportedSubtitle(track) {
   line-height: 1.55;
 }
 
+.subtitle-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.subtitle-select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subtitle-select-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.subtitle-select-input {
+  width: 100%;
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 20, 0.76);
+  color: var(--text-primary);
+  padding: 0 14px;
+  font: inherit;
+}
+
+.subtitle-select-input:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
+.subtitle-role-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.subtitle-role-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.subtitle-role-pill-primary {
+  border-color: rgba(0, 210, 255, 0.28);
+}
+
+.subtitle-role-pill-secondary {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 .subtitle-file-input {
   display: none;
 }
@@ -778,6 +994,10 @@ function handleRemoveImportedSubtitle(track) {
 
   .subtitle-import-btn {
     width: 100%;
+  }
+
+  .subtitle-selection-grid {
+    grid-template-columns: 1fr;
   }
 
   .subtitle-track-row {

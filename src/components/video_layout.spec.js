@@ -60,18 +60,24 @@ describe('WatchPage layout contract', () => {
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
     expect(script).toContain("'gateway-fallback-request'");
+    expect(template).toContain('@gateway-fallback-request="handleGatewayFallbackRequest"');
+    expect(script).toContain("'subtitle-selection-change'");
+    expect(template).toContain(':subtitle-selection="subtitleSelection"');
+    expect(template).toContain(':subtitle-catalog-status="remoteSubtitleStatus"');
+    expect(template).toContain(':remote-subtitle-status="remoteSubtitleStatus"');
     expect(script).toContain("import VideoPlayer from './VideoPlayer.vue';");
     expect(script).toContain("import VideoInfo from './VideoInfo.vue';");
     expect(template).toContain('@playback-snapshot="handlePlaybackSnapshot"');
-    expect(template).toContain('@gateway-fallback-request="handleGatewayFallbackRequest"');
     expect(template).toContain(':remote-subtitles="remoteSubtitles"');
     expect(template).toContain(':imported-subtitles="importedSubtitles"');
     expect(template).toContain('@subtitle-import="handleSubtitleImport"');
     expect(template).toContain('@subtitle-remove="handleSubtitleRemove"');
     expect(script).toContain("function handleGatewayFallbackRequest(payload) {");
+    expect(template).toContain('@subtitle-selection-change="handleSubtitleSelectionChange"');
     expect(script).toContain("function handlePlaybackSnapshot(snapshot) {");
     expect(script).toContain("function handleSubtitleImport(importedTrack) {");
     expect(script).toContain("function handleSubtitleRemove(trackId) {");
+    expect(script).toContain("function handleSubtitleSelectionChange(nextSelection) {");
     expect(style).toContain('.watch-page');
     expect(style).toContain('flex: 1;');
     expect(style).toContain('min-width: 0;');
@@ -117,21 +123,63 @@ describe('VideoPlayer hotkey contract', () => {
 describe('VideoPlayer playback persistence contract', () => {
   it('emits player-driven playback snapshots on key lifecycle events', () => {
     const descriptor = readDescriptor(new URL('./VideoPlayer.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
 
-    expect(script).toContain("const emit = defineEmits(['status-update', 'gateway-fallback-request', 'levels-loaded', 'playback-snapshot']);");
-    expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
-    expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
+    expect(script).toContain("const emit = defineEmits([");
+    expect(script).toContain("'gateway-fallback-request'");
     expect(script).toContain('shouldAutoFallbackGateway');
     expect(script).toContain('isLoopbackGatewayUrl');
     expect(script).toContain('function requestGatewayFallback(reason = null, options = {}) {');
     expect(script).toContain('dedupeKey: `source:${seq}`');
+    expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
+    expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
+    expect(script).toContain("'subtitle-selection-change'");
+    expect(script).toContain('allowMultipleShowingTracks: true');
+    expect(script).toContain('subsCapsButton: false');
+    expect(script).toContain("const primarySubtitleButtonComponentName = 'PrimarySubtitleControlButton';");
+    expect(script).toContain("const primarySubtitleControlInsertBefore = ['audioTrackButton', 'pictureInPictureToggle', 'fullscreenToggle'];");
+    expect(script).toContain('function registerPrimarySubtitleControlButton() {');
+    expect(script).toContain('function ensurePrimarySubtitleControl() {');
+    expect(script).toContain('function resolvePrimarySubtitleControlState() {');
+    expect(script).toContain('function updatePrimarySubtitleControl() {');
+    expect(script).toContain('function togglePrimarySubtitleMenu() {');
+    expect(script).toContain('function selectPrimarySubtitle(lang) {');
+    expect(script).toContain("const primarySubtitleTriggerLabel = '主';");
+    expect(script).toContain('player.primarySubtitleMenuToggle_ = togglePrimarySubtitleMenu;');
+    expect(script).toContain('subtitleCatalogStatus: {');
+    expect(script).toContain('此處只切換主字幕，次字幕請到 Subtitles 視窗設定');
+    expect(template).toContain('data-testid="primary-subtitle-menu"');
+    expect(template).toContain('data-testid="primary-subtitle-menu-off"');
+    expect(template).toContain('關閉主字幕');
+    expect(script).toContain("const dualSubtitleSwapButtonComponentName = 'DualSubtitleSwapButton';");
+    expect(script).toContain('function registerDualSubtitleSwapButton() {');
+    expect(script).toContain('function ensureDualSubtitleSwapControl() {');
+    expect(script).toContain('function swapSubtitleRoles() {');
     expect(script).toContain("player.on('pause', handlePauseSnapshot);");
     expect(script).toContain("player.on('ended', handleEndedSnapshot);");
     expect(script).toContain("player.on('seeked', handleSeekedSnapshot);");
     expect(script).toContain("player.on('timeupdate', handleTimeupdateSnapshot);");
     expect(script).toContain("player.one('error', () => {");
+    expect(script).toContain("player.on('playerresize', () => {");
+    expect(script).toContain("player.on('fullscreenchange', () => {");
+    expect(script).toContain('updatePrimarySubtitleMenuPosition();');
+    expect(script).toContain('function syncSecondaryCueOffsets(primaryCueElements, secondaryCueElements) {');
     expect(script).toContain("emit('playback-snapshot', {");
+    expect(style).toContain('.vjs-text-track-cue--secondary');
+    expect(style).toContain('.vjs-primary-subtitle-trigger-label');
+    expect(style).toContain('.vjs-primary-subtitle-button--active');
+    expect(style).toContain('.primary-subtitle-menu');
+    expect(style).toContain('.primary-subtitle-menu-status');
+    expect(style).toContain('.primary-subtitle-menu-badge--local');
+    expect(style).toContain('.primary-subtitle-menu-item--secondary');
+    expect(style).toContain('.vjs-dual-subtitle-swap-button');
+    expect(style).toContain('.vjs-dual-subtitle-swap-icon');
+    expect(script).toContain('function orderSubtitleTracksForDisplay(subtitles, selection = props.subtitleSelection) {');
+    expect(script).toContain('function hasPreferredShowingTrackOrder(selection = props.subtitleSelection) {');
+    expect(style).toContain('transform: translateY(var(--dual-subtitle-offset-y, 0px)) scale(0.76);');
+    expect(style).toContain('transform-origin: center bottom;');
   });
 });
 
@@ -375,7 +423,7 @@ describe('VideoInfo layout contract', () => {
 });
 
 describe('SubtitleDialog contract', () => {
-  it('focuses on imported subtitles and exposes a right-side session status summary', () => {
+  it('keeps secondary subtitle controls alongside the import/session workflow', () => {
     const descriptor = readDescriptor(new URL('./SubtitleDialog.vue', import.meta.url));
     const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
@@ -384,15 +432,24 @@ describe('SubtitleDialog contract', () => {
     expect(template).not.toContain('Available in CID');
     expect(template).not.toContain('subtitle-dialog-remote-empty');
     expect(template).toContain('data-testid="subtitle-dialog-session-status"');
+    expect(template).toContain('Secondary subtitle');
+    expect(template).toContain('data-testid="subtitle-dialog-selection-grid"');
+    expect(template).toContain('data-testid="subtitle-dialog-secondary-select"');
     expect(template).toContain('Imported in this browser');
     expect(template).toContain('Local subtitles temporarily override same-language CID tracks.');
     expect(template).toContain('data-testid="subtitle-dialog-imported-list"');
     expect(script).toContain("const toolbarStatusLabel = computed(() => {");
     expect(script).toContain("const toolbarStatusValue = computed(() => {");
+    expect(script).toContain("const currentPrimaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.primaryLang));");
+    expect(script).toContain("function handleSecondarySubtitleChange(event) {");
+    expect(script).toContain("function clearSecondarySubtitle() {");
     expect(script).toContain("return hasImportedSubtitles.value ? 'Session active' : 'Ready';");
     expect(style).toContain('.subtitle-toolbar-status');
     expect(style).toContain('.subtitle-toolbar-status-label');
     expect(style).toContain('.subtitle-toolbar-status-value');
+    expect(style).toContain('.subtitle-selection-grid');
+    expect(style).toContain('.subtitle-select-input');
+    expect(style).toContain('.subtitle-role-pill');
     expect(style).toContain('.subtitle-section-copy');
     expect(style).toContain('.subtitle-section-caption');
   });

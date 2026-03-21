@@ -2,13 +2,20 @@ import { buildSidecarAssetUrl } from './videoInfo';
 
 export const subtitleManifestFileName = 'subtitles.json';
 export const subtitlePreferenceStorageKey = 'ipfs-hls-subtitle-preference';
+export const subtitleCatalogStatus = Object.freeze({
+  idle: 'idle',
+  loading: 'loading',
+  ready: 'ready',
+  error: 'error',
+});
 const localSubtitleSource = 'local';
 const remoteSubtitleSource = 'remote';
 const defaultImportedSubtitleLanguage = 'und';
 
 const defaultSubtitlePreference = Object.freeze({
   mode: 'off',
-  lang: '',
+  primaryLang: '',
+  secondaryLang: '',
 });
 
 const subtitleLabelMap = Object.freeze({
@@ -35,12 +42,15 @@ export function createDefaultSubtitlePreference() {
   return { ...defaultSubtitlePreference };
 }
 
-export async function fetchSubtitleManifest(baseUrl, options = {}) {
+export async function fetchSubtitleCatalog(baseUrl, options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const manifestUrl = buildSidecarAssetUrl(baseUrl, subtitleManifestFileName);
 
   if (!manifestUrl || typeof fetchImpl !== 'function') {
-    return [];
+    return {
+      status: subtitleCatalogStatus.error,
+      tracks: [],
+    };
   }
 
   try {
@@ -54,18 +64,35 @@ export async function fetchSubtitleManifest(baseUrl, options = {}) {
     });
 
     if (!response?.ok) {
-      return [];
+      return {
+        status: response?.status === 404 ? subtitleCatalogStatus.ready : subtitleCatalogStatus.error,
+        tracks: [],
+      };
     }
 
     const contentType = response.headers?.get?.('content-type') || '';
     if (contentType.includes('text/html')) {
-      return [];
+      return {
+        status: subtitleCatalogStatus.error,
+        tracks: [],
+      };
     }
 
-    return normalizeSubtitleManifest(await response.json());
+    return {
+      status: subtitleCatalogStatus.ready,
+      tracks: normalizeSubtitleManifest(await response.json()),
+    };
   } catch (_) {
-    return [];
+    return {
+      status: subtitleCatalogStatus.error,
+      tracks: [],
+    };
   }
+}
+
+export async function fetchSubtitleManifest(baseUrl, options = {}) {
+  const catalog = await fetchSubtitleCatalog(baseUrl, options);
+  return catalog.tracks;
 }
 
 export function normalizeSubtitleManifest(payload = {}) {
@@ -271,17 +298,19 @@ export function reconcileSubtitlePreference(preference, subtitles = [], navigato
     return normalizedPreference;
   }
 
-  const matchedStoredLang = matchAvailableSubtitleLanguage(subtitles, normalizedPreference.lang);
-  if (matchedStoredLang) {
-    return {
-      mode: normalizedPreference.mode,
-      lang: matchedStoredLang,
-    };
-  }
+  const matchedPrimaryLang =
+    matchAvailableSubtitleLanguage(subtitles, normalizedPreference.primaryLang) ||
+    choosePreferredSubtitleLanguage(subtitles, navigatorLike);
+  const matchedSecondaryLang = resolveSecondarySubtitleLanguage(
+    subtitles,
+    normalizedPreference.secondaryLang,
+    matchedPrimaryLang
+  );
 
   return {
     mode: normalizedPreference.mode,
-    lang: choosePreferredSubtitleLanguage(subtitles, navigatorLike),
+    primaryLang: matchedPrimaryLang,
+    secondaryLang: matchedSecondaryLang,
   };
 }
 
@@ -291,17 +320,53 @@ export function resolveToggledSubtitlePreference(preference, subtitles = [], nav
     return reconciledPreference;
   }
 
-  const matchedActiveLang = matchAvailableSubtitleLanguage(subtitles, activeLang);
-  if (matchedActiveLang) {
+  const activeLanguages = normalizeActiveSubtitleLanguages(subtitles, activeLang);
+  if (activeLanguages.length > 0) {
     return {
       mode: 'off',
-      lang: matchedActiveLang || reconciledPreference.lang,
+      primaryLang: activeLanguages[0] || reconciledPreference.primaryLang,
+      secondaryLang: activeLanguages[1] || reconciledPreference.secondaryLang,
     };
   }
 
   return {
     mode: 'showing',
-    lang: reconciledPreference.lang || choosePreferredSubtitleLanguage(subtitles, navigatorLike),
+    primaryLang: reconciledPreference.primaryLang || choosePreferredSubtitleLanguage(subtitles, navigatorLike),
+    secondaryLang: reconciledPreference.secondaryLang,
+  };
+}
+
+export function resolvePlayerControlledSubtitlePreference(
+  preference,
+  subtitles = [],
+  navigatorLike = null,
+  activeLang = ''
+) {
+  const reconciledPreference = reconcileSubtitlePreference(preference, subtitles, navigatorLike);
+  if (!Array.isArray(subtitles) || subtitles.length === 0) {
+    return reconciledPreference;
+  }
+
+  const activeLanguages = normalizeActiveSubtitleLanguages(subtitles, activeLang);
+  if (activeLanguages.length === 0) {
+    return {
+      mode: 'off',
+      primaryLang: reconciledPreference.primaryLang,
+      secondaryLang: reconciledPreference.secondaryLang,
+    };
+  }
+
+  const nextPrimaryLang = activeLanguages[0] || reconciledPreference.primaryLang;
+  const nextSecondaryLang = resolveSecondarySubtitleLanguage(
+    subtitles,
+    activeLanguages[1] || reconciledPreference.secondaryLang,
+    nextPrimaryLang
+  );
+
+  return {
+    mode: 'showing',
+    primaryLang: nextPrimaryLang,
+    secondaryLang: nextSecondaryLang,
   };
 }
 
@@ -338,9 +403,13 @@ export function convertSrtToVtt(text) {
 }
 
 function normalizeSubtitlePreference(preference) {
+  const legacyLang = normalizeString(preference?.primaryLang || preference?.lang);
+  const secondaryLang = normalizeString(preference?.secondaryLang);
+
   return {
     mode: preference?.mode === 'showing' ? 'showing' : 'off',
-    lang: normalizeString(preference?.lang),
+    primaryLang: legacyLang,
+    secondaryLang: normalizeLocale(secondaryLang) === normalizeLocale(legacyLang) ? '' : secondaryLang,
   };
 }
 
@@ -401,6 +470,26 @@ function defaultImportedSubtitleLabel(lang, fileName) {
   return stripFileExtension(fileName) || 'Local subtitle';
 }
 
+function normalizeActiveSubtitleLanguages(subtitles, activeLanguages) {
+  const candidateLanguages = Array.isArray(activeLanguages) ? activeLanguages : [activeLanguages];
+  const normalizedLanguages = [];
+
+  candidateLanguages.forEach((language) => {
+    const matchedLanguage = matchAvailableSubtitleLanguage(subtitles, language);
+    if (!matchedLanguage) {
+      return;
+    }
+
+    if (normalizedLanguages.some((value) => normalizeLocale(value) === normalizeLocale(matchedLanguage))) {
+      return;
+    }
+
+    normalizedLanguages.push(matchedLanguage);
+  });
+
+  return normalizedLanguages.slice(0, 2);
+}
+
 function matchAvailableSubtitleLanguage(subtitles, locale) {
   const normalizedLocale = normalizeLocale(locale);
   if (!normalizedLocale) return '';
@@ -415,6 +504,15 @@ function matchAvailableSubtitleLanguage(subtitles, locale) {
 
   const baseMatch = subtitles.find((subtitle) => localeBaseLanguage(subtitle?.lang) === localeBase);
   return baseMatch ? normalizeString(baseMatch.lang) : '';
+}
+
+function resolveSecondarySubtitleLanguage(subtitles, locale, primaryLang = '') {
+  const matchedLanguage = matchAvailableSubtitleLanguage(subtitles, locale);
+  if (!matchedLanguage) {
+    return '';
+  }
+
+  return normalizeLocale(matchedLanguage) === normalizeLocale(primaryLang) ? '' : matchedLanguage;
 }
 
 function extractPreferredLocales(navigatorLike) {
