@@ -32,7 +32,7 @@ describe('VideoInfo layout contract', () => {
     const style = getFirstStyleContent(descriptor);
 
     const infoRowIndex = template.indexOf('<div ref="infoRowRef" class="info-row" data-testid="video-info-row">');
-    const creatorInfoIndex = template.indexOf('<div ref="creatorInfoRef" class="creator-info" data-testid="video-info-creator">');
+    const creatorInfoIndex = template.indexOf('ref="creatorInfoRef"');
     const actionsIndex = template.indexOf('<div ref="actionsRef" class="actions" :class="{ \'actions-wrapped\': actionsWrapped }" data-testid="video-info-actions">');
     const descriptionIndex = template.indexOf('<div class="description glass-panel">');
 
@@ -42,6 +42,8 @@ describe('VideoInfo layout contract', () => {
     expect(creatorInfoIndex).toBeGreaterThan(infoRowIndex);
     expect(actionsIndex).toBeGreaterThan(creatorInfoIndex);
     expect(descriptionIndex).toBeGreaterThan(actionsIndex);
+    expect(template).toContain("'creator-info-compact': creatorTextHidden");
+    expect(template).toContain('data-testid="video-info-follow-button"');
 
     expect(style).toContain('justify-content: space-between;');
     expect(style).toContain('justify-content: flex-end;');
@@ -88,13 +90,32 @@ describe('VideoInfo layout contract', () => {
     expect(script).toContain("const overflowActionOrder = [shareActionId, downloadActionId];");
     expect(script).toContain("const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));");
     expect(script).toContain('function resolveLayout()');
-    expect(script).toContain('const availableActionsWidth = Math.max(0, infoRowWidth - creatorWidth - infoGap);');
+    expect(script).toContain('const nextCreatorTextHidden = fullCreatorWidth > infoRowWidth + 1;');
+    expect(script).toContain('const nextCreatorWidth = nextCreatorTextHidden ? compactCreatorWidth : fullCreatorWidth;');
+    expect(script).toContain('const availableActionsWidth = Math.max(0, infoRowWidth - nextCreatorWidth - infoGap);');
 
     expect(style).toContain('.actions-wrapped');
     expect(style).toContain('.action-measure');
     expect(style).toContain('.actions-menu');
     expect(style).toContain('border-radius: 20px;');
     expect(style).toContain('justify-content: flex-start;');
+  });
+
+  it('hides uploader text before the follow button wraps and keeps a compact measurement copy offscreen', () => {
+    const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('v-if="!creatorTextHidden" class="creator-text" data-testid="video-info-creator-text"');
+    expect(template).toContain('ref="creatorTextMeasureRef"');
+    expect(template).toContain('class="creator-text creator-text-measure"');
+    expect(script).toContain('const creatorTextHidden = ref(false);');
+    expect(script).toContain('const creatorTextMeasureRef = ref(null);');
+    expect(script).toContain('const subscribeButtonRef = ref(null);');
+    expect(script).toContain('const compactCreatorWidth =');
+    expect(style).toContain('.creator-text-measure');
+    expect(style).toContain('.creator-info-compact .subscribe-btn');
   });
 
   it('places dynamically collapsed items at the top of the overflow menu (e.g. share before download)', () => {
