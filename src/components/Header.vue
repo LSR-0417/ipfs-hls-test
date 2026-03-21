@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from '../i18n';
 import {
   isDisabledGatewayInput,
   isPrivateHostname,
@@ -31,11 +32,15 @@ const props = defineProps({
   sidebarOpen: { type: Boolean, default: false },
 });
 const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);
+const { availableLocales, locale, setLocale, t } = useI18n();
 
 const searchQuery = ref('');
 const isCompactHeader = ref(false);
 const searchInputRef = ref(null);
 const settingsOpen = ref(false);
+const localeActionRef = ref(null);
+const localeButtonRef = ref(null);
+const localeMenuRef = ref(null);
 const gatewayButtonRef = ref(null);
 const gatewayDialogRef = ref(null);
 const selectedGatewayId = ref(builtInGateways[0].id);
@@ -46,6 +51,7 @@ const gatewayError = ref('');
 const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
 const isGatewayProbeRunning = ref(false);
+const isLocaleMenuOpen = ref(false);
 const lastFocusedGatewayTrigger = ref(null);
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
@@ -122,6 +128,12 @@ const currentGatewayProbeState = computed(() => {
 const gatewaySelectionCaption = computed(() =>
   currentCidValue.value ? 'Fastest healthy gateway appears first.' : 'Choose a gateway now, or load a CID to compare health.'
 );
+const currentGatewayButtonAriaLabel = computed(() =>
+  t('header.actions.gateway.ariaLabel', { gateway: currentGatewayName.value })
+);
+const currentLocaleDefinition = computed(() => {
+  return availableLocales.find((option) => option.code === locale.value) || availableLocales[0] || null;
+});
 const selectedGatewayValue = computed(() => {
   if (selectedGatewayId.value === LOCAL_GATEWAY_ID) {
     return isDevMode ? localGatewayUrl.value : gatewayUrl(builtInGateways[0]);
@@ -150,7 +162,9 @@ const currentGatewayName = computed(() => {
     return 'Custom Gateway';
   }
 });
-const searchPlaceholder = computed(() => (isCompactHeader.value ? 'Search CID' : 'Search IPFS CID (e.g. Qm...)'));
+const searchPlaceholder = computed(() =>
+  isCompactHeader.value ? t('header.search.placeholder.compact') : t('header.search.placeholder.full')
+);
 const currentGatewayId = computed(() => {
   const current = currentGatewayValue.value;
   if (!current) return '';
@@ -302,6 +316,49 @@ function toggleSidebar() {
   emit('toggle-sidebar');
 }
 
+function toggleLocaleMenu() {
+  isLocaleMenuOpen.value = !isLocaleMenuOpen.value;
+}
+
+function closeLocaleMenu(options = {}) {
+  if (!isLocaleMenuOpen.value) return;
+
+  isLocaleMenuOpen.value = false;
+
+  if (options.restoreFocus !== false) {
+    nextTick(() => {
+      localeButtonRef.value?.focus();
+    });
+  }
+}
+
+function changeLocale(nextLocale) {
+  const localeCode = typeof nextLocale === 'string' ? nextLocale : nextLocale?.target?.value;
+
+  if (!localeCode) return;
+  setLocale(localeCode);
+  closeLocaleMenu({ restoreFocus: false });
+}
+
+function handleDocumentPointerDown(event) {
+  if (!isLocaleMenuOpen.value) return;
+
+  if (localeActionRef.value?.contains(event.target)) {
+    return;
+  }
+
+  closeLocaleMenu({ restoreFocus: false });
+}
+
+function handleDocumentKeydown(event) {
+  if (event.key !== 'Escape' || !isLocaleMenuOpen.value) {
+    return;
+  }
+
+  event.preventDefault();
+  closeLocaleMenu();
+}
+
 function syncLocalFromGateway(urlStr) {
   if (!isDevMode) return;
 
@@ -341,6 +398,7 @@ function formatGatewayEndpoint(urlStr) {
 }
 
 function openSettings() {
+  closeLocaleMenu({ restoreFocus: false });
   if (isDevMode) {
     restoreLocalGateway();
     syncLocalFromGateway(props.currentGateway);
@@ -803,6 +861,8 @@ function syncCompactHeaderViewport() {
 onMounted(() => {
   syncCompactHeaderViewport();
   window.addEventListener('resize', syncCompactHeaderViewport);
+  document.addEventListener('pointerdown', handleDocumentPointerDown);
+  document.addEventListener('keydown', handleDocumentKeydown);
   if (isDevMode) {
     restoreLocalGateway();
   }
@@ -817,6 +877,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('keydown', handleGatewayDialogKeydown);
+    document.removeEventListener('pointerdown', handleDocumentPointerDown);
+    document.removeEventListener('keydown', handleDocumentKeydown);
   }
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', syncCompactHeaderViewport);
@@ -863,8 +925,8 @@ onBeforeUnmount(() => {
             v-if="!isSearchQueryEmpty"
             class="icon-btn search-clear-btn"
             @click="clearSearchQuery"
-            aria-label="Clear search"
-            title="Clear search text"
+            :aria-label="t('header.search.actions.clear.ariaLabel')"
+            :title="t('header.search.actions.clear.title')"
             data-testid="header-search-clear-button"
           >
             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z" /></svg>
@@ -872,8 +934,8 @@ onBeforeUnmount(() => {
           <button
             class="icon-btn search-submit-btn"
             @click="onSearch"
-            aria-label="Search"
-            title="Search CID"
+            :aria-label="t('header.search.actions.submit.ariaLabel')"
+            :title="t('header.search.actions.submit.title')"
             data-testid="header-search-submit-button"
           >
             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" /></svg>
@@ -883,6 +945,61 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="actions-area" data-testid="header-actions-area">
+      <div
+        ref="localeActionRef"
+        class="locale-action-shell"
+        data-testid="header-locale-switcher"
+      >
+        <button
+          ref="localeButtonRef"
+          type="button"
+          class="action-btn locale-btn"
+          :aria-label="`${t('common.language')}: ${currentLocaleDefinition?.nativeLabel || locale}`"
+          aria-haspopup="menu"
+          :aria-expanded="isLocaleMenuOpen ? 'true' : 'false'"
+          data-testid="header-locale-button"
+          @click="toggleLocaleMenu"
+        >
+          <span class="action-btn-visual locale-btn-visual" aria-hidden="true">
+            <svg class="locale-btn-icon" viewBox="0 0 24 24">
+              <path
+                fill="currentColor"
+                d="M12.87 15.07 10.33 12.56l.03-.03c1.74-1.94 3.07-4.17 3.98-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.33 8.43 10 10.63 8.31 12.54 7.21 11.32 6.3 9.95 5.6 8.5h-2c.83 1.93 2 3.72 3.47 5.3L2 18.82l1.41 1.41 4.87-4.87 3.03 3.03.56-3.32ZM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12Zm-2.62 7 1.62-4.33L19.12 17h-3.24Z"
+              />
+            </svg>
+          </span>
+          <span class="action-btn-copy">
+            <span class="action-btn-label">{{ t('common.language') }}</span>
+            <span class="action-btn-title">{{ currentLocaleDefinition?.nativeLabel || locale }}</span>
+          </span>
+        </button>
+        <div
+          v-if="isLocaleMenuOpen"
+          ref="localeMenuRef"
+          class="locale-menu glass-panel"
+          role="menu"
+          :aria-label="t('common.language')"
+          data-testid="header-locale-menu"
+        >
+          <button
+            v-for="option in availableLocales"
+            :key="option.code"
+            type="button"
+            class="locale-menu-item"
+            :class="{ 'is-active': locale === option.code }"
+            role="menuitemradio"
+            :aria-checked="locale === option.code ? 'true' : 'false'"
+            :data-testid="`header-locale-option-${option.code}`"
+            @click="changeLocale(option.code)"
+          >
+            <span class="locale-menu-item-copy">
+              <span class="locale-menu-item-title">{{ option.nativeLabel }}</span>
+              <span class="locale-menu-item-meta">{{ option.code }}</span>
+            </span>
+            <span v-if="locale === option.code" class="locale-menu-item-check" aria-hidden="true">✓</span>
+          </button>
+        </div>
+      </div>
       <button
         ref="gatewayButtonRef"
         type="button"
@@ -890,7 +1007,7 @@ onBeforeUnmount(() => {
         @click="openSettings"
         aria-haspopup="dialog"
         :aria-expanded="settingsOpen ? 'true' : 'false'"
-        :aria-label="`Switch gateway. Current gateway: ${currentGatewayName}`"
+        :aria-label="currentGatewayButtonAriaLabel"
         :title="currentGatewayValue || currentGatewayName"
         data-testid="gateway-button"
       >
@@ -901,15 +1018,15 @@ onBeforeUnmount(() => {
           </svg>
         </span>
         <span class="action-btn-copy">
-          <span class="action-btn-label">Gateway</span>
+          <span class="action-btn-label">{{ t('header.actions.gateway.label') }}</span>
           <span class="action-btn-title">{{ currentGatewayName }}</span>
         </span>
       </button>
       <button
         type="button"
         class="action-btn account-btn"
-        aria-label="Sign in to your account"
-        title="Sign in"
+        :aria-label="t('header.actions.account.ariaLabel')"
+        :title="t('header.actions.account.title')"
         data-testid="account-button"
       >
         <span class="action-btn-visual account-btn-visual" aria-hidden="true">
@@ -921,8 +1038,8 @@ onBeforeUnmount(() => {
           </svg>
         </span>
         <span class="action-btn-copy">
-          <span class="action-btn-label">Account</span>
-          <span class="action-btn-title">Sign In</span>
+          <span class="action-btn-label">{{ t('header.actions.account.label') }}</span>
+          <span class="action-btn-title">{{ t('header.actions.account.title') }}</span>
         </span>
       </button>
     </div>
@@ -1253,6 +1370,12 @@ onBeforeUnmount(() => {
 }
 
 .actions-area {
+  --header-locale-min-width: 96px;
+  --header-locale-max-width: 220px;
+  --header-gateway-min-width: 104px;
+  --header-gateway-max-width: 244px;
+  --header-account-min-width: 96px;
+  --header-account-max-width: 180px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1260,6 +1383,92 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   min-width: 0;
   justify-content: flex-end;
+}
+
+.locale-action-shell {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: var(--header-locale-min-width);
+  max-width: var(--header-locale-max-width);
+}
+
+.locale-btn {
+  width: 100%;
+}
+
+.locale-btn-visual {
+  color: rgba(255, 232, 189, 0.92);
+  background: linear-gradient(135deg, rgba(255, 204, 102, 0.12), rgba(0, 210, 255, 0.12));
+  border-color: rgba(255, 214, 130, 0.16);
+}
+
+.locale-btn-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.locale-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 196px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 18px;
+  z-index: 140;
+}
+
+.locale-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.locale-menu-item:hover,
+.locale-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+  outline: none;
+}
+
+.locale-menu-item.is-active {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.locale-menu-item-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.locale-menu-item-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.locale-menu-item-meta {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.locale-menu-item-check {
+  color: var(--accent-cyan);
+  font-size: 0.9rem;
+  font-weight: 700;
+  flex: 0 0 auto;
 }
 
 .action-btn {
@@ -1318,9 +1527,9 @@ onBeforeUnmount(() => {
 }
 
 .gateway-btn {
-  flex: 0 1 196px;
-  width: auto;
-  max-width: 196px;
+  flex: 0 1 auto;
+  min-width: var(--header-gateway-min-width);
+  max-width: var(--header-gateway-max-width);
 }
 
 .action-btn-visual {
@@ -1435,11 +1644,17 @@ onBeforeUnmount(() => {
 }
 
 .action-btn-label {
+  display: block;
+  width: 100%;
   color: rgba(255, 255, 255, 0.56);
   font-size: 0.62rem;
   letter-spacing: 0.09em;
   line-height: 1;
   text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-btn-title {
@@ -1456,9 +1671,9 @@ onBeforeUnmount(() => {
 }
 
 .account-btn {
-  flex: 0 1 152px;
-  width: auto;
-  max-width: 152px;
+  flex: 0 1 auto;
+  min-width: var(--header-account-min-width);
+  max-width: var(--header-account-max-width);
 }
 
 .account-btn-visual {
@@ -1507,17 +1722,24 @@ onBeforeUnmount(() => {
     display: none; /* hide standard icon to save space on mobile */
   }
   .actions-area {
+    --header-locale-min-width: 92px;
+    --header-locale-max-width: 188px;
+    --header-gateway-min-width: 100px;
+    --header-gateway-max-width: 196px;
     width: auto;
     gap: 4px;
+  }
+  .locale-action-shell {
+    min-width: var(--header-locale-min-width);
+    max-width: var(--header-locale-max-width);
   }
   .actions-area .icon-btn,
   .account-btn {
     display: none;
   }
   .gateway-btn {
-    width: auto;
-    min-width: 0;
-    max-width: 152px;
+    min-width: var(--header-gateway-min-width);
+    max-width: var(--header-gateway-max-width);
     padding: 4px 6px;
   }
   .action-btn-title {
@@ -1549,16 +1771,27 @@ onBeforeUnmount(() => {
   .search-submit-btn {
     margin-left: 4px;
   }
-  .gateway-btn {
-    flex: 0 0 46px;
-    width: 46px;
-    max-width: 46px;
-    gap: 0;
-    padding: 0;
-    justify-content: center;
+  .actions-area {
+    --header-locale-min-width: 88px;
+    --header-locale-max-width: 160px;
+    --header-gateway-min-width: 96px;
+    --header-gateway-max-width: 176px;
   }
-  .gateway-btn .action-btn-copy {
-    display: none;
+  .locale-action-shell {
+    min-width: var(--header-locale-min-width);
+    max-width: var(--header-locale-max-width);
+  }
+  .locale-btn {
+    padding: 4px 6px;
+  }
+  .locale-menu {
+    min-width: 170px;
+    right: -8px;
+  }
+  .gateway-btn {
+    min-width: var(--header-gateway-min-width);
+    max-width: var(--header-gateway-max-width);
+    padding: 4px 6px;
   }
   .action-btn-visual {
     --action-chip-radius: 10px;
@@ -1569,6 +1802,34 @@ onBeforeUnmount(() => {
   .gateway-btn-icon {
     width: 16px;
     height: 16px;
+  }
+}
+
+@media (max-width: 375px) {
+  .locale-action-shell {
+    flex: 0 0 46px;
+    min-width: 46px;
+    max-width: 46px;
+  }
+  .locale-btn {
+    gap: 0;
+    padding: 0;
+    justify-content: center;
+  }
+  .locale-btn .action-btn-copy {
+    display: none;
+  }
+  .gateway-btn {
+    flex: 0 0 46px;
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    gap: 0;
+    padding: 0;
+    justify-content: center;
+  }
+  .gateway-btn .action-btn-copy {
+    display: none;
   }
 }
 

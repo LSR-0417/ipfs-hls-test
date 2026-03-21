@@ -160,9 +160,11 @@ describe('RecommendationsPage layout contract', () => {
     const style = getFirstStyleContent(descriptor);
 
     expect(template).toContain('<section class="recommendations-page" data-testid="recommendations-page">');
-    expect(template).toContain('<h2 class="recommendations-title" data-testid="recommendations-title">Recommended Next</h2>');
+    expect(template).toContain("<h2 class=\"recommendations-title\" data-testid=\"recommendations-title\">{{ t('recommendations.title') }}</h2>");
     expect(template).toContain('<VideoGrid />');
     expect(script).toContain("import VideoGrid from './VideoGrid.vue';");
+    expect(script).toContain("import { useI18n } from '../i18n';");
+    expect(script).toContain("const { t } = useI18n();");
     expect(style).toContain('.recommendations-page');
     expect(style).toContain('flex-direction: column;');
     expect(style).toContain('margin: 0 0 0 16px;');

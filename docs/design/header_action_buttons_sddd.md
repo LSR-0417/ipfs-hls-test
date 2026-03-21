@@ -14,11 +14,12 @@
 
 - 原本 `Gateway` 使用較重的卡片式按鈕
 - 右側搭配一顆獨立圓形 avatar
-- 兩者在尺寸、資訊密度、hover 回饋與視覺責任上不一致
+- 之後新增 `Language` 入口時，也需要納入同一組 toolbar action 語言
+- 它們在尺寸、資訊密度、hover 回饋與視覺責任上不一致
 
 後續調整的核心方向為：
 
-- 把兩者整併成同一系列 action button
+- 把 `Language`、`Gateway`、`Account` 整併成同一系列 action button
 - 降低卡片感，讓它更像 header tooling
 - 保留 gateway 的即時狀態辨識能力
 - 在 `iPhone 13 mini` 寬度下仍可穩定顯示
@@ -27,7 +28,7 @@
 
 ### 2.1 一致性
 
-`Gateway` 與 `Account` 需要共享同一套按鈕語言，而不是一顆資訊卡搭配一顆頭像。
+`Language`、`Gateway` 與 `Account` 需要共享同一套按鈕語言，而不是一顆資訊卡搭配一顆頭像，再外加另一顆獨立控制。
 
 ### 2.2 可擴充性
 
@@ -107,29 +108,51 @@ action button
 
 LLM 不應把這些 scale 補償誤解成狀態效果。
 
+### 3.5 寬度策略
+
+目前右上角按鈕不再採用單一固定寬度，而是改成每顆按鈕各自定義 `min-width` 與 `max-width`。
+
+這個決策的原因是：
+
+- 讓 `Language`、`Gateway` 這種文字長度波動較大的按鈕能盡量顯示完整內容
+- 保留搜尋列的主要版面優先權
+- 把截斷延後到超過 `max-width` 之後，而不是提早壓扁文字
+
+目前實作中的寬度基準位於 `src/components/Header.vue`，屬於可微調數值；但「有最小值、有最大值、超過才截斷」是設計契約，不應被拿掉。
+
 ## 4. Responsive 策略
 
 ### 4.1 Desktop
 
 桌面寬度下：
 
+- `Language` 顯示 `label + title`
 - `Gateway` 顯示 `label + title`
 - `Account` 顯示 `label + title`
-- gateway title 可安全截斷
+- title 在各自 `max-width` 內可安全截斷
 
 ### 4.2 中窄寬度
 
 中窄寬度下：
 
 - `Account` 優先隱藏
-- `Gateway` 保留 icon 與文字
+- `Language` 與 `Gateway` 保留 icon 與文字
 - 搜尋列優先保有輸入寬度
 
-### 4.3 最窄寬度
+### 4.3 小螢幕過渡區
+
+約 `480px` 以下時：
+
+- `Language` 與 `Gateway` 先縮小寬度區間
+- 仍盡量保留文字，不立即退化為 icon-only
+- 若 title 太長，應先使用 ellipsis，而不是破壞 header 排版
+
+### 4.4 最窄寬度
 
 最窄寬度下：
 
 - `Account` 隱藏
+- `Language` 收斂為 icon-only
 - `Gateway` 收斂為 icon-only
 - 搜尋 placeholder 改短
 - 仍保留 gateway status ring
@@ -190,23 +213,26 @@ LLM 若被要求「整體統一風格」，也不應直接把 header action butt
 - gateway icon scale 補償是基於視覺校正，而不是統一的 icon source system
 - `Account` 目前仍是 placeholder action，尚未接真實登入流程
 - status ring 只套用於 gateway trigger，其他按鈕沒有通用狀態模型
+- 寬度基準目前仍直接定義在 `Header.vue`，尚未抽成共用 token 或 component API
 
 ## 8. 後續建議
 
 若未來要繼續演進，建議優先順序如下：
 
 1. 建立共用 header action component，避免 `Header.vue` 內樣式持續膨脹
-2. 釐清 gateway icon source，降低 per-icon scale 補償需求
-3. 若接入真實登入流程，再定義 `Account` 的登入 / 已登入雙態規則
+2. 抽出 header action 的尺寸 / 寬度 token，減少魔術數字分散在 CSS
+3. 釐清 gateway icon source，降低 per-icon scale 補償需求
+4. 若接入真實登入流程，再定義 `Account` 的登入 / 已登入雙態規則
 
 ## 9. LLM 修改守則
 
 若 LLM 後續要修改 header actions，應優先保住以下不變量：
 
-1. `Gateway` 與 `Account` 屬於同一系列 action buttons
+1. `Language`、`Gateway` 與 `Account` 屬於同一系列 action buttons
 2. icon 與狀態必須分責
 3. 狀態視覺不得超出按鈕邊界
-4. `375px` 寬度下 gateway 必須可收斂為 icon-only
-5. 搜尋列可用性優先於次要文案
+4. 帶文字的 action button 必須維持 `min-width` / `max-width` 契約
+5. `375px` 寬度下 gateway 必須可收斂為 icon-only
+6. 搜尋列可用性優先於次要文案
 
 若需求與上述不變量衝突，應明確指出衝突，而不是默默選擇其一。

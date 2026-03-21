@@ -27,14 +27,23 @@ describe('Header search action button', () => {
     expect(template).toContain('data-testid="header-search-clear-button"');
     expect(template).toContain('class="icon-btn search-submit-btn"');
     expect(template).toContain('@click="onSearch"');
-    expect(template).toContain('aria-label="Search"');
-    expect(template).toContain('title="Search CID"');
+    expect(template).toContain(":aria-label=\"t('header.search.actions.submit.ariaLabel')\"");
+    expect(template).toContain(":title=\"t('header.search.actions.submit.title')\"");
     expect(template).toContain('data-testid="header-search-submit-button"');
+    expect(template).toContain('data-testid="header-locale-switcher"');
+    expect(template).toContain('data-testid="header-locale-button"');
+    expect(template).toContain('class="action-btn locale-btn"');
+    expect(template).toContain('class="locale-menu glass-panel"');
 
+    expect(script).toContain("import { useI18n } from '../i18n';");
+    expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
     expect(script).toContain('const searchInputRef = ref(null);');
     expect(script).toContain('const isSearchQueryEmpty = computed(() => searchQuery.value.trim().length === 0);');
     expect(script).toContain('function focusSearchInput() {');
     expect(script).toContain('async function clearSearchQuery() {');
+    expect(script).toContain('function toggleLocaleMenu() {');
+    expect(script).toContain('function closeLocaleMenu(options = {}) {');
+    expect(script).toContain('function changeLocale(nextLocale) {');
     expect(script).toContain("searchQuery.value = '';");
     expect(script).toContain('await nextTick();');
     expect(script).toContain('focusSearchInput();');
@@ -45,6 +54,9 @@ describe('Header search action button', () => {
     expect(style).toContain('.search-actions');
     expect(style).toContain('.search-clear-btn');
     expect(style).toContain('.search-submit-btn');
+    expect(style).toContain('.locale-action-shell');
+    expect(style).toContain('.locale-btn');
+    expect(style).toContain('.locale-menu');
   });
 });
 

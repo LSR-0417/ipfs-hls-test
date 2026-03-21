@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { useI18n } from '../i18n';
 
 const props = defineProps({
   activeView: {
@@ -13,28 +14,29 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['view-select']);
+const { t } = useI18n();
 
 const isDevMode = import.meta.env.DEV;
 const appVersion = __APP_VERSION__;
 const branchName = __APP_BRANCH__;
 const worktreeName = __APP_WORKTREE__;
 
-const menuItems = [
-  { id: 'home', label: 'Home', targetView: 'home', icon: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' },
-  { id: 'explore', label: 'Explore', targetView: '', icon: 'M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1c.61 0 1.1-.49 1.1-1.1s-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z' },
-  { id: 'library', label: 'Library', targetView: '', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z' },
-  { id: 'history', label: 'History', targetView: 'history', icon: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z' },
-];
+const menuItems = computed(() => [
+  { id: 'home', label: t('sidebar.menu.home'), targetView: 'home', icon: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' },
+  { id: 'explore', label: t('sidebar.menu.explore'), targetView: '', icon: 'M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1c.61 0 1.1-.49 1.1-1.1s-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z' },
+  { id: 'library', label: t('sidebar.menu.library'), targetView: '', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z' },
+  { id: 'history', label: t('sidebar.menu.history'), targetView: 'history', icon: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z' },
+]);
 
 const homeBuildItems = computed(() => {
   const items = [
-    { label: 'Version', value: `v${appVersion || 'unavailable'}` },
+    { label: t('sidebar.build.version'), value: `v${appVersion || t('common.unavailable')}` },
   ];
 
   if (isDevMode) {
     items.push(
-      { label: 'Worktree', value: worktreeName || 'unavailable' },
-      { label: 'Branch', value: branchName || 'unavailable' }
+      { label: t('sidebar.build.worktree'), value: worktreeName || t('common.unavailable') },
+      { label: t('sidebar.build.branch'), value: branchName || t('common.unavailable') }
     );
   }
 

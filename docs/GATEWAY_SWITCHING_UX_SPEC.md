@@ -60,12 +60,14 @@ Header 右上角的 gateway 按鈕固定顯示：
 - 主標：`Gateway`
 - 次標：目前 gateway 名稱
 - 一個位於 icon chip 內部的狀態 ring，反映背景 probe 結果
-- 與 `Account` 共享同系列的 header action button 視覺語言
+- 與 `Language`、`Account` 共享同系列的 header action button 視覺語言
+- 在既定 `min-width` / `max-width` 區間內盡量顯示文字，超過上限才安全截斷
 
 Responsive 行為如下：
 
 - 桌面寬度：顯示 `Gateway` 與目前 gateway 名稱
-- 中窄寬度：優先保留 gateway 按鈕，隱藏 `Account`
+- 中窄寬度：優先保留 `Language` / `Gateway`，隱藏 `Account`
+- `<= 480px`：gateway 先縮小寬度區間，但仍盡量保留文字
 - 最窄寬度：gateway 收斂為 icon-only，但仍保留狀態 ring
 
 目前不會顯示：
