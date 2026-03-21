@@ -32,6 +32,7 @@ const props = defineProps({
 const emit = defineEmits(['search', 'gateway-change']);
 
 const searchQuery = ref('');
+const isCompactHeader = ref(false);
 const settingsOpen = ref(false);
 const gatewayButtonRef = ref(null);
 const gatewayDialogRef = ref(null);
@@ -144,6 +145,7 @@ const currentGatewayName = computed(() => {
     return 'Custom Gateway';
   }
 });
+const searchPlaceholder = computed(() => (isCompactHeader.value ? 'Search CID' : 'Search IPFS CID (e.g. Qm...)'));
 const currentGatewayId = computed(() => {
   const current = currentGatewayValue.value;
   if (!current) return '';
@@ -732,7 +734,14 @@ function restoreLocalGateway() {
   }
 }
 
+function syncCompactHeaderViewport() {
+  if (typeof window === 'undefined') return;
+  isCompactHeader.value = window.innerWidth <= 480;
+}
+
 onMounted(() => {
+  syncCompactHeaderViewport();
+  window.addEventListener('resize', syncCompactHeaderViewport);
   if (isDevMode) {
     restoreLocalGateway();
   }
@@ -747,6 +756,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('keydown', handleGatewayDialogKeydown);
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncCompactHeaderViewport);
   }
   stopGatewayProbeLoop();
   cancelScheduledGatewayProbe();
@@ -773,7 +785,7 @@ onBeforeUnmount(() => {
         <input 
           type="text" 
           v-model="searchQuery" 
-          placeholder="Search IPFS CID (e.g. Qm...)" 
+          :placeholder="searchPlaceholder"
           @keyup.enter="onSearch"
         />
         <button class="icon-btn search-submit-btn" @click="onSearch" aria-label="Search">
@@ -785,6 +797,7 @@ onBeforeUnmount(() => {
     <div class="actions-area" data-testid="header-actions-area">
       <button
         ref="gatewayButtonRef"
+        type="button"
         class="action-btn gateway-btn"
         @click="openSettings"
         aria-haspopup="dialog"
@@ -793,20 +806,37 @@ onBeforeUnmount(() => {
         :title="currentGatewayValue || currentGatewayName"
         data-testid="gateway-button"
       >
-        <span class="gateway-btn-visual" :class="`is-${currentGatewayKind}`" aria-hidden="true">
+        <span class="action-btn-visual gateway-btn-visual" :class="`is-${currentGatewayKind}`" aria-hidden="true">
+          <span class="gateway-btn-status-ring" :class="`is-${currentGatewayProbeState.state}`"></span>
           <svg class="gateway-btn-icon" viewBox="0 0 24 24">
             <path fill="currentColor" :d="currentGatewayIconPath" />
           </svg>
-          <span class="gateway-signal gateway-btn-signal" :class="`is-${currentGatewayProbeState.state}`"></span>
         </span>
-        <span class="gateway-btn-copy">
-          <span class="gateway-btn-action">Gateway</span>
-          <span class="gateway-btn-name">{{ currentGatewayName }}</span>
+        <span class="action-btn-copy">
+          <span class="action-btn-label">Gateway</span>
+          <span class="action-btn-title">{{ currentGatewayName }}</span>
         </span>
       </button>
-      <div class="avatar">
-        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=b6e3f4" alt="User" />
-      </div>
+      <button
+        type="button"
+        class="action-btn account-btn"
+        aria-label="Sign in to your account"
+        title="Sign in"
+        data-testid="account-button"
+      >
+        <span class="action-btn-visual account-btn-visual" aria-hidden="true">
+          <svg class="account-btn-icon" viewBox="0 0 24 24">
+            <path
+              fill="currentColor"
+              d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v1h20v-1c0-3.33-6.67-5-10-5z"
+            />
+          </svg>
+        </span>
+        <span class="action-btn-copy">
+          <span class="action-btn-label">Account</span>
+          <span class="action-btn-title">Sign In</span>
+        </span>
+      </button>
     </div>
   </header>
 
@@ -1126,60 +1156,86 @@ onBeforeUnmount(() => {
 .actions-area {
   display: flex;
   align-items: center;
-  gap: 16px;
-  width: clamp(280px, 28vw, 336px);
+  gap: 6px;
+  width: auto;
+  flex: 0 0 auto;
   min-width: 0;
   justify-content: flex-end;
 }
 
-.gateway-btn {
+.action-btn {
   position: relative;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.04);
+  min-height: 46px;
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  padding: 10px 10px 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  padding: 6px 8px;
   font-size: 0.9rem;
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex: 1 1 0;
-  width: min(100%, 224px);
+  gap: 10px;
   min-width: 0;
-  max-width: 224px;
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition:
+    transform 0.22s ease,
+    background 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+  box-shadow: none;
 }
 
-.gateway-btn::before {
+.action-btn::before {
   content: '';
   position: absolute;
-  inset: 1px;
-  border-radius: 19px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 0.22s ease;
 }
 
-.gateway-btn:hover {
-  background: rgba(255, 255, 255, 0.055);
-  border-color: rgba(255, 255, 255, 0.16);
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.action-btn:hover::before,
+.action-btn:focus-visible::before {
+  opacity: 1;
+}
+
+.action-btn:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(162, 82, 255, 0.26);
   box-shadow:
-    0 10px 20px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    0 0 0 1px rgba(162, 82, 255, 0.18),
+    0 0 0 4px rgba(162, 82, 255, 0.08);
 }
 
-.gateway-btn-visual {
+.gateway-btn {
+  flex: 0 1 196px;
+  width: auto;
+  max-width: 196px;
+}
+
+.action-btn-visual {
   position: relative;
   z-index: 1;
+  --action-chip-radius: 12px;
   width: 34px;
   height: 34px;
-  border-radius: 12px;
+  border-radius: var(--action-chip-radius);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  overflow: hidden;
   color: rgba(255, 255, 255, 0.82);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1202,41 +1258,92 @@ onBeforeUnmount(() => {
 }
 
 .gateway-btn-icon {
-  width: 16px;
-  height: 16px;
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  transform-origin: center;
+  transition: transform 0.22s ease;
 }
 
-.gateway-btn-signal {
+.gateway-btn-visual.is-local .gateway-btn-icon {
+  transform: scale(1.14);
+}
+
+.gateway-btn-visual.is-public .gateway-btn-icon {
+  transform: scale(1.06);
+}
+
+.gateway-btn-visual.is-custom .gateway-btn-icon {
+  transform: scale(1.1);
+}
+
+.gateway-btn-status-ring {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 11px;
-  height: 11px;
-  border: 2px solid rgba(11, 14, 25, 0.95);
+  inset: 1px;
+  border-radius: calc(var(--action-chip-radius) - 1px);
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  opacity: 0.72;
+  transition: box-shadow 0.22s ease, opacity 0.22s ease;
 }
 
-.gateway-btn-copy {
+.gateway-btn-status-ring.is-idle {
+  box-shadow: inset 0 0 0 1px rgba(127, 139, 153, 0.24);
+  opacity: 0.52;
+}
+
+.gateway-btn-status-ring.is-probing {
+  box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.76);
+  animation: gateway-ring-pulse 1.1s ease-in-out infinite;
+}
+
+.gateway-btn-status-ring.is-playlist_ready {
+  box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.7);
+}
+
+.gateway-btn-status-ring.is-ready {
+  box-shadow: inset 0 0 0 1px rgba(56, 211, 159, 0.78);
+}
+
+.gateway-btn-status-ring.is-degraded {
+  box-shadow: inset 0 0 0 1px rgba(255, 159, 67, 0.76);
+}
+
+.gateway-btn-status-ring.is-rate_limited {
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.74);
+}
+
+.gateway-btn-status-ring.is-redirected {
+  box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.72);
+}
+
+.gateway-btn-status-ring.is-failed {
+  box-shadow: inset 0 0 0 1px rgba(255, 107, 107, 0.8);
+}
+
+.action-btn-copy {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
-  gap: 3px;
+  gap: 2px;
   flex: 1;
   width: 100%;
   min-width: 0;
 }
 
-.gateway-btn-action {
+.action-btn-label {
   color: rgba(255, 255, 255, 0.56);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
+  font-size: 0.62rem;
+  letter-spacing: 0.09em;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.gateway-btn-name {
+.action-btn-title {
   display: block;
   width: 100%;
   font-size: 0.98rem;
@@ -1247,6 +1354,23 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-btn {
+  flex: 0 1 152px;
+  width: auto;
+  max-width: 152px;
+}
+
+.account-btn-visual {
+  color: rgba(214, 238, 255, 0.92);
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.12), rgba(162, 82, 255, 0.16));
+  border-color: rgba(160, 214, 255, 0.18);
+}
+
+.account-btn-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .icon-btn {
@@ -1264,21 +1388,6 @@ onBeforeUnmount(() => {
 
 .icon-btn:hover {
   background: var(--interactive-hover);
-}
-
-.avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid var(--accent-cyan);
-  cursor: pointer;
-}
-
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 @media (max-width: 768px) {
@@ -1300,25 +1409,67 @@ onBeforeUnmount(() => {
   }
   .actions-area {
     width: auto;
-    gap: 8px;
+    gap: 4px;
   }
   .actions-area .icon-btn,
-  .actions-area .avatar {
+  .account-btn {
     display: none;
   }
   .gateway-btn {
-    width: min(100%, 208px);
+    width: auto;
     min-width: 0;
-    max-width: 208px;
-    padding: 10px;
+    max-width: 152px;
+    padding: 4px 6px;
   }
-  .gateway-btn-name {
-    font-size: 0.9rem;
+  .action-btn-title {
+    font-size: 0.88rem;
   }
 }
 @media (max-width: 480px) {
+  .header {
+    padding: 0 12px;
+  }
+  .logo-area {
+    gap: 10px;
+  }
+  .hamburger {
+    padding: 6px;
+  }
   .logo-text {
     display: none; /* Only show logo icon on tiny screens */
+  }
+  .search-area {
+    margin: 0 6px;
+  }
+  .search-bar {
+    padding: 6px 10px;
+  }
+  .search-bar input {
+    font-size: 0.85rem;
+  }
+  .search-submit-btn {
+    margin-left: 4px;
+  }
+  .gateway-btn {
+    flex: 0 0 46px;
+    width: 46px;
+    max-width: 46px;
+    gap: 0;
+    padding: 0;
+    justify-content: center;
+  }
+  .gateway-btn .action-btn-copy {
+    display: none;
+  }
+  .action-btn-visual {
+    --action-chip-radius: 10px;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--action-chip-radius);
+  }
+  .gateway-btn-icon {
+    width: 16px;
+    height: 16px;
   }
 }
 
@@ -1807,6 +1958,18 @@ onBeforeUnmount(() => {
   50% {
     transform: scale(1.18);
     opacity: 1;
+  }
+}
+
+@keyframes gateway-ring-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.58);
+    opacity: 0.62;
+  }
+  50% {
+    box-shadow: inset 0 0 0 1.5px rgba(255, 209, 102, 0.88);
+    opacity: 0.9;
   }
 }
 
