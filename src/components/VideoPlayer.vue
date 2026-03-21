@@ -189,6 +189,48 @@ if (typeof window !== 'undefined') {
   window.videojs = videojs;
 }
 
+function patchVideoJsTextTrackDisplay() {
+  if (typeof videojs.getComponent !== 'function') {
+    return;
+  }
+
+  const TextTrackDisplay = videojs.getComponent('TextTrackDisplay');
+  const prototype = TextTrackDisplay?.prototype;
+
+  if (!prototype || prototype.__safeActiveCuesPatchApplied__) {
+    return;
+  }
+
+  const originalUpdateForTrack = prototype.updateForTrack;
+  const originalUpdateDisplayState = prototype.updateDisplayState;
+
+  if (typeof originalUpdateForTrack !== 'function' || typeof originalUpdateDisplayState !== 'function') {
+    return;
+  }
+
+  prototype.updateForTrack = function updateForTrackWithSafeActiveCues(tracks) {
+    const readyTracks = (Array.isArray(tracks) ? tracks : [tracks]).filter((track) => track?.activeCues);
+
+    if (readyTracks.length === 0) {
+      return;
+    }
+
+    return originalUpdateForTrack.call(this, readyTracks);
+  };
+
+  prototype.updateDisplayState = function updateDisplayStateWithSafeActiveCues(track) {
+    if (!track?.activeCues) {
+      return;
+    }
+
+    return originalUpdateDisplayState.call(this, track);
+  };
+
+  prototype.__safeActiveCuesPatchApplied__ = true;
+}
+
+patchVideoJsTextTrackDisplay();
+
 const primarySubtitleButtonComponentName = 'PrimarySubtitleControlButton';
 const primarySubtitleControlStateEventName = 'primarysubtitlecontrolstatechange';
 const primarySubtitleMenuTitle = '主字幕';

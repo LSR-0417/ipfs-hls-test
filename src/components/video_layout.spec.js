@@ -134,6 +134,12 @@ describe('VideoPlayer playback persistence contract', () => {
     expect(script).toContain('function requestGatewayFallback(reason = null, options = {}) {');
     expect(script).toContain('dedupeKey: `source:${seq}`');
     expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
+    expect(script).toContain('function patchVideoJsTextTrackDisplay() {');
+    expect(script).toContain("if (!prototype || prototype.__safeActiveCuesPatchApplied__) {");
+    expect(script).toContain('prototype.updateForTrack = function updateForTrackWithSafeActiveCues(tracks) {');
+    expect(script).toContain("const readyTracks = (Array.isArray(tracks) ? tracks : [tracks]).filter((track) => track?.activeCues);");
+    expect(script).toContain('prototype.updateDisplayState = function updateDisplayStateWithSafeActiveCues(track) {');
+    expect(script).toContain('patchVideoJsTextTrackDisplay();');
     expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
     expect(script).toContain("'subtitle-selection-change'");
     expect(script).toContain('allowMultipleShowingTracks: true');
