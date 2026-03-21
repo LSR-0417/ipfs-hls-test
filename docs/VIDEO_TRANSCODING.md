@@ -1,65 +1,111 @@
 # 影片轉檔
 
-第一步：預先建立 5 個資料夾
+本文件以目前實作的 [`script/multi_resolution_hls.sh`](/Users/iskku/Project/ipfs-hls-test/script/multi_resolution_hls.sh) 為準，說明本專案目前的 HLS 轉檔方式。
 
-首先，準備好用來存放這 5 種畫質切片的資料夾結構（0 是 4K，4 是 480p）：
-
-```bash
-mkdir -p my_4k_abr/stream_0 my_4k_abr/stream_1 my_4k_abr/stream_2 my_4k_abr/stream_3 my_4k_abr/stream_4
-```
-
-第二步：執行 4K 全解析度 ABR 轉檔指令
-
-請把 temp.mp4 換成你的 4K 原始影片檔案。這段轉檔會非常吃 CPU 和時間，執行後可以去喝杯咖啡：
+## 1. 使用方式
 
 ```bash
-ffmpeg -i temp.mp4 \
-  -map 0:v:0 -map 0:a:0 \
-  -map 0:v:0 -map 0:a:0 \
-  -map 0:v:0 -map 0:a:0 \
-  -map 0:v:0 -map 0:a:0 \
-  -map 0:v:0 -map 0:a:0 \
-  -c:v libx264 -c:a aac \
-  -filter:v:0 scale=-2:2160 -b:v:0 15000k -maxrate:v:0 16000k -bufsize:v:0 30000k \
-  -filter:v:1 scale=-2:1440 -b:v:1 8000k  -maxrate:v:1 8600k  -bufsize:v:1 16000k \
-  -filter:v:2 scale=-2:1080 -b:v:2 5000k  -maxrate:v:2 5300k  -bufsize:v:2 10000k \
-  -filter:v:3 scale=-2:720  -b:v:3 2800k  -maxrate:v:3 3000k  -bufsize:v:3 5600k \
-  -filter:v:4 scale=-2:480  -b:v:4 1400k  -maxrate:v:4 1500k  -bufsize:v:4 2800k \
-  -f hls \
-  -hls_time 5 \
-  -hls_playlist_type vod \
-  -hls_segment_filename "my_4k_abr/stream_%v/segment_%03d.ts" \
-  -master_pl_name index.m3u8 \
-  -var_stream_map "v:0,a:0 v:1,a:1 v:2,a:2 v:3,a:3 v:4,a:4" \
-  "my_4k_abr/stream_%v/streaming-list.m3u8"
+./script/multi_resolution_hls.sh /path/to/video.mp4
 ```
 
-第三步：串流多解析度的資料夾結構
+此腳本只接受一個輸入影片參數，會在輸入影片同層建立一個同 basename 的輸出資料夾。
 
-> 📌 產生的 `master.m3u8` 可直接交給前端播放器（例如
-> 使用本專案的 `VideoPlayer.vue`）處理；播放器會讀取
-> manifest 裡的 `#EXT-X-STREAM-INF` 條目並自動建立多畫質
-> 選單。若不想使用 HLS，也可以保留這些分流 mp4/ts 檔案，
-> 並把它們以 `{src,type,size}` 格式提供給 Plyr 的
-> `sources` 屬性。
+例如：
 
-採用前端外掛字幕的方式，以下是轉檔完成後，包含字幕檔放置位置的專案資料夾結構參考：
+- 輸入：`/video/demo.mp4`
+- 輸出：`/video/demo/`
 
-```plantext
-my_4k_abr/              # 轉檔輸出的主資料夾
-    ├── master.m3u8         # HLS 主播放清單
-    ├── subtitle.vtt        # 🚩 轉換後的 VTT 字幕檔建議放在這裡
-    ├── stream_0/           # 4K 畫質資料夾
-    │   ├── playlist.m3u8   # 該畫質的子播放清單
-    │   ├── segment_000.ts  # 影片切片檔
-    │   ├── segment_001.ts
-    │   └── ...
-    ├── stream_1/           # 1440p 畫質資料夾
-    │   └── ... (內容同上)
-    ├── stream_2/           # 1080p 畫質資料夾
-    │   └── ...
-    ├── stream_3/           # 720p 畫質資料夾
-    │   └── ...
-    └── stream_4/           # 480p 畫質資料夾
-        └── ...
+## 2. 執行前需求
+
+執行環境需提供：
+
+- `bash`
+- `ffmpeg`
+- `ffprobe`
+- `sed`
+- `mkdir`
+- `mv`
+
+目前腳本使用 `sed -i ''`，因此預設目標平台為 macOS / BSD `sed` 環境。
+
+## 3. 轉檔流程
+
+腳本的實際流程如下：
+
+1. 檢查 `ffmpeg` 是否存在
+2. 讀取輸入影片路徑
+3. 用 `ffprobe` 取得第一條影像軌高度
+4. 根據來源高度，自動決定要輸出的畫質層級
+5. 以單次 `ffmpeg` 執行完成所有 variant 輸出
+6. 將 FFmpeg 產生的 `temp.m3u8` 改名為 `streaminglist-{quality}.m3u8`
+7. 將分段檔名改為 `segment_{quality}_{NNN}.ts`
+8. 同步修正 root `index.m3u8` 與 variant playlist 內的引用
+
+## 4. 自動畫質層級
+
+目前畫質階層依來源高度動態決定：
+
+| 條件 | 輸出資料夾 |
+|------|------------|
+| `HEIGHT >= 2160` | `4k`、`2k`、`1080p`、`720p`、`480p` |
+| `HEIGHT >= 1440` | `2k`、`1080p`、`720p`、`480p` |
+| `HEIGHT >= 1080` | `1080p`、`720p`、`480p` |
+| `HEIGHT >= 720`  | `720p`、`480p` |
+| `HEIGHT >= 480`  | `480p` |
+| `HEIGHT < 480`   | `orig` |
+
+## 5. 輸出命名
+
+目前輸出命名固定如下：
+
+- root playlist：`index.m3u8`
+- variant playlist：`streaminglist-{quality}.m3u8`
+- segment：`segment_{quality}_{NNN}.ts`
+
+## 6. 輸出結構範例
+
+若輸入影片最終輸出 `1080p`、`720p`、`480p`，結果大致如下：
+
+```text
+demo/
+├── index.m3u8
+├── 1080p/
+│   ├── streaminglist-1080p.m3u8
+│   ├── segment_1080p_000.ts
+│   ├── segment_1080p_001.ts
+│   └── ...
+├── 720p/
+│   ├── streaminglist-720p.m3u8
+│   ├── segment_720p_000.ts
+│   └── ...
+└── 480p/
+    ├── streaminglist-480p.m3u8
+    ├── segment_480p_000.ts
+    └── ...
 ```
+
+## 7. 與播放器的關聯
+
+前端播放器目前以：
+
+```text
+<gateway>/ipfs/<CID>/index.m3u8
+```
+
+作為 HLS 載入入口，因此轉檔完成後最重要的入口檔案就是 root `index.m3u8`。
+
+## 8. 不在此腳本責任內的事項
+
+此腳本目前不負責：
+
+- 上傳到 IPFS
+- 產生或搬移字幕
+- 生成 `info.json`
+- 處理封面與頭像
+- 驗證特定 gateway 上的實際播放結果
+
+若要整理 sidecar metadata / 字幕，請搭配：
+
+- [`script/download_youtube_assets.sh`](/Users/iskku/Project/ipfs-hls-test/script/download_youtube_assets.sh)
+- [`script/package_youtube_assets.sh`](/Users/iskku/Project/ipfs-hls-test/script/package_youtube_assets.sh)
+- [`script/generate_subtitles_manifest.sh`](/Users/iskku/Project/ipfs-hls-test/script/generate_subtitles_manifest.sh)
