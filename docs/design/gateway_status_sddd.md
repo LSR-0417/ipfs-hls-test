@@ -6,7 +6,7 @@
 
 目前設計的核心方向為：
 
-- 以燈號快速表達可用性
+- 以簡短顏色狀態快速表達可用性
 - 以簡短文字表達「能不能順播」
 - 用內部量測的 `durationMs` 做排序與推薦
 - 將結果與目前 CID 綁定
@@ -40,6 +40,11 @@
 - `rate_limited`：橘燈
 - `redirected`：藍燈
 - `failed`：紅燈
+
+目前狀態在兩個位置的承載方式不同：
+
+- Gateway Settings 視窗清單：使用狀態點
+- Header gateway trigger：使用 icon chip 內部的狀態 ring
 
 ### 2.3 目前顯示文字
 
@@ -136,6 +141,8 @@
 5. 若需要，再讀 variant playlist 與抽樣片段
 6. 依結果回傳 `ready`、`playlist_ready`、`degraded`、`rate_limited`、`redirected` 或 `failed`
 7. UI 更新燈號、文字、推薦與排序
+
+Header trigger 不使用超出按鈕邊界的小燈號，避免 icon 視覺縮小與按鈕密集時的互相干擾。
 
 ### 4.3 過期結果保護
 

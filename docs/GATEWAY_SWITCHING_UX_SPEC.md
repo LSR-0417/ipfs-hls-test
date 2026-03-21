@@ -6,6 +6,11 @@
 - 性質：現況規格與已知限制記錄
 - 主要影響介面：`src/App.vue`、`src/components/Header.vue`、`src/components/VideoPlayer.vue`
 
+## 相關文件
+
+- [`HEADER_ACTION_BUTTONS_GUIDELINES.md`](./HEADER_ACTION_BUTTONS_GUIDELINES.md)
+- [`design/header_action_buttons_sddd.md`](./design/header_action_buttons_sddd.md)
+
 ## 1. 目前行為摘要
 
 目前的 gateway 切換屬於「立即套用並重新載入來源」模型，而不是交易式切換流程。
@@ -54,13 +59,20 @@ Header 右上角的 gateway 按鈕固定顯示：
 
 - 主標：`Gateway`
 - 次標：目前 gateway 名稱
-- 一個狀態燈號，反映背景 probe 結果
+- 一個位於 icon chip 內部的狀態 ring，反映背景 probe 結果
+- 與 `Account` 共享同系列的 header action button 視覺語言
+
+Responsive 行為如下：
+
+- 桌面寬度：顯示 `Gateway` 與目前 gateway 名稱
+- 中窄寬度：優先保留 gateway 按鈕，隱藏 `Account`
+- 最窄寬度：gateway 收斂為 icon-only，但仍保留狀態 ring
 
 目前不會顯示：
 
 - `切換中...`
 - 切換專用次級文案
-- 切換失敗警示點
+- 切換失敗專屬 banner 或 badge
 
 ### 3.2 Player 區域
 

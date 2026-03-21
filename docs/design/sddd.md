@@ -26,6 +26,7 @@
 `Header.vue` 目前整合兩個主要功能：
 
 - CID 搜尋輸入
+- Header action buttons
 - Gateway Settings dialog
 
 目前 gateway configurator 的實作重點如下：
@@ -33,7 +34,8 @@
 - 內建公開 gateway：`dweb.link`、`ipfs.io`
 - 自訂 gateway：只接受公開 `HTTPS` `/ipfs/` base URL
 - `Local Node` 設定只在開發模式 (`import.meta.env.DEV`) 顯示
-- Header 按鈕會顯示目前 gateway 名稱與 probe 狀態點
+- 右上角 action buttons 目前採用統一系列設計，包含 `Gateway` 與 `Account`
+- Gateway 按鈕會顯示目前 gateway 名稱與 probe 狀態 ring
 - Dialog 內會顯示背景 probe 排名、`Recommended` 標記與 `Recheck Now`
 
 目前 gateway 切換是立即套用模型，不是交易式切換：
@@ -185,7 +187,7 @@ fallback 規則：
 
 目前 probe 結果用於：
 
-- Header 按鈕狀態點
+- Header 按鈕狀態 ring
 - Dialog 排序
 - `Recommended` 標記
 

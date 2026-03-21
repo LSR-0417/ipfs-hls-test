@@ -17,9 +17,14 @@
 
 ## 2. 範圍
 
-- 作用範圍：`Header.vue` 的 Gateway Settings 視窗與 Header 按鈕狀態點
+- 作用範圍：`Header.vue` 的 Gateway Settings 視窗與 Header 按鈕狀態 ring
 - 檢查目標：`${gatewayBaseUrl}${cid}/index.m3u8`，以及播放清單內推導出的 media playlist / segment URL
 - 依據資料：目前播放器中的 `currentCid`
+
+目前視覺承載方式如下：
+
+- Gateway Settings 視窗：使用狀態點
+- Header gateway trigger：使用 icon chip 內部狀態 ring
 
 不包含：
 
