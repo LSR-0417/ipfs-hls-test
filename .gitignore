@@ -45,6 +45,7 @@ coverage/
 .vite/
 playwright-report/
 test-results/
+.worktrees/
 
 # OS
 Thumbs.db

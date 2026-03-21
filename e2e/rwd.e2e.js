@@ -94,6 +94,7 @@ test.describe('Responsive Video Actions', () => {
     await expect(page.getByTestId('video-info-like-button')).toBeVisible();
     await expect(page.getByTestId('video-info-dislike-button')).toBeVisible();
     await expect(page.getByTestId('video-info-share-button')).toBeVisible();
+    await expect(page.getByTestId('video-info-creator-text')).toBeVisible();
 
     const justifyContent = await actions.evaluate((node) => window.getComputedStyle(node).justifyContent);
     expect(justifyContent).toBe('flex-end');
@@ -114,6 +115,12 @@ test.describe('Responsive Video Actions', () => {
     await expect(page.getByTestId('video-info-like-button')).toBeVisible();
     await expect(page.getByTestId('video-info-dislike-button')).toBeVisible();
     await expect(page.getByTestId('video-info-share-button')).toHaveCount(0);
+    await expect(page.getByTestId('video-info-creator-text')).toHaveCount(0);
+    await expect(page.getByTestId('video-info-follow-button')).toBeVisible();
+
+    const avatarBox = await getBox(page.getByTestId('video-info-avatar'));
+    const followBox = await getBox(page.getByTestId('video-info-follow-button'));
+    expect(Math.abs(followBox.y - avatarBox.y)).toBeLessThanOrEqual(4);
 
     const justifyContent = await actions.evaluate((node) => window.getComputedStyle(node).justifyContent);
     expect(justifyContent).toBe('flex-start');

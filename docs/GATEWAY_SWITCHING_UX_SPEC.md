@@ -1,470 +1,164 @@
 # Gateway 切換 UX 規格書
 
 ## 文件狀態
-- 狀態：提案中
-- 範圍：目前播放中影片的 gateway 切換流程
-- 主要影響介面：`src/App.vue`、`src/components/Header.vue`、`src/components/VideoPlayer.vue`、`src/components/VideoInfo.vue`
 
-## 問題定義
-目前的 gateway 切換在技術上可用，但對影音播放器來說，體驗仍然不夠順。現況比較像是「直接把來源換掉」，而不是「有狀態、有保護、有回復機制的切換流程」。
+- 狀態：已依目前實作更新
+- 性質：現況規格與已知限制記錄
+- 主要影響介面：`src/App.vue`、`src/components/Header.vue`、`src/components/VideoPlayer.vue`
 
-目前實作中可觀察到的問題：
+## 1. 目前行為摘要
 
-1. 套用 gateway 的動作太樂觀，畫面切換過於突兀。
-   使用者點擊 `applyGateway()` 後，設定視窗會立刻關閉，但播放器只顯示泛用的 `正在載入影片...` 狀態。沒有專門的「切換中」視覺層，因此畫面看起來不穩定。
+目前的 gateway 切換屬於「立即套用並重新載入來源」模型，而不是交易式切換流程。
 
-2. 切換太早破壞連續性。
-   `App.vue` 在使用者切換 gateway 時，會立刻提交新的來源狀態。gateway 選擇應視為本機偏好，而不是分享 URL 的一部分；在新 gateway 尚未證明能正常提供媒體前，就先提交狀態，仍會破壞舊的播放上下文。
+使用者在 `Header.vue` 的 Gateway Settings 視窗中選擇目標 gateway 並按下 `Apply` 後：
 
-3. 從使用者角度來看，續播行為不夠可信。
-   目前程式透過 `getCurrentPlaybackTime(window)` 嘗試保留播放時間，但沒有確認：
-   - 新 gateway 是否真的載入到要求的片段
-   - seek 是否真的成功
-   - 播放器是否真的已經切到新 gateway，而不是停在舊狀態
+1. Dialog 立即關閉
+2. `Header.vue` 發出 `gateway-change`
+3. `App.vue` 立即將新 gateway 視為目前值，並寫入 `localStorage`
+4. 若目前已有 CID，`App.vue` 先抓取目前播放快照，再直接呼叫 `loadVideo(...)`
+5. `VideoPlayer.vue` 重設 player、重新載入 `index.m3u8`、重掛字幕、在 `loadedmetadata` 後 seek 回原本時間
 
-4. 字幕與媒體就緒被混在同一個模糊的載入階段。
-   `VideoPlayer.vue` 會平行處理新來源與字幕偵測，但使用者無法判斷延遲是來自 gateway、metadata、segment，還是字幕探測。
+目前沒有額外的 player overlay、成功 toast、失敗 banner 或 rollback。
 
-5. 缺少優雅的失敗回退機制。
-   如果目標 gateway 很慢或故障，使用者沒有明確的恢復路徑。系統沒有公開 timeout、rollback、retry 或替代 gateway 建議。
+## 2. 使用者流程
 
-## UX 目標
+### 2.1 有 CID 時的切換流程
 
-1. 在 gateway 切換過程中保留使用者信心。
-2. 只要技術上可行，就保留觀看連續性。
-3. 讓切換感覺是有意圖、可逆、低風險的操作。
-4. 清楚區分「已提出切換」、「正在連線」、「已驗證成功」、「切換失敗」。
-5. 避免播放器出現空白、跳動或無法解釋的狀態。
+1. 使用者開啟 Gateway Settings
+2. 使用者選擇內建 gateway、自訂 HTTPS gateway，或開發模式下的 Local Node
+3. 使用者點擊 `Apply`
+4. `App.vue` 透過 `getPlaybackSnapshot(window)` 記錄：
+   - `time`
+   - `isPlaying`
+5. `App.vue` 立即：
+   - 更新 `currentGateway`
+   - `persistGateway(nextGateway, window)`
+   - 設定新的 `currentM3u8Url`、`currentIpfsBaseUrl`、`currentPosterUrl`
+   - 以原播放時間作為 `startTime`
+   - 以原播放 / 暫停狀態作為 `shouldAutoplay`
+6. `VideoPlayer.vue` 顯示泛用狀態文字並重新載入來源
 
-## 非目標
+### 2.2 無 CID 時的切換流程
 
-1. 自動多 CDN / 多 gateway 負載平衡。
-2. 兩條 live HLS 管線之間真正無縫的 segment 級接手。
-3. 持續背景預抓所有 gateway。
-4. 第一版就做完整的網路效能基礎設施。
+若目前沒有 CID：
 
-## UX 原則
-Gateway 切換應該更像「換路徑」，而不是「重載整個播放器」。
+- gateway 仍會立即寫入 `localStorage`
+- 不會觸發播放器重新載入
+- 後續搜尋 CID 時，會使用最後一次選定的 gateway
 
-使用者應該感受到：
-- 目前的播放位置是被保護的
-- 系統正在測試一條新路徑
-- 即使失敗也不會把他丟在半路
-- 成功時有明確確認
+## 3. 目前可見回饋
 
-## 建議互動模型
+### 3.1 Header
 
-### 摘要
-當使用者切換 gateway 時，App 應進入暫時性的切換模式，並提供明確的 overlay 與可回退的轉場。舊播放 session 在新 gateway 驗證成功前，都仍然是參考狀態。
+Header 右上角的 gateway 按鈕固定顯示：
 
-### 核心模式
-1. 使用者開啟 Gateway Settings。
-2. 使用者選擇目標 gateway。
-3. 使用者點擊 `Apply`。
-4. 視窗關閉，播放器進入 `Switching Gateway` 模式。
-5. 目前影片畫面仍保留在畫面上方，只覆蓋一層 loading veil。
-6. App 嘗試從新 gateway 載入同一個 CID，並帶入目前播放時間。
-7. App 驗證播放是否就緒。
-8. 若成功：
-   顯示成功提示，並依規則恢復播放。
-9. 若失敗：
-   還原上一個 gateway，並提供重試路徑。
+- 主標：`Gateway`
+- 次標：目前 gateway 名稱
+- 一個狀態燈號，反映背景 probe 結果
 
-## 播放器 UX 狀態
+目前不會顯示：
 
-### 1. Idle
-一般播放狀態，沒有任何 gateway 切換進行中。
+- `切換中...`
+- 切換專用次級文案
+- 切換失敗警示點
 
-可見提示：
-- Gateway 按鈕顯示目前 gateway 名稱
-- 沒有 overlay
+### 3.2 Player 區域
 
-### 2. Pending Switch
-使用者確認新 gateway 後的第一個瞬間。
+播放器切換來源時，使用的是 `VideoPlayer.vue` 既有狀態文字，而不是結構化的 gateway switch UX。
 
-可見提示：
-- 在目前畫面上方出現 player overlay
-- Overlay 標題：`正在切換 gateway`
-- Overlay 副標：`正在保留你目前的位置並重新連線`
-- 禁止重複送出同一個 Apply
+目前實際會出現的文字包含：
 
-行為：
-- 建立目前 session 快照：
-  - `previousGateway`
-  - `targetGateway`
-  - `resumeTime`
-  - `wasPlaying`
-  - `cid`
+- `正在載入影片...`
+- `播放器已就緒`
+- `播放器已就緒，繼續播放中`
+- `✅ 資源就緒！請手動播放 (將從 mm:ss 開始)。`
+- `播放器已就緒，請手動播放`
 
-### 3. Connecting
-新媒體來源已開始請求。
+目前沒有：
 
-可見提示：
-- 狀態訊息依序可顯示：
-  - `正在連線到新的 gateway...`
-  - `正在載入播放清單...`
-  - `正在跳轉到 12:34...`
-- Header 的 gateway 按鈕可顯示次級標籤：
-  - `切換中...`
+- `正在切換 gateway` overlay
+- `Local Node -> dweb.link` 之類的切換路徑提示
+- 成功 toast
+- 失敗重試按鈕
 
-行為：
-- 若可能，保留上一個已渲染畫面
-- 暫停播放，避免音訊與畫面錯位
-- 在新來源請求啟動後才真正拆除舊來源
+## 4. 狀態與資料責任
 
-### 4. Verifying
-Metadata 已載入，播放器正在 seek 回原本位置。
+### 4.1 URL
 
-可見提示：
-- `正在驗證播放連續性...`
-- 可選的技術細節：
-  - `Pinata -> 12:34`
+分享 URL 只同步：
 
-驗證條件：
-- `loadedmetadata` 已觸發
-- seek 已被要求執行
-- 播放器 `currentTime()` 與目標時間落在可接受誤差範圍內
-- 首幀可播放，或 `canplay` 已觸發
-
-### 5. Success
-新 gateway 已準備完成。
-
-可見提示：
-- 顯示 1.5 到 2 秒的成功 toast：
-  - `已切換到 Pinata`
-- 可選副標：
-  - `已從 12:34 繼續播放`
-
-行為：
-- 若切換前正在播放，成功後自動續播
-- 若切換前是暫停，成功後維持暫停
-- 只有成功後才提交新的 gateway state；分享 URL 仍僅更新 `cid` / `t`
-
-### 6. Failed
-新 gateway 無法在合理時間內提供媒體。
-
-可見提示：
-- Error toast 或 banner：
-  - `無法切換到 dweb.link`
-- 操作按鈕：
-  - `重試`
-  - `保留目前 gateway`
-  - `改用上一個可用 gateway`（若適用）
-
-行為：
-- 回退到最後一個已知可用的 gateway
-- 還原之前的播放狀態
-- 保持失敗結果為非破壞性
-
-## 建議 UX 文案
-
-### 切換中
-- 標題：`正在切換 gateway`
-- 內文：`我們正在重新連線串流，同時保留你目前的播放位置。`
-
-### 成功
-- `Gateway 已切換`
-- `目前正在使用 Pinata 播放`
-
-### 失敗
-- `Gateway 切換失敗`
-- `選擇的 gateway 沒有在時間內回應。`
-
-### 重試輔助
-- `再試一次`
-- `改用上一個 gateway`
-
-## 互動細節
-
-### 保留播放意圖
-在切換前記錄 `wasPlaying`。
-
-規則：
-- 若切換前正在播放，成功後自動續播。
-- 若切換前是暫停，成功後維持暫停。
-- 若切換失敗，恢復切換前的播放 / 暫停狀態。
-
-### 保留視覺連續性
-切換開始時，不應立刻把播放器清成黑畫面或空畫面。
-
-建議行為：
-- 以 overlay 凍結目前畫面的視覺感受
-- Overlay fade in 約 120 到 180 ms
-- 成功後 Overlay fade out 約 180 到 220 ms
-
-### 尊重使用者控制
-在切換期間：
-- 停用重複對同一目標送出 Apply
-- 只有在新請求尚未正式提交前允許 Cancel
-- 一旦來源切換已開始，只有在實作可靠時才提供 `Abort`
-
-對 v1 較安全的規則：
-- 提交後不提供取消
-- 逾時或失敗時自動 rollback
-
-## 功能需求
-
-### FR-1 Session 快照
-切換前需保存：
 - `cid`
-- `fromGateway`
-- `toGateway`
-- `resumeTime`
-- `wasPlaying`
-- `selectedSubtitleLanguage`
-- `selectedQuality`（若可恢復）
-
-### FR-2 明確的切換狀態
-`App.vue` 應擁有專門的切換 state object，而不是只依賴泛用的 `status` 字串。
-
-建議結構：
-
-```js
-{
-  phase: 'idle' | 'pending' | 'connecting' | 'verifying' | 'success' | 'failed',
-  fromGateway: '',
-  toGateway: '',
-  resumeTime: 0,
-  wasPlaying: false,
-  startedAt: 0,
-  error: '',
-}
-```
-
-### FR-3 URL 與 Storage 提交策略
-在切換成功前，不要先把新的 gateway 視為已提交狀態。
-
-原因：
-- gateway 屬於本機偏好，應持久化於瀏覽器 storage，而不是 Query Parameter。
-- 分享 URL 應代表可分享的播放狀態，只包含 `cid` 與 `t`，而不是尚未驗證的 gateway 嘗試。
-
-規則：
-- gateway 必須寫入瀏覽器 storage（目前採 `localStorage`）以保留使用者偏好。
-- `window.history` 不應寫入 `gateway` Query Parameter。
-
-### FR-4 Timeout 政策
-需要定義切換 timeout。
-
-建議預設值：
-- localhost metadata timeout：4 秒
-- 公開 gateway metadata timeout：8 秒
-- 完整驗證 timeout 上限：10 秒
-
-若超時：
-- 將切換標記為失敗
-- 回退到上一個 gateway
-
-### FR-5 驗證閘門
-只有在以下條件成立時，gateway 切換才算成功：
-- 來源 metadata 已載入
-- seek 已在容許誤差內完成
-- 播放器已能從目標來源渲染或播放
-
-建議誤差：
-- VOD 以目標續播時間前後 2 秒內為可接受範圍
-
-### FR-6 Header 回饋
-Header 上的 gateway 按鈕應反映切換狀態。
-
-狀態：
-- 一般：`Gateway`
-- 切換中：`切換中...`
-- 失敗：顯示一個淡化的警示點，直到使用者關閉或重新操作
-
-### FR-7 狀態顯示區
-在播放器附近建立結構化的狀態區，不要只用低價值的 debug 文案。
-
-需支援：
-- 載入標題
-- 短描述
-- 可選的操作按鈕
-
-### FR-8 失敗恢復
-切換失敗時，至少提供：
-- 重試同一 gateway
-- 回退到上一個 gateway
-- 改選其他 gateway
-
-### FR-9 字幕策略
-字幕偵測不應阻擋切換完成。
-
-規則：
-- 媒體連續性優先
-- 字幕探測為次要，可在播放就緒後繼續進行
+- `t`
 
-### FR-10 畫質恢復
-若前一個畫質等級可以映射到新 gateway，則在驗證後恢復；若不行，則退回 auto quality，但不能因此阻擋切換完成。
-
-## 技術設計說明
-
-### 目前瓶頸
-依目前程式碼來看：
-
-1. `App.vue` 內的 `onGatewayChange()` 會立刻呼叫 `loadVideo(...)`
-2. `loadVideo()` 會立刻更新 state；其中分享 URL 只應反映 `cid` / `t`，gateway 則應由 storage 管理
-3. `VideoPlayer.vue` 目前只提供泛用的狀態更新，沒有明確的切換生命週期事件
-4. 播放器回傳給 `App.vue` 的成功 / 失敗握手機制仍不完整
-
-### 需要的事件契約
-`VideoPlayer.vue` 應在 gateway 切換過程中發出結構化事件。
-
-建議事件：
-- `switch-start`
-- `switch-metadata-loaded`
-- `switch-seeked`
-- `switch-ready`
-- `switch-failed`
+`App.vue` 會主動把 `gateway` 從 query string 中移除，不將 gateway 寫入分享 URL。
 
-範例 payload：
+### 4.2 Storage
 
-```js
-{
-  gateway: 'https://gateway.pinata.cloud/ipfs/',
-  cid: 'bafy...',
-  resumeTime: 754,
-  elapsedMs: 1320,
-  reason: '',
-}
-```
+gateway 屬於瀏覽器偏好設定，使用 `localStorage` 持久化。
 
-### 建議控制流程
+目前寫入時機為：
 
-1. `Header.vue`
-   送出 `gateway-change`，帶入使用者選擇的 gateway。
+- `onGatewayChange()` 一開始就寫入一次
+- `loadVideo()` 內又會再寫入一次
 
-2. `App.vue`
-   建立播放快照，並將切換 phase 設為 `pending`。
+也就是說，新 gateway 在載入成功前就已被視為已提交狀態。
 
-3. `App.vue`
-   要求 `VideoPlayer.vue` 依切換 metadata 切換來源。
+### 4.3 Sidecar 與字幕
 
-4. `VideoPlayer.vue`
-   載入目標來源，並持續發出生命週期事件。
+切換 gateway 後，`App.vue` 會重新推導同一個 CID 的 sidecar 路徑：
 
-5. `App.vue`
-   只有在收到 `switch-ready` 後才提交 gateway state 與 storage；若有必要，URL 只更新 `cid` / `t`。
+- `index.m3u8`
+- `cover.webp`
+- `info.json`
+- `subtitles.json`
+- `avatar.jpg`
 
-6. `App.vue`
-   若收到 `switch-failed`，則執行 rollback。
+字幕與 metadata 會平行載入，但目前 UI 不會把「媒體切換」與「字幕 / metadata 載入」拆成獨立階段顯示。
 
-## 建議 UI 新增項目
+## 5. 續播行為
 
-### Player Overlay
-可新增獨立元件，或先在 `VideoPlayer.vue` 內做 inline block。
+目前續播邏輯如下：
 
-內容：
-- spinner 或線性進度條
-- 狀態標題
-- 短訊息
-- 來源 gateway 與目標 gateway
+- 切換前抓取整秒 `time`
+- 切換前抓取 `isPlaying`
+- `VideoPlayer.vue` 在 `loadedmetadata` 後直接 `player.currentTime(startTime)`
+- 若切換前正在播放，則在 `canplay` 後嘗試 `player.play()`
+- 若自動播放被瀏覽器阻擋，退回「請手動播放」訊息
 
-範例：
+目前沒有額外驗證：
 
-```text
-正在切換 gateway
-Local Node -> Pinata
-正在保留你在 12:34 的位置
-```
+- seek 是否落在容許誤差內
+- 第一個片段是否已真的從新 gateway 成功播放
+- 播放器是否需要回退到舊 gateway
 
-### 成功 Toast
-位置：
-- Desktop 放在播放器右上角
-- Mobile 放在上中或底部 sheet 形式
+## 6. 目前限制
 
-時間：
-- 建議 1600 ms
+以下功能目前尚未實作：
 
-### 失敗 Banner
-位置：
-- 可放在播放器控制列上方，或 header 下方
+- 專門的 gateway transition state object
+- `pending / connecting / verifying / success / failed` phase
+- `switch-start`、`switch-ready`、`switch-failed` 等結構化事件
+- 切換 timeout 與 App 層 rollback
+- 切換失敗後的 `重試 / 回退 / 改選其他 gateway` 操作
+- 切換期間的 `aria-live` 宣告
+- 專屬 overlay / toast / banner
+- 字幕語言與畫質偏好在切換成功後的顯式恢復驗證
 
-操作：
-- 重試
-- 回退
+## 7. 開發模式與可選 gateway
 
-## 無障礙需求
+目前 gateway 選擇器的行為如下：
 
-1. 切換狀態需透過 `aria-live="polite"` 宣告。
-2. 若切換失敗導致播放中止，錯誤訊息與恢復操作應使用 `aria-live="assertive"`。
-3. 關閉 Gateway Settings 後，鍵盤焦點必須可預期地回到合理位置。
-4. 切換期間被停用的按鈕，需同時具有可見與語意上的 disabled 狀態。
+- 內建公開 gateway：`dweb.link`、`ipfs.io`
+- 自訂 gateway：只接受公開 `HTTPS` 且以 `/ipfs/` 結尾的 URL
+- Local Node：只在 `import.meta.env.DEV` 為 `true` 時顯示
+- 已停用 gateway：`gateway.pinata.cloud`
 
-## 分析與除錯
+## 8. 驗收條件
 
-至少追蹤：
-- 切換開始時間
-- 來源 gateway
-- 目標 gateway
-- 切換耗時
-- 成功 / 失敗結果
-- 失敗原因分類：
-  - timeout
-  - manifest load error
-  - segment load error
-  - seek verification mismatch
+符合以下條件時，可視為目前實作與本文一致：
 
-第一版可以先用 console log 作為開發期追蹤。
-
-## 驗收標準
-
-### AC-1 順暢度
-當同一個 CID 切換 gateway 時，使用者不應看到超過 300 ms 且無法解釋的空白播放器狀態。
-
-### AC-2 連續性
-若切換成功，播放應回到原本時間附近，誤差不超過 2 秒。
-
-### AC-3 URL / Storage 一致性
-若切換失敗，URL 不得出現未成功提交的 gateway；分享 URL 仍只包含最後一個已知的 `cid` / `t`，而 gateway 選擇應維持在最後一個已知可用值的瀏覽器 storage 中。
-
-### AC-4 失敗恢復
-若選定的 gateway 失敗，系統必須明確告知使用者，並提供恢復操作。
-
-### AC-5 字幕非阻塞
-字幕偵測不可阻擋播放變成 ready。
-
-### AC-6 暫停狀態保留
-若使用者切換前是暫停，成功後仍須維持暫停。
-
-## 實作規劃
-
-### Phase 1
-- 在 `App.vue` 引入 gateway transition state
-- 明確定義 share URL 與 gateway storage 的責任分工
-- 加入 player overlay 狀態
-- 讓 `VideoPlayer.vue` 發出成功 / 失敗事件
-- 補上 timeout 與 rollback
-
-### Phase 2
-- 保留字幕語言與畫質偏好
-- 在 dialog 中加入 gateway 效能提示
-- 補上 retry 與替代 gateway 建議
-
-### Phase 3
-- 評估在 source swap 前做輕量 preflight 檢查
-- 評估建立 last-known gateway health scoring
-
-## 開放問題
-
-1. 若瀏覽器 autoplay policy 擋住自動續播，是否仍要在成功後嘗試播放？
-   建議：
-   先嘗試 resume，若失敗再退回明確的 `點擊繼續播放` 提示。
-
-2. 是否要在真正切換來源前，先對新 gateway 的 `index.m3u8` 做 preflight？
-   建議：
-   若實作成本可接受，對公開 gateway 應採用。
-
-3. Gateway Settings 是否需要顯示 latency 預估？
-   建議：
-   v1 不必，但 phase 2 值得加入。
-
-## 立即工程建議
-最重要的修正其實是架構層面的：
-
-將 gateway 切換從單純的 prop 更新，提升為明確的交易式流程：
-- 先建立目前 session 快照
-- 開始切換
-- 驗證目標 gateway
-- 成功後提交
-- 失敗時回滾
-
-如果沒有做到這一步，即使後續補了 loading 文案或動畫，播放器的切換感受仍然會偏突兀。
+1. 使用者按下 `Apply` 後，Dialog 立即關閉，且沒有專屬切換 overlay。
+2. `gateway` 不會出現在分享 URL 中，只會寫進 `localStorage`。
+3. 若目前有 CID，切換時會保留整秒播放時間與播放 / 暫停意圖。
+4. 播放器以泛用狀態文字回饋來源切換，而不是 gateway 專屬狀態機。
+5. 切換失敗時，系統不提供 App 層 rollback 或 retry UI；使用者需再次手動切換。
