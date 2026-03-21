@@ -168,6 +168,48 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('justify-content: flex-start;');
   });
 
+  it('opens a share dialog with a link field, current time snapshot, and start-at toggle', () => {
+    const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('data-testid="video-info-share-dialog"');
+    expect(template).toContain('data-testid="video-info-share-url-input"');
+    expect(template).toContain('data-testid="video-info-share-copy-button"');
+    expect(template).toContain('data-testid="video-info-share-current-time"');
+    expect(template).toContain('data-testid="video-info-share-start-at-toggle"');
+    expect(template).toContain('aria-haspopup="dialog"');
+    expect(template).toContain('@click="openShareDialog"');
+    expect(template).toContain('v-model="shareIncludeTime"');
+    expect(template).toContain('class="share-url-field"');
+    expect(template).toContain('class="share-dialog-footer"');
+    expect(template).toContain('class="share-time-inline-label">開始處</span>');
+    expect(template).toContain("{{ shareCopySuccess ? 'Copied!' : 'Copy' }}");
+
+    expect(script).toContain('const isShareDialogOpen = ref(false);');
+    expect(script).toContain('const shareIncludeTime = ref(false);');
+    expect(script).toContain('const sharePlaybackTime = ref(0);');
+    expect(script).toContain("const shareUrlText = ref('');");
+    expect(script).toContain('const shareUrlInputRef = ref(null);');
+    expect(script).toContain('const shareTimeLabel = computed(() => formatShareStartTime(sharePlaybackTime.value));');
+    expect(script).toContain('watch([() => props.cid, shareIncludeTime, sharePlaybackTime, isShareDialogOpen], () => {');
+    expect(script).toContain('syncShareUrl();');
+    expect(script).toContain("}, { immediate: true, flush: 'sync' });");
+    expect(script).toContain('function syncShareUrl() {');
+    expect(script).toContain('function openShareDialog() {');
+    expect(script).toContain('sharePlaybackTime.value = getCurrentPlaybackTime(window);');
+    expect(script).toContain('shareIncludeTime.value = sharePlaybackTime.value > 0;');
+    expect(script).toContain('function copyShareUrl() {');
+
+    expect(style).toContain('.share-backdrop');
+    expect(style).toContain('.share-dialog');
+    expect(style).toContain('.share-url-field');
+    expect(style).toContain('.share-url-input');
+    expect(style).toContain('.share-dialog-footer');
+    expect(style).toContain('.share-time-inline');
+  });
+
   it('hides uploader text before the follow button wraps and keeps a compact measurement copy offscreen', () => {
     const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
     const template = descriptor.template?.content || '';

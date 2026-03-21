@@ -97,7 +97,7 @@ ipfs-hls-test/
 **主要方法：**
 ```javascript
 playVideo()              // 構建 M3U8 URL 並開始播放
-shareCurrentTime()       // 複製包含播放時間的分享連結
+openShareDialog()        // 開啟分享對話框，可選擇是否帶入目前播放時間
 onStatusUpdate(msg)      // 接收播放器狀態更新
 onLevelsLoaded(levels)   // 接收視頻質量列表
 ```
