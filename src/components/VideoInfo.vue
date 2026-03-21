@@ -9,6 +9,8 @@ import {
   formatUploadDateTooltip,
   linkifyDescription,
 } from '../utils/videoInfo';
+import { getCurrentPlaybackTime } from '../utils/playback';
+import { buildShareUrl, formatShareStartTime } from '../utils/share';
 
 const defaultDescription =
   'Playing decentralized video content from IPFS. Ensuring censorship resistance and high availability through peer-to-peer networking.';
@@ -23,7 +25,13 @@ const props = defineProps({
   },
 });
 
-const shareSuccess = ref(false);
+const shareDialogRef = ref(null);
+const shareUrlInputRef = ref(null);
+const isShareDialogOpen = ref(false);
+const shareIncludeTime = ref(false);
+const sharePlaybackTime = ref(0);
+const shareUrlText = ref('');
+const shareCopySuccess = ref(false);
 const avatarLoadFailed = ref(false);
 const isDescriptionExpanded = ref(false);
 const collapsedDescription = ref('');
@@ -47,6 +55,7 @@ let layoutObserver = null;
 let layoutFrame = 0;
 let syncInProgress = false;
 let syncPending = false;
+let shareCopySuccessTimeout = 0;
 
 const shareActionId = 'share';
 const downloadActionId = 'download';
@@ -82,12 +91,13 @@ const displayRelativeUploadTime = computed(() => {
 });
 const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));
 const downloadUrl = computed(() => buildSidecarAssetUrl(props.ipfsBaseUrl, 'index.m3u8'));
+const shareTimeLabel = computed(() => formatShareStartTime(sharePlaybackTime.value));
 const overflowMenuItems = computed(() => {
   return overflowActionOrder
     .filter((actionId) => actionId === downloadActionId || hiddenActionIds.value.includes(actionId))
     .map((actionId) => ({
       id: actionId,
-      label: actionId === shareActionId ? (shareSuccess.value ? 'Copied!' : 'Share') : 'Download',
+      label: actionId === shareActionId ? 'Share' : 'Download',
       disabled: actionId === downloadActionId && !downloadUrl.value,
     }));
 });
@@ -131,6 +141,9 @@ watch(
     avatarLoadFailed.value = false;
     isDescriptionExpanded.value = false;
     isMoreMenuOpen.value = false;
+    closeShareDialog();
+    sharePlaybackTime.value = 0;
+    shareIncludeTime.value = false;
     void updateCollapsedDescription();
     scheduleActionLayoutSync();
   },
@@ -147,6 +160,23 @@ watch(
 
 watch([displayUploader, displayChannelText], () => {
   scheduleActionLayoutSync();
+});
+
+watch([() => props.cid, shareIncludeTime, sharePlaybackTime, isShareDialogOpen], () => {
+  syncShareUrl();
+}, { immediate: true, flush: 'sync' });
+
+watch(isShareDialogOpen, async (isOpen) => {
+  if (!isOpen) return;
+
+  await nextTick();
+  shareDialogRef.value?.focus();
+  const input = shareUrlInputRef.value;
+  input?.focus();
+  if (input && typeof input.setSelectionRange === 'function') {
+    const cursorIndex = input.value.length;
+    input.setSelectionRange(cursorIndex, cursorIndex);
+  }
 });
 
 function scheduleActionLayoutSync() {
@@ -316,6 +346,11 @@ function handleDocumentPointerDown(event) {
 
 function handleDocumentKeydown(event) {
   if (event.key === 'Escape') {
+    if (isShareDialogOpen.value) {
+      closeShareDialog();
+      return;
+    }
+
     closeMoreMenu();
   }
 }
@@ -337,7 +372,7 @@ function handleOverflowAction(actionId) {
   closeMoreMenu();
 
   if (actionId === shareActionId) {
-    shareCurrentTime();
+    openShareDialog();
     return;
   }
 
@@ -346,43 +381,73 @@ function handleOverflowAction(actionId) {
   }
 }
 
-function shareCurrentTime() {
+function clearShareCopySuccessTimeout() {
+  if (shareCopySuccessTimeout) {
+    clearTimeout(shareCopySuccessTimeout);
+    shareCopySuccessTimeout = 0;
+  }
+}
+
+function syncShareUrl() {
+  if (typeof window === 'undefined') {
+    shareUrlText.value = '';
+    return;
+  }
+
+  shareUrlText.value = buildShareUrl(
+    window.location.href,
+    props.cid,
+    shareIncludeTime.value ? sharePlaybackTime.value : 0
+  );
+}
+
+function closeShareDialog() {
+  isShareDialogOpen.value = false;
+  shareUrlText.value = '';
+  shareCopySuccess.value = false;
+  clearShareCopySuccessTimeout();
+}
+
+function openShareDialog() {
   if (!props.cid) {
     alert('無有效的 CID！');
     return;
   }
 
-  let currentTime = 0;
-  if (window.videojs && window.videojs.getAllPlayers().length > 0) {
-    currentTime = Math.floor(window.videojs.getAllPlayers()[0].currentTime());
-  } else {
-    const video = document.querySelector('video');
-    if (video) {
-      currentTime = Math.floor(video.currentTime);
-    }
-  }
+  closeMoreMenu();
+  sharePlaybackTime.value = getCurrentPlaybackTime(window);
+  shareIncludeTime.value = sharePlaybackTime.value > 0;
+  shareCopySuccess.value = false;
+  clearShareCopySuccessTimeout();
+  syncShareUrl();
+  isShareDialogOpen.value = true;
+}
 
-  const shareUrl = new URL(window.location.origin + window.location.pathname);
-  shareUrl.searchParams.set('cid', props.cid);
-  if (currentTime > 0) {
-    shareUrl.searchParams.set('t', currentTime);
-  }
+function setShareCopySuccess() {
+  shareCopySuccess.value = true;
+  clearShareCopySuccessTimeout();
+  shareCopySuccessTimeout = setTimeout(() => {
+    shareCopySuccess.value = false;
+    shareCopySuccessTimeout = 0;
+  }, 2000);
+}
 
-  const urlStr = shareUrl.toString();
+function copyShareUrl() {
+  if (!shareUrlText.value) {
+    return;
+  }
 
   const handleSuccess = () => {
-    shareSuccess.value = true;
-    setTimeout(() => {
-      shareSuccess.value = false;
-    }, 2000);
+    setShareCopySuccess();
+    shareUrlInputRef.value?.focus();
   };
 
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(urlStr).then(handleSuccess).catch(() => {
-      fallbackCopyTextToClipboard(urlStr, handleSuccess);
+    navigator.clipboard.writeText(shareUrlText.value).then(handleSuccess).catch(() => {
+      fallbackCopyTextToClipboard(shareUrlText.value, handleSuccess);
     });
   } else {
-    fallbackCopyTextToClipboard(urlStr, handleSuccess);
+    fallbackCopyTextToClipboard(shareUrlText.value, handleSuccess);
   }
 }
 
@@ -588,6 +653,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown);
   document.removeEventListener('keydown', handleDocumentKeydown);
   window.removeEventListener('resize', scheduleActionLayoutSync);
+  clearShareCopySuccessTimeout();
 
   if (layoutObserver) {
     layoutObserver.disconnect();
@@ -628,9 +694,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div ref="shareMeasureRef" class="glass-btn action-btn action-measure" aria-hidden="true">
-          <svg v-if="!shareSuccess" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
-          <svg v-else viewBox="0 0 24 24" width="20" height="20" class="success-icon"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-          <span class="btn-text">{{ shareSuccess ? 'Copied!' : 'Share' }}</span>
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+          <span class="btn-text">Share</span>
         </div>
 
         <button
@@ -639,13 +704,13 @@ onBeforeUnmount(() => {
           class="glass-btn action-btn"
           data-action-item
           data-testid="video-info-share-button"
-          @click="shareCurrentTime"
-          :class="{ 'success-text': shareSuccess }"
-          title="Share Video (Copy Link)"
+          aria-haspopup="dialog"
+          :aria-expanded="isShareDialogOpen ? 'true' : 'false'"
+          @click="openShareDialog"
+          title="Share Video"
         >
-          <svg v-if="!shareSuccess" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
-          <svg v-else viewBox="0 0 24 24" width="20" height="20" class="success-icon"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-          <span class="btn-text">{{ shareSuccess ? 'Copied!' : 'Share' }}</span>
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+          <span class="btn-text">Share</span>
         </button>
 
         <div ref="moreMenuRef" class="more-actions" data-action-item data-testid="video-info-more-actions">
@@ -763,6 +828,85 @@ onBeforeUnmount(() => {
     <div ref="creatorTextMeasureRef" class="creator-text creator-text-measure" aria-hidden="true">
       <div class="creator-name">{{ displayUploader }} <svg viewBox="0 0 24 24" width="16" height="16" class="verified"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div>
       <div class="subscribers">{{ displayChannelText }}</div>
+    </div>
+
+    <div
+      v-if="isShareDialogOpen"
+      class="share-backdrop"
+      data-testid="video-info-share-dialog-backdrop"
+      @click.self="closeShareDialog"
+    >
+      <div
+        ref="shareDialogRef"
+        class="share-dialog glass-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shareDialogTitle"
+        aria-describedby="shareDialogSubtitle"
+        tabindex="-1"
+        data-testid="video-info-share-dialog"
+      >
+        <div class="share-dialog-header">
+          <div class="share-dialog-copy">
+            <h3 id="shareDialogTitle">Share</h3>
+            <p id="shareDialogSubtitle" class="share-dialog-subtitle">
+              Copy a direct link to this video and choose whether to start at the current playback time.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="share-dialog-close"
+            aria-label="Close share dialog"
+            data-testid="video-info-share-dialog-close"
+            @click="closeShareDialog"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.3l6.3 6.29 6.29-6.3z"/></svg>
+          </button>
+        </div>
+
+        <div class="share-dialog-body">
+          <div class="share-url-stack">
+            <div class="share-url-label" id="shareUrlLabel">Video link</div>
+            <div class="share-url-field">
+              <input
+                id="shareUrlInput"
+                ref="shareUrlInputRef"
+                class="share-url-input"
+                type="text"
+                readonly
+                aria-labelledby="shareUrlLabel"
+                :value="shareUrlText"
+                data-testid="video-info-share-url-input"
+              />
+              <button
+                type="button"
+                class="glass-btn share-copy-btn"
+                :class="{ 'success-text': shareCopySuccess }"
+                data-testid="video-info-share-copy-button"
+                @click="copyShareUrl"
+              >
+                {{ shareCopySuccess ? 'Copied!' : 'Copy' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="share-dialog-footer" data-testid="video-info-share-current-time">
+            <label
+              class="share-time-inline"
+              :class="{ 'is-disabled': sharePlaybackTime <= 0 }"
+              data-testid="video-info-share-start-at-toggle"
+            >
+              <input
+                v-model="shareIncludeTime"
+                type="checkbox"
+                :disabled="sharePlaybackTime <= 0"
+              />
+              <span class="share-time-inline-label">開始處</span>
+              <span class="share-time-inline-value">{{ shareTimeLabel }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -988,6 +1132,168 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.share-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(7, 9, 16, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.share-dialog {
+  width: min(560px, calc(100vw - 48px));
+  overflow: hidden;
+  border-radius: 24px;
+  background: rgba(16, 18, 32, 0.94);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+
+.share-dialog:focus {
+  outline: none;
+}
+
+.share-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.share-dialog-copy {
+  min-width: 0;
+}
+
+.share-dialog-copy h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.share-dialog-subtitle {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.share-dialog-close {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.share-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.share-dialog-body {
+  display: grid;
+  gap: 18px;
+  padding: 20px 24px 24px;
+}
+
+.share-url-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.share-url-label {
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.share-url-field {
+  position: relative;
+}
+
+.share-url-input {
+  width: 100%;
+  min-width: 0;
+  height: 56px;
+  padding: 14px 132px 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.share-url-input:focus {
+  outline: 2px solid rgba(0, 210, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.share-copy-btn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  justify-content: center;
+  min-width: 96px;
+  height: 40px;
+  padding: 0 16px;
+}
+
+.share-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 28px;
+}
+
+.share-time-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+
+.share-time-inline input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-cyan);
+}
+
+.share-time-inline.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.share-time-inline-label {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.share-time-inline-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .divider {
   width: 1px;
   height: 20px;
@@ -1194,10 +1500,6 @@ onBeforeUnmount(() => {
   border-color: rgba(0, 210, 255, 0.4);
 }
 
-.success-icon {
-  color: var(--accent-cyan);
-}
-
 @media (max-width: 600px) {
   .actions {
     gap: 8px;
@@ -1205,6 +1507,43 @@ onBeforeUnmount(() => {
 
   .action-btn {
     padding: 8px 12px;
+  }
+
+  .share-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .share-dialog {
+    width: 100%;
+    border-radius: 24px 24px 0 0;
+  }
+
+  .share-dialog-header {
+    padding: 18px 16px 14px;
+  }
+
+  .share-dialog-copy h3 {
+    font-size: 1.18rem;
+  }
+
+  .share-dialog-subtitle {
+    font-size: 0.82rem;
+  }
+
+  .share-dialog-body {
+    padding: 14px 16px 18px;
+  }
+
+  .share-url-input {
+    height: 52px;
+    padding-right: 112px;
+  }
+
+  .share-copy-btn {
+    min-width: 84px;
+    height: 36px;
+    padding: 0 14px;
   }
 
   .stats-hashtag {

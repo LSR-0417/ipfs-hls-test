@@ -9,10 +9,10 @@ const viewportMatrix = [
   { name: '4k', width: 3840, height: 2160, mobile: false, desktop: true },
 ];
 
-async function openApp(page) {
+async function openApp(page, url = './') {
   await page.route('https://images.unsplash.com/**', (route) => route.abort());
   await page.route('https://api.dicebear.com/**', (route) => route.abort());
-  await page.goto('./', { waitUntil: 'domcontentloaded' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('app-header')).toBeVisible();
   await expect(page.getByTestId('main-content')).toBeVisible();
 }
@@ -129,6 +129,81 @@ test.describe('Responsive Video Actions', () => {
     await expect(page.getByTestId('video-info-overflow-menu')).toBeVisible();
     await expect(page.getByTestId('video-info-overflow-item-share')).toBeVisible();
     await expect(page.getByTestId('video-info-overflow-item-download')).toBeVisible();
+  });
+
+  test('opens a YouTube-style share dialog, toggles the time parameter, and copies the generated URL', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__copiedShareUrl = '';
+      Object.defineProperty(window, 'isSecureContext', {
+        configurable: true,
+        value: true,
+      });
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText(text) {
+            window.__copiedShareUrl = text;
+            return Promise.resolve();
+          },
+        },
+      });
+    });
+
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page, './?cid=bafysharetest123');
+
+    await page.evaluate(() => {
+      const existingVideo = document.querySelector('video');
+      const video = existingVideo || document.body.appendChild(document.createElement('video'));
+
+      Object.defineProperty(video, 'currentTime', {
+        configurable: true,
+        get: () => 93,
+      });
+    });
+
+    await page.getByTestId('video-info-share-button').click();
+
+    const dialog = page.getByTestId('video-info-share-dialog');
+    const urlInput = page.getByTestId('video-info-share-url-input');
+    const timePanel = page.getByTestId('video-info-share-current-time');
+    const startAtToggle = page.getByTestId('video-info-share-start-at-toggle');
+    const copyButton = page.getByTestId('video-info-share-copy-button');
+
+    await expect(dialog).toBeVisible();
+    await expect(timePanel).toContainText('1:33');
+    await expect(startAtToggle).toContainText('開始處');
+    await expect(startAtToggle).toContainText('1:33');
+    await expect(urlInput).toHaveValue(/cid=bafysharetest123/);
+    await expect(urlInput).toHaveValue(/t=93/);
+
+    await startAtToggle.click();
+    await expect(urlInput).toHaveValue('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123');
+
+    await startAtToggle.click();
+    await expect(urlInput).toHaveValue('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123&t=93');
+
+    await copyButton.click();
+    await expect(copyButton).toContainText('Copied!');
+
+    const copiedUrl = await page.evaluate(() => window.__copiedShareUrl);
+    expect(copiedUrl).toBe('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123&t=93');
+  });
+
+  test('opens the share dialog from the overflow menu on iPhone 13 mini', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openApp(page, './?cid=bafysharemobile123');
+
+    await page.getByTestId('video-info-overflow-trigger').click();
+    await page.getByTestId('video-info-overflow-item-share').click();
+
+    const dialog = page.getByTestId('video-info-share-dialog');
+    await expect(dialog).toBeVisible();
+
+    const dialogBox = await getBox(dialog);
+    expect(dialogBox.width).toBeGreaterThanOrEqual(371);
+    expect(dialogBox.x).toBeLessThanOrEqual(2);
+    expect(dialogBox.y + dialogBox.height).toBeGreaterThanOrEqual(810);
   });
 });
 
