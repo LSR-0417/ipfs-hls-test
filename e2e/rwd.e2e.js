@@ -215,17 +215,21 @@ test.describe('Responsive Video Actions', () => {
     await expect(urlInput).toHaveValue(/cid=bafysharetest123/);
     await expect(urlInput).toHaveValue(/t=93/);
 
-    await startAtToggle.click();
-    await expect(urlInput).toHaveValue('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123');
+    const shareBaseUrl = new URL(page.url());
+    shareBaseUrl.search = '?cid=bafysharetest123';
 
     await startAtToggle.click();
-    await expect(urlInput).toHaveValue('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123&t=93');
+    await expect(urlInput).toHaveValue(shareBaseUrl.toString());
+
+    await startAtToggle.click();
+    shareBaseUrl.search = '?cid=bafysharetest123&t=93';
+    await expect(urlInput).toHaveValue(shareBaseUrl.toString());
 
     await copyButton.click();
     await expect(copyButton).toContainText('Copied!');
 
     const copiedUrl = await page.evaluate(() => window.__copiedShareUrl);
-    expect(copiedUrl).toBe('http://127.0.0.1:4173/ipfs-hls-test/?cid=bafysharetest123&t=93');
+    expect(copiedUrl).toBe(shareBaseUrl.toString());
   });
 
   test('opens the share dialog from the overflow menu on iPhone 13 mini', async ({ page }) => {
