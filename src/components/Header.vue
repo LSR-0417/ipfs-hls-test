@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   isDisabledGatewayInput,
   isPrivateHostname,
@@ -33,6 +33,8 @@ const emit = defineEmits(['search', 'gateway-change']);
 
 const searchQuery = ref('');
 const settingsOpen = ref(false);
+const gatewayButtonRef = ref(null);
+const gatewayDialogRef = ref(null);
 const selectedGatewayId = ref(builtInGateways[0].id);
 const localHost = ref('127.0.0.1');
 const localPort = ref('8080');
@@ -41,6 +43,7 @@ const gatewayError = ref('');
 const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
 const isGatewayProbeRunning = ref(false);
+const lastFocusedGatewayTrigger = ref(null);
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
@@ -48,10 +51,6 @@ const currentGatewayValue = computed(
   () => normalizeGatewayUrl(props.currentGateway, { allowPrivateHosts: isDevMode }) || props.currentGateway
 );
 const currentCidValue = computed(() => props.currentCid.trim());
-const isCurrentCustomGateway = computed(() => {
-  const current = currentGatewayValue.value;
-  return Boolean(current) && !builtInGateways.some((gateway) => gatewayUrl(gateway) === current);
-});
 const orderedBuiltInGateways = computed(() =>
   [...builtInGateways].sort((left, right) => {
     const leftState = probeStateFor(left.id);
@@ -114,6 +113,21 @@ const currentGatewayProbeState = computed(() => {
 
   return createIdleProbeState();
 });
+const gatewaySelectionCaption = computed(() =>
+  currentCidValue.value ? 'Fastest healthy gateway appears first.' : 'Choose a gateway now, or load a CID to compare health.'
+);
+const selectedGatewayValue = computed(() => {
+  if (selectedGatewayId.value === LOCAL_GATEWAY_ID) {
+    return isDevMode ? localGatewayUrl.value : gatewayUrl(builtInGateways[0]);
+  }
+
+  if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
+    return customGatewayPreview.value;
+  }
+
+  const selectedGateway = builtInGateways.find((gateway) => gateway.id === selectedGatewayId.value);
+  return selectedGateway ? gatewayUrl(selectedGateway) : '';
+});
 const currentGatewayName = computed(() => {
   const current = currentGatewayValue.value;
   if (!current) return 'Not set';
@@ -129,6 +143,50 @@ const currentGatewayName = computed(() => {
   } catch (_) {
     return 'Custom Gateway';
   }
+});
+const currentGatewayId = computed(() => {
+  const current = currentGatewayValue.value;
+  if (!current) return '';
+
+  const matchedGateway = builtInGateways.find((gateway) => gatewayUrl(gateway) === current);
+  if (matchedGateway) {
+    return matchedGateway.id;
+  }
+
+  return CUSTOM_GATEWAY_ID;
+});
+const selectedGatewayName = computed(() => {
+  if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
+    const preview = customGatewayPreview.value;
+    if (!preview) return 'Custom Gateway';
+
+    try {
+      const parsed = new URL(preview);
+      return parsed.hostname || parsed.host || 'Custom Gateway';
+    } catch (_) {
+      return 'Custom Gateway';
+    }
+  }
+
+  const selectedGateway = builtInGateways.find((gateway) => gateway.id === selectedGatewayId.value);
+  return selectedGateway?.label || builtInGateways[0]?.label || 'Gateway';
+});
+const hasPendingGatewayChange = computed(() => {
+  const selected = selectedGatewayValue.value;
+  const current = currentGatewayValue.value;
+
+  if (selected && selected !== current) return true;
+
+  return selectedGatewayId.value !== currentGatewayId.value;
+});
+const gatewayChangeSummary = computed(() => {
+  if (!hasPendingGatewayChange.value) return '';
+
+  if (!currentGatewayValue.value) {
+    return `Use ${selectedGatewayName.value}`;
+  }
+
+  return `Switch from ${currentGatewayName.value} to ${selectedGatewayName.value}`;
 });
 const currentGatewayKind = computed(() => {
   const current = currentGatewayValue.value;
@@ -175,6 +233,26 @@ watch(
   },
   { immediate: true }
 );
+
+watch(settingsOpen, async (isOpen) => {
+  if (typeof document === 'undefined') return;
+
+  if (isOpen) {
+    lastFocusedGatewayTrigger.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    gatewayDialogRef.value?.focus();
+    document.addEventListener('keydown', handleGatewayDialogKeydown);
+    return;
+  }
+
+  document.removeEventListener('keydown', handleGatewayDialogKeydown);
+  await nextTick();
+
+  const nextFocusTarget = gatewayButtonRef.value || lastFocusedGatewayTrigger.value;
+  if (nextFocusTarget && typeof nextFocusTarget.focus === 'function') {
+    nextFocusTarget.focus();
+  }
+});
 
 watch(
   () => [currentCidValue.value, props.currentLoadSequence],
@@ -230,6 +308,17 @@ function gatewayUrl(gateway) {
   return gateway.id === LOCAL_GATEWAY_ID ? localGatewayUrl.value : gateway.url;
 }
 
+function formatGatewayEndpoint(urlStr) {
+  if (!urlStr) return '';
+
+  try {
+    const parsed = new URL(urlStr);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch (_) {
+    return urlStr.replace(/^https?:\/\//, '');
+  }
+}
+
 function openSettings() {
   if (isDevMode) {
     restoreLocalGateway();
@@ -243,6 +332,10 @@ function openSettings() {
   syncSelectionFromGateway(props.currentGateway);
   gatewayError.value = '';
   settingsOpen.value = true;
+}
+
+function closeSettings() {
+  settingsOpen.value = false;
 }
 
 function applyGateway() {
@@ -278,7 +371,7 @@ function applyGateway() {
   }
 
   emit('gateway-change', nextGateway);
-  settingsOpen.value = false;
+  closeSettings();
 }
 
 function syncSelectionFromGateway(urlStr) {
@@ -505,6 +598,52 @@ function isRecommendedGateway(id) {
   return recommendedGatewayId.value === id && probeStateFor(id).state === 'ready';
 }
 
+function getGatewayDialogFocusableElements() {
+  if (!gatewayDialogRef.value) return [];
+
+  return Array.from(
+    gatewayDialogRef.value.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+}
+
+function handleGatewayDialogKeydown(event) {
+  if (!settingsOpen.value) return;
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSettings();
+    return;
+  }
+
+  if (event.key !== 'Tab') return;
+
+  const focusableElements = getGatewayDialogFocusableElements();
+  if (!focusableElements.length) {
+    event.preventDefault();
+    gatewayDialogRef.value?.focus();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+  const activeElement = document.activeElement;
+
+  if (event.shiftKey) {
+    if (activeElement === firstElement || !gatewayDialogRef.value?.contains(activeElement)) {
+      event.preventDefault();
+      lastElement.focus();
+    }
+    return;
+  }
+
+  if (activeElement === lastElement || !gatewayDialogRef.value?.contains(activeElement)) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
 function probeSortRank(probeState) {
   if (probeState.state === 'ready') return 0;
   if (probeState.state === 'playlist_ready') return 1;
@@ -606,6 +745,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('keydown', handleGatewayDialogKeydown);
+  }
   stopGatewayProbeLoop();
   cancelScheduledGatewayProbe();
   isGatewayProbeRunning.value = false;
@@ -642,6 +784,7 @@ onBeforeUnmount(() => {
 
     <div class="actions-area" data-testid="header-actions-area">
       <button
+        ref="gatewayButtonRef"
         class="action-btn gateway-btn"
         @click="openSettings"
         aria-haspopup="dialog"
@@ -667,132 +810,204 @@ onBeforeUnmount(() => {
     </div>
   </header>
 
-  <div v-if="settingsOpen" class="gateway-backdrop" data-testid="gateway-backdrop" @click.self="settingsOpen = false">
-    <div class="gateway-dialog" role="dialog" aria-modal="true" aria-labelledby="gatewayTitle" data-testid="gateway-dialog">
+  <div v-if="settingsOpen" class="gateway-backdrop" data-testid="gateway-backdrop" @click.self="closeSettings()">
+    <div
+      ref="gatewayDialogRef"
+      class="gateway-dialog gateway-dialog--form"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gatewayTitle"
+      aria-describedby="gatewaySubtitle"
+      tabindex="-1"
+      data-testid="gateway-dialog"
+    >
       <div class="gateway-header">
-        <div>
-          <h3 id="gatewayTitle">Gateway Settings</h3>
-          <div class="gateway-subtitle">Choose the best route to your IPFS content</div>
+        <div class="gateway-header-copy">
+          <h3 id="gatewayTitle">Switch Gateway</h3>
+          <p id="gatewaySubtitle" class="gateway-subtitle">
+            Choose the best route to your IPFS content without leaving the current session.
+          </p>
         </div>
-        <button class="gateway-close" @click="settingsOpen = false" aria-label="Close">
-          ✕
-        </button>
       </div>
 
-      <div class="gateway-current">
-        <span class="label">Current</span>
-        <div class="gateway-current-row">
-          <span class="gateway-signal" :class="`is-${currentGatewayProbeState.state}`" aria-hidden="true"></span>
-          <span class="value">{{ currentGateway }}</span>
-        </div>
-        <span class="gateway-status-text">{{ formatProbeStateText(currentGatewayProbeState) }}</span>
-      </div>
-
-      <div class="gateway-probe-toolbar">
-        <div class="gateway-probe-note">Showing the latest background ranking. Recheck manually when needed.</div>
-        <button class="ghost-btn gateway-refresh-btn" :disabled="!currentCidValue || isGatewayProbeRunning" @click="forceGatewayProbe">
-          {{ isGatewayProbeRunning ? 'Checking...' : 'Recheck Now' }}
-        </button>
-      </div>
-
-      <div class="gateway-list">
-        <label
-          v-for="g in orderedBuiltInGateways"
-          :key="g.id"
-          class="gateway-option"
-          :class="{ selected: selectedGatewayId === g.id }"
-        >
-          <input type="radio" name="gateway" :value="g.id" v-model="selectedGatewayId" />
-          <div class="gateway-meta">
-            <div class="gateway-title">
-              <span class="gateway-title-main">
-                <span class="gateway-signal" :class="gatewaySignalClass(g.id)" aria-hidden="true"></span>
-                <span>{{ g.label }}</span>
-              </span>
-              <span class="gateway-badges">
-                <span v-if="isRecommendedGateway(g.id)" class="badge badge-recommended">Recommended</span>
-                <span v-if="gatewayUrl(g) === currentGatewayValue" class="badge">Active</span>
-              </span>
+      <div class="gateway-dialog-body" data-testid="gateway-dialog-body">
+        <section class="gateway-section">
+          <div class="gateway-section-header">
+            <div class="gateway-section-heading">
+              <h4>Available Gateways</h4>
+              <p class="gateway-section-caption">{{ gatewaySelectionCaption }}</p>
             </div>
-            <div class="gateway-desc">{{ g.desc }}</div>
-            <div class="gateway-status-text">{{ gatewaySignalText(g.id) }}</div>
-            <div class="gateway-url">{{ gatewayUrl(g) }}</div>
+            <button class="ghost-btn gateway-refresh-btn" :disabled="!currentCidValue || isGatewayProbeRunning" @click="forceGatewayProbe">
+              {{ isGatewayProbeRunning ? 'Checking...' : 'Recheck Now' }}
+            </button>
           </div>
-          <div class="gateway-check">✓</div>
-        </label>
-      </div>
 
-      <label class="gateway-option" :class="{ selected: selectedGatewayId === CUSTOM_GATEWAY_ID }">
-        <input type="radio" name="gateway" :value="CUSTOM_GATEWAY_ID" v-model="selectedGatewayId" />
-        <div class="gateway-meta">
-          <div class="gateway-title">
-            <span class="gateway-title-main">
-              <span class="gateway-signal" :class="gatewaySignalClass(CUSTOM_GATEWAY_ID)" aria-hidden="true"></span>
-              <span>Custom Gateway</span>
-            </span>
-            <span class="gateway-badges">
-              <span v-if="isRecommendedGateway(CUSTOM_GATEWAY_ID)" class="badge badge-recommended">Recommended</span>
-              <span v-if="isCurrentCustomGateway" class="badge">Active</span>
-            </span>
+          <div class="gateway-list">
+            <label
+              v-for="g in orderedBuiltInGateways"
+              :key="g.id"
+              class="gateway-option"
+              :class="{ selected: selectedGatewayId === g.id, current: currentGatewayId === g.id }"
+              :data-testid="`gateway-option-${g.id}`"
+              :title="gatewayUrl(g)"
+            >
+              <input type="radio" name="gateway" :value="g.id" v-model="selectedGatewayId" />
+              <span class="gateway-selector" aria-hidden="true">
+                <span class="gateway-selector-dot"></span>
+              </span>
+              <div class="gateway-option-main">
+                <div class="gateway-option-header">
+                  <span class="gateway-title-main">
+                    <span class="gateway-signal" :class="gatewaySignalClass(g.id)" aria-hidden="true"></span>
+                    <span>{{ g.label }}</span>
+                  </span>
+                  <span class="gateway-badges">
+                    <span
+                      v-if="currentGatewayId === g.id && selectedGatewayId === g.id"
+                      class="badge badge-current-selection"
+                    >
+                      Current Selection
+                    </span>
+                    <template v-else>
+                      <span v-if="selectedGatewayId === g.id" class="badge badge-selected">Selected</span>
+                      <span v-if="currentGatewayId === g.id" class="badge badge-current">Current</span>
+                    </template>
+                    <span v-if="isRecommendedGateway(g.id)" class="badge badge-recommended">Recommended</span>
+                  </span>
+                </div>
+                <div class="gateway-desc">{{ g.desc }}</div>
+                <div class="gateway-meta-row">
+                  <div class="gateway-endpoint">{{ formatGatewayEndpoint(gatewayUrl(g)) }}</div>
+                  <div class="gateway-status-text">{{ gatewaySignalText(g.id) }}</div>
+                </div>
+              </div>
+            </label>
+
+            <label
+              class="gateway-option"
+              :class="{ selected: selectedGatewayId === CUSTOM_GATEWAY_ID, current: currentGatewayId === CUSTOM_GATEWAY_ID }"
+              data-testid="gateway-option-custom"
+              :title="customGatewayPreview || 'https://friend-gateway.example/ipfs/'"
+            >
+              <input type="radio" name="gateway" :value="CUSTOM_GATEWAY_ID" v-model="selectedGatewayId" />
+              <span class="gateway-selector" aria-hidden="true">
+                <span class="gateway-selector-dot"></span>
+              </span>
+              <div class="gateway-option-main">
+                <div class="gateway-option-header">
+                  <span class="gateway-title-main">
+                    <span class="gateway-signal" :class="gatewaySignalClass(CUSTOM_GATEWAY_ID)" aria-hidden="true"></span>
+                    <span>Custom Gateway</span>
+                  </span>
+                  <span class="gateway-badges">
+                    <span
+                      v-if="currentGatewayId === CUSTOM_GATEWAY_ID && selectedGatewayId === CUSTOM_GATEWAY_ID"
+                      class="badge badge-current-selection"
+                    >
+                      Current Selection
+                    </span>
+                    <template v-else>
+                      <span v-if="selectedGatewayId === CUSTOM_GATEWAY_ID" class="badge badge-selected">Selected</span>
+                      <span v-if="currentGatewayId === CUSTOM_GATEWAY_ID" class="badge badge-current">Current</span>
+                    </template>
+                    <span v-if="isRecommendedGateway(CUSTOM_GATEWAY_ID)" class="badge badge-recommended">Recommended</span>
+                  </span>
+                </div>
+                <div class="gateway-desc">Use a public HTTPS gateway that is not in the default list</div>
+                <div class="gateway-meta-row">
+                  <div class="gateway-endpoint">
+                    {{ formatGatewayEndpoint(customGatewayPreview) || 'friend-gateway.example/ipfs/' }}
+                  </div>
+                  <div class="gateway-status-text">{{ gatewaySignalText(CUSTOM_GATEWAY_ID) }}</div>
+                </div>
+              </div>
+            </label>
           </div>
-          <div class="gateway-desc">Use a public HTTPS gateway that is not in the default list</div>
-          <div class="gateway-status-text">{{ gatewaySignalText(CUSTOM_GATEWAY_ID) }}</div>
-          <div class="gateway-url">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</div>
-        </div>
-        <div class="gateway-check">✓</div>
-      </label>
+        </section>
 
-      <div class="custom-config" :class="{ active: selectedGatewayId === CUSTOM_GATEWAY_ID }">
-        <div class="local-title">Custom Public Gateway</div>
-        <label for="customGateway">HTTPS Gateway URL</label>
-        <input
-          id="customGateway"
-          type="text"
-          v-model="customGateway"
-          placeholder="https://friend-gateway.example/ipfs/"
-          @focus="selectedGatewayId = CUSTOM_GATEWAY_ID"
-          @input="gatewayError = ''"
-        />
-        <div class="local-preview">
-          <span class="label">Preview</span>
-          <span class="value">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</span>
-        </div>
-      </div>
+        <section
+          v-if="selectedGatewayId === CUSTOM_GATEWAY_ID"
+          class="gateway-section"
+          data-testid="gateway-custom-config"
+        >
+          <div class="gateway-section-header">
+            <div>
+              <h4>Custom Gateway</h4>
+              <p class="gateway-section-caption">Public HTTPS gateway only.</p>
+            </div>
+          </div>
 
-      <div v-if="isDevMode" class="local-config">
-        <div class="local-title">Local Node Settings</div>
-        <div class="local-fields">
-          <div class="field">
-            <label for="localHost">Host / IP</label>
+          <div class="custom-config active">
+            <div class="local-title">Custom Public Gateway</div>
+            <label for="customGateway">HTTPS Gateway URL</label>
             <input
-              id="localHost"
+              id="customGateway"
               type="text"
-              v-model="localHost"
-              placeholder="127.0.0.1"
-              @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
+              v-model="customGateway"
+              placeholder="https://friend-gateway.example/ipfs/"
+              @focus="selectedGatewayId = CUSTOM_GATEWAY_ID"
+              @input="gatewayError = ''"
             />
+            <div class="local-preview">
+              <span class="label">Preview</span>
+              <span class="value">{{ customGatewayPreview || 'https://friend-gateway.example/ipfs/' }}</span>
+            </div>
           </div>
-          <div class="field">
-            <label for="localPort">Port</label>
-            <input
-              id="localPort"
-              type="text"
-              v-model="localPort"
-              placeholder="8080"
-              @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
-            />
+        </section>
+
+        <section
+          v-if="isDevMode && selectedGatewayId === LOCAL_GATEWAY_ID"
+          class="gateway-section"
+          data-testid="gateway-local-config"
+        >
+          <div class="gateway-section-header">
+            <div>
+              <h4>Local Node Settings</h4>
+              <p class="gateway-section-caption">Only shown when the local gateway is selected.</p>
+            </div>
           </div>
-        </div>
-        <div class="local-preview">
-          <span class="label">Preview</span>
-          <span class="value">{{ localGatewayUrl }}</span>
+
+          <div class="local-config">
+            <div class="local-title">Local Node Settings</div>
+            <div class="local-fields">
+              <div class="field">
+                <label for="localHost">Host / IP</label>
+                <input
+                  id="localHost"
+                  type="text"
+                  v-model="localHost"
+                  placeholder="127.0.0.1"
+                  @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
+                />
+              </div>
+              <div class="field">
+                <label for="localPort">Port</label>
+                <input
+                  id="localPort"
+                  type="text"
+                  v-model="localPort"
+                  placeholder="8080"
+                  @focus="selectedGatewayId = LOCAL_GATEWAY_ID"
+                />
+              </div>
+            </div>
+            <div class="local-preview">
+              <span class="label">Preview</span>
+              <span class="value">{{ localGatewayUrl }}</span>
+            </div>
+          </div>
+        </section>
+
+        <div v-if="gatewayError" class="gateway-error" role="status" aria-live="assertive">
+          {{ gatewayError }}
         </div>
       </div>
 
-      <div v-if="gatewayError" class="gateway-error">{{ gatewayError }}</div>
-
-      <div class="gateway-actions">
-        <button class="ghost-btn" @click="settingsOpen = false">Cancel</button>
+      <div class="gateway-footer" data-testid="gateway-dialog-footer">
+        <div v-if="hasPendingGatewayChange" class="gateway-transition-note" data-testid="gateway-transition-note">
+          {{ gatewayChangeSummary }}
+        </div>
+        <button class="ghost-btn" @click="closeSettings()">Cancel</button>
         <button class="primary-btn" @click="applyGateway">Apply</button>
       </div>
     </div>
@@ -1117,96 +1332,64 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 24px;
   z-index: 200;
 }
 
 .gateway-dialog {
-  width: min(520px, 100%);
-  background: rgba(16, 18, 32, 0.9);
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(84dvh, 960px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: rgba(16, 18, 32, 0.94);
   border: 1px solid var(--panel-border);
-  border-radius: 18px;
+  border-radius: 24px;
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
-  padding: 20px;
   color: var(--text-primary);
-  max-height: 80vh;
-  overflow: auto;
+}
+
+.gateway-dialog:focus {
+  outline: none;
 }
 
 .gateway-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.gateway-header-copy {
+  min-width: 0;
+  max-width: 48ch;
 }
 
 .gateway-header h3 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.35rem;
+  line-height: 1.15;
 }
 
 .gateway-subtitle {
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   margin-top: 6px;
+  line-height: 1.5;
 }
 
-.gateway-close {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 1.2rem;
-  cursor: pointer;
-}
-
-.gateway-current {
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--panel-border);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.gateway-current .label {
-  font-size: 0.75rem;
+.gateway-summary-label {
+  font-size: 0.72rem;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
 }
 
-.gateway-current .value {
-  font-size: 0.9rem;
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.gateway-current-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.gateway-list {
-  margin-top: 16px;
-  display: grid;
-  gap: 12px;
-}
-
-.gateway-probe-toolbar {
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.gateway-probe-note {
-  color: rgba(255, 255, 255, 0.65);
+.gateway-endpoint {
+  color: rgba(255, 255, 255, 0.58);
   font-size: 0.8rem;
-  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .gateway-refresh-btn {
@@ -1214,21 +1397,67 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.gateway-option {
+.gateway-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 24px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+}
+
+.gateway-section {
+  display: grid;
   gap: 12px;
-  align-items: center;
-  padding: 14px;
-  border-radius: 14px;
+}
+
+.gateway-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gateway-section-heading {
+  min-width: 0;
+}
+
+.gateway-section h4 {
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.2;
+}
+
+.gateway-section-caption {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.gateway-list {
+  display: grid;
+  gap: 12px;
+}
+
+.gateway-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border-radius: 18px;
   border: 1px solid var(--panel-border);
   background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .gateway-option input {
-  accent-color: var(--accent-cyan);
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .gateway-option:hover {
@@ -1236,17 +1465,64 @@ onBeforeUnmount(() => {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.gateway-option.selected {
-  border-color: rgba(0, 210, 255, 0.5);
-  box-shadow: 0 0 18px rgba(0, 210, 255, 0.15);
+.gateway-option.current {
+  border-color: rgba(0, 210, 255, 0.42);
+  background:
+    linear-gradient(180deg, rgba(0, 210, 255, 0.1), rgba(0, 210, 255, 0.04)),
+    rgba(255, 255, 255, 0.035);
+  box-shadow:
+    inset 4px 0 0 rgba(0, 210, 255, 0.9),
+    0 0 0 1px rgba(0, 210, 255, 0.14),
+    0 0 22px rgba(0, 210, 255, 0.14);
 }
 
-.gateway-title {
-  display: flex;
+.gateway-selector {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gateway-selector-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: transparent;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+}
+
+.gateway-option.selected .gateway-selector {
+  border-color: rgba(0, 210, 255, 0.72);
+  background: rgba(0, 210, 255, 0.14);
+  box-shadow: 0 0 0 4px rgba(0, 210, 255, 0.08);
+}
+
+.gateway-option.selected .gateway-selector-dot {
+  background: var(--accent-cyan);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.gateway-option-main {
+  display: grid;
   gap: 8px;
+  min-width: 0;
+}
+
+.gateway-option-header {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  font-weight: 600;
+  gap: 10px 12px;
+  flex-wrap: wrap;
 }
 
 .gateway-title-main {
@@ -1267,30 +1543,18 @@ onBeforeUnmount(() => {
 .gateway-desc {
   color: var(--text-secondary);
   font-size: 0.85rem;
-  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.gateway-meta-row {
+  display: grid;
+  gap: 6px;
 }
 
 .gateway-status-text {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.78rem;
-  margin-top: 6px;
-}
-
-.gateway-url {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.75rem;
-  margin-top: 6px;
-  word-break: break-all;
-}
-
-.gateway-check {
-  color: var(--accent-cyan);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.gateway-option.selected .gateway-check {
-  opacity: 1;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .gateway-signal {
@@ -1358,28 +1622,60 @@ onBeforeUnmount(() => {
   border-color: rgba(56, 211, 159, 0.45);
 }
 
-.gateway-actions {
-  margin-top: 18px;
+.badge-current {
+  background: rgba(0, 210, 255, 0.16);
+  color: #b7f4ff;
+  border-color: rgba(0, 210, 255, 0.44);
+}
+
+.badge-selected {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.badge-current-selection {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.22), rgba(255, 255, 255, 0.12));
+  color: #f5fdff;
+  border-color: rgba(0, 210, 255, 0.5);
+}
+
+.gateway-footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   justify-content: flex-end;
-  gap: 10px;
-  position: sticky;
-  bottom: 0;
-  background: rgba(16, 18, 32, 0.95);
-  padding-top: 12px;
+  gap: 12px;
+  padding: 16px 24px 24px;
+  border-top: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(16, 18, 32, 0.72), rgba(16, 18, 32, 0.98));
+}
+
+.gateway-transition-note {
+  flex: 1 0 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 210, 255, 0.18);
+  background: rgba(0, 210, 255, 0.08);
+  color: rgba(228, 250, 255, 0.9);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .ghost-btn,
 .primary-btn {
   border-radius: 12px;
-  padding: 10px 16px;
+  min-height: 44px;
+  padding: 11px 18px;
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ghost-btn {
   background: transparent;
+  min-width: 124px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: var(--text-secondary);
 }
@@ -1398,6 +1694,7 @@ onBeforeUnmount(() => {
 
 .primary-btn {
   background: rgba(0, 210, 255, 0.18);
+  min-width: 148px;
   border: 1px solid rgba(0, 210, 255, 0.4);
   color: var(--text-primary);
 }
@@ -1406,24 +1703,31 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 18px rgba(0, 210, 255, 0.25);
 }
 
+.ghost-btn:focus-visible,
+.primary-btn:focus-visible,
+.gateway-option:focus-within,
+.local-config input:focus-visible,
+.custom-config input:focus-visible {
+  outline: 2px solid rgba(0, 210, 255, 0.65);
+  outline-offset: 2px;
+}
+
 .local-config {
-  margin-top: 16px;
-  padding: 14px;
-  border-radius: 14px;
+  padding: 16px;
+  border-radius: 18px;
   border: 1px solid var(--panel-border);
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.24);
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .custom-config {
-  margin-top: 16px;
-  padding: 14px;
-  border-radius: 14px;
+  padding: 16px;
+  border-radius: 18px;
   border: 1px solid var(--panel-border);
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.24);
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .custom-config.active {
@@ -1450,7 +1754,6 @@ onBeforeUnmount(() => {
 
 .local-config input,
 .custom-config input {
-  margin-top: 6px;
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--panel-border);
@@ -1487,7 +1790,6 @@ onBeforeUnmount(() => {
 }
 
 .gateway-error {
-  margin-top: 14px;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 107, 129, 0.35);
@@ -1513,76 +1815,98 @@ onBeforeUnmount(() => {
     align-items: flex-end;
     padding: 0;
   }
+
   .gateway-dialog {
     width: 100%;
-    border-radius: 20px 20px 0 0;
-    padding: 14px 16px 12px;
-    max-height: 90vh;
+    max-height: min(92dvh, 100dvh);
+    border-radius: 24px 24px 0 0;
   }
+
   .gateway-header {
-    align-items: center;
+    align-items: flex-start;
+    padding: 18px 16px 14px;
   }
+
   .gateway-header h3 {
-    font-size: 1.1rem;
+    font-size: 1.18rem;
   }
+
   .gateway-subtitle {
     font-size: 0.82rem;
   }
-  .gateway-current {
-    padding: 8px 10px;
+
+  .gateway-dialog-body {
+    padding: 14px 16px 18px;
+    gap: 16px;
   }
-  .gateway-probe-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
+
   .gateway-option {
     grid-template-columns: auto 1fr;
-    gap: 8px;
-    padding: 10px;
+    gap: 10px;
+    padding: 14px 12px;
   }
-  .gateway-title {
+
+  .gateway-option-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .gateway-title-main {
     font-size: 0.95rem;
   }
+
   .gateway-status-text {
     font-size: 0.74rem;
   }
+
   .gateway-desc {
     font-size: 0.8rem;
   }
-  .gateway-url {
-    font-size: 0.7rem;
+
+  .gateway-endpoint {
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .gateway-check {
-    display: none;
+
+  .gateway-footer {
+    flex-direction: row;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
   }
-  .gateway-actions {
-    position: sticky;
-    bottom: -1px;
-    margin-top: 12px;
-    padding: 10px 0 4px;
-    flex-direction: column;
+
+  .gateway-transition-note {
+    font-size: 0.78rem;
   }
+
   .ghost-btn,
   .primary-btn {
-    width: 100%;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
     justify-content: center;
-    padding: 10px 14px;
+    padding: 12px 14px;
     font-size: 0.9rem;
   }
+
   .local-config {
-    padding: 10px;
+    padding: 12px;
   }
+
   .custom-config {
-    padding: 10px;
+    padding: 12px;
   }
+
   .local-fields {
     grid-template-columns: 1fr;
   }
+
   .local-config input,
   .custom-config input {
     padding: 9px 10px;
     font-size: 0.85rem;
   }
+
   .local-title {
     font-size: 0.9rem;
   }

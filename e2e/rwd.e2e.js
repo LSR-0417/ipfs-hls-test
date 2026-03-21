@@ -138,6 +138,11 @@ test.describe('Responsive Gateway Dialog', () => {
     expect(dialogBox.width).toBeGreaterThanOrEqual(371);
     expect(dialogBox.x).toBeLessThanOrEqual(2);
     expect(dialogBox.y + dialogBox.height).toBeGreaterThanOrEqual(810);
+
+    const footer = page.getByTestId('gateway-dialog-footer');
+    await expect(footer).toBeVisible();
+    const footerFlexDirection = await footer.evaluate((node) => window.getComputedStyle(node).flexDirection);
+    expect(footerFlexDirection).toBe('row');
   });
 
   test('stays centered and capped on FHD desktop', async ({ page }) => {
@@ -149,11 +154,58 @@ test.describe('Responsive Gateway Dialog', () => {
     await expect(dialog).toBeVisible();
 
     const dialogBox = await getBox(dialog);
-    expect(dialogBox.width).toBeGreaterThanOrEqual(480);
-    expect(dialogBox.width).toBeLessThanOrEqual(520);
+    expect(dialogBox.width).toBeGreaterThanOrEqual(600);
+    expect(dialogBox.width).toBeLessThanOrEqual(640);
 
     const centeredX = (1920 - dialogBox.width) / 2;
     expect(Math.abs(dialogBox.x - centeredX)).toBeLessThanOrEqual(24);
     expect(dialogBox.y).toBeGreaterThan(40);
+  });
+
+  test('reveals advanced settings only for the selected gateway type', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page);
+
+    await page.getByTestId('gateway-button').click();
+    await expect(page.getByTestId('gateway-dialog')).toBeVisible();
+
+    const localOption = page.getByTestId('gateway-option-local');
+    const dwebOption = page.getByTestId('gateway-option-dweb');
+    const customOption = page.getByTestId('gateway-option-custom');
+    await expect(localOption).toHaveClass(/current/);
+    await expect(localOption).toHaveClass(/selected/);
+    await expect(dwebOption).not.toHaveClass(/current/);
+    await expect(localOption).toContainText('Current Selection');
+
+    await expect(page.getByTestId('gateway-local-config')).toBeVisible();
+    await expect(page.getByTestId('gateway-custom-config')).toHaveCount(0);
+    await expect(page.getByTestId('gateway-transition-note')).toHaveCount(0);
+
+    await customOption.click();
+    await expect(page.getByTestId('gateway-custom-config')).toBeVisible();
+    await expect(page.getByTestId('gateway-local-config')).toHaveCount(0);
+    await expect(page.getByTestId('gateway-transition-note')).toBeVisible();
+    await expect(localOption).toHaveClass(/current/);
+    await expect(localOption).not.toHaveClass(/selected/);
+    await expect(localOption).toContainText('Current');
+    await expect(customOption).toContainText('Selected');
+
+    await dwebOption.click();
+    await expect(page.getByTestId('gateway-custom-config')).toHaveCount(0);
+    await expect(page.getByTestId('gateway-local-config')).toHaveCount(0);
+    await expect(page.getByTestId('gateway-transition-note')).toBeVisible();
+    await expect(localOption).toHaveClass(/current/);
+    await expect(localOption).not.toHaveClass(/selected/);
+    await expect(dwebOption).toHaveClass(/selected/);
+    await expect(dwebOption).not.toHaveClass(/current/);
+    await expect(localOption).toContainText('Current');
+    await expect(dwebOption).toContainText('Selected');
+
+    await localOption.click();
+    await expect(page.getByTestId('gateway-local-config')).toBeVisible();
+    await expect(page.getByTestId('gateway-transition-note')).toHaveCount(0);
+    await expect(localOption).toHaveClass(/current/);
+    await expect(localOption).toHaveClass(/selected/);
+    await expect(localOption).toContainText('Current Selection');
   });
 });
