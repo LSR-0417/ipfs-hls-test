@@ -63,6 +63,13 @@ cd "<download-folder>"
 - 這支腳本只整理 sidecar 資產，不會刪除或搬動原始影片檔。
 - 如果同一個目錄有多支影片，只會處理找到的第一個 `.info.json`。
 
+與前端 sidecar 硬編碼契約的關係：
+
+- 前端目前固定讀取 `info.json`、`subtitles.json`、`cover.webp`、`avatar.jpg`
+- `package_youtube_assets.sh` 會穩定產生 `info.json`
+- `package_youtube_assets.sh` 會呼叫 `generate_subtitles_manifest.sh` 產生 `subtitles.json`
+- `package_youtube_assets.sh` 只會保留來源副檔名，輸出 `cover.<ext>` 與 `avatar.<ext>`，不保證一定是 `cover.webp` / `avatar.jpg`
+
 ## 3. `generate_subtitles_manifest.sh`
 
 用途：
