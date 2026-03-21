@@ -8,6 +8,10 @@ defineProps({
     type: String,
     default: '',
   },
+  gateway: {
+    type: String,
+    default: '',
+  },
   ipfsBaseUrl: {
     type: String,
     default: '',
@@ -74,6 +78,8 @@ function handleSubtitleRemove(trackId) {
     <VideoPlayer
       class="player-container glass-panel"
       data-testid="player-container"
+      :cid="cid"
+      :gateway="gateway"
       :m3u8-url="m3u8Url"
       :poster-url="posterUrl"
       :subtitles="subtitles"

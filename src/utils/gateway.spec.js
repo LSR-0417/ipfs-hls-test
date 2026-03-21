@@ -42,7 +42,7 @@ function createHeaders(values = {}) {
   };
 }
 
-function createResponse({ ok = true, status = 200, headers = {}, text = '', bodyChunks = [new Uint8Array([1])] } = {}) {
+function createResponse({ ok = true, status = 200, headers = {}, text = '', bodyChunks = [new Uint8Array(262144)] } = {}) {
   let chunkIndex = 0;
 
   return {
@@ -211,10 +211,14 @@ describe('probeGatewayAvailability', () => {
     await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
       {
         state: 'ready',
-        detail: `已快速驗證前 ${gatewayProbeSegmentSampleCount} 個片段`,
+        detail: `已預載前 ${gatewayProbeSegmentSampleCount} 個片段，可開始播放`,
         durationMs: 32,
         httpStatus: 200,
         retryAfterMs: null,
+        throughputMbps: 196.61,
+        playbackRate: 468.75,
+        sampleSegmentCount: gatewayProbeSegmentSampleCount,
+        completedSampleCount: gatewayProbeSegmentSampleCount,
       }
     );
 
@@ -249,7 +253,13 @@ describe('probeGatewayAvailability', () => {
 
       throw new Error(`unexpected url: ${url}`);
     });
-    const nowFn = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(112).mockReturnValueOnce(128);
+    const nowFn = vi
+      .fn()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(112)
+      .mockReturnValueOnce(118)
+      .mockReturnValueOnce(124)
+      .mockReturnValueOnce(128);
     const onProgress = vi.fn();
 
     await expect(
@@ -260,20 +270,36 @@ describe('probeGatewayAvailability', () => {
       })
     ).resolves.toEqual({
       state: 'ready',
-      detail: '已快速驗證前 2 個片段',
+      detail: '已預載前 2 個片段，可開始播放',
       durationMs: 28,
       httpStatus: 200,
       retryAfterMs: null,
+      throughputMbps: 149.8,
+      playbackRate: 357.14,
+      sampleSegmentCount: 2,
+      completedSampleCount: 2,
     });
 
-    expect(onProgress).toHaveBeenCalledTimes(1);
-    expect(onProgress).toHaveBeenCalledWith({
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress).toHaveBeenNthCalledWith(1, {
       state: 'playlist_ready',
       detail: '已找到 index.m3u8，正在驗證片段',
       durationMs: 12,
       httpStatus: 200,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     });
+    expect(onProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        state: 'probing',
+        detail: '已預載 2/2 個片段',
+        sampleSegmentCount: 2,
+        completedSampleCount: 2,
+      })
+    );
   });
 
   it('returns failed when the gateway responds with an error status', async () => {
@@ -287,6 +313,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 35,
         httpStatus: 404,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -320,6 +350,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 38,
         httpStatus: 404,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -338,20 +372,24 @@ describe('probeGatewayAvailability', () => {
 
       throw new Error(`unexpected url: ${url}`);
     });
-    const nowFn = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(35);
+    const nowFn = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(15010);
 
     await expect(
       probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', {
         fetchImpl,
         nowFn,
-        readyThresholdMs: 20,
+        playbackRateThreshold: 1.2,
       })
     ).resolves.toEqual({
       state: 'playlist_ready',
-      detail: '已找到 index.m3u8，前 3 個片段可取但偏慢',
-      durationMs: 25,
+      detail: '已預載前 3 個片段，但下載速度偏慢',
+      durationMs: 15000,
       httpStatus: 200,
       retryAfterMs: null,
+      throughputMbps: 0.42,
+      playbackRate: 1,
+      sampleSegmentCount: 3,
+      completedSampleCount: 3,
     });
   });
 
@@ -374,10 +412,14 @@ describe('probeGatewayAvailability', () => {
     await expect(probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', { fetchImpl, nowFn })).resolves.toEqual(
       {
         state: 'ready',
-        detail: '已快速驗證前 2 個片段',
+        detail: '已預載前 2 個片段，可開始播放',
         durationMs: 14,
         httpStatus: 200,
         retryAfterMs: null,
+        throughputMbps: 299.59,
+        playbackRate: 714.29,
+        sampleSegmentCount: 2,
+        completedSampleCount: 2,
       }
     );
   });
@@ -397,6 +439,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 45,
         httpStatus: 429,
         retryAfterMs: 120000,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -416,6 +462,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 10,
         httpStatus: 429,
         retryAfterMs: gatewayRateLimitBackoffMs,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -435,6 +485,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 8,
         httpStatus: 301,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -454,6 +508,10 @@ describe('probeGatewayAvailability', () => {
         durationMs: 16,
         httpStatus: 504,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       }
     );
   });
@@ -484,6 +542,10 @@ describe('probeGatewayAvailability', () => {
       durationMs: 50,
       httpStatus: null,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     });
   });
 });

@@ -47,3 +47,41 @@ describe('Header search action button', () => {
     expect(style).toContain('.search-submit-btn');
   });
 });
+
+describe('Sidebar toggle contract', () => {
+  it('wires the header hamburger button to the collapsible sidebar state', () => {
+    const appDescriptor = readDescriptor(new URL('../App.vue', import.meta.url));
+    const headerDescriptor = readDescriptor(new URL('./Header.vue', import.meta.url));
+    const sidebarDescriptor = readDescriptor(new URL('./Sidebar.vue', import.meta.url));
+
+    const appTemplate = appDescriptor.template?.content || '';
+    const appScript = appDescriptor.scriptSetup?.content || '';
+    const headerTemplate = headerDescriptor.template?.content || '';
+    const headerScript = headerDescriptor.scriptSetup?.content || '';
+    const headerStyle = getStyleContent(headerDescriptor);
+    const sidebarTemplate = sidebarDescriptor.template?.content || '';
+    const sidebarScript = sidebarDescriptor.scriptSetup?.content || '';
+    const sidebarStyle = getStyleContent(sidebarDescriptor);
+
+    expect(appScript).toContain('const isSidebarCollapsed = ref(false);');
+    expect(appScript).toContain('function toggleSidebar() {');
+    expect(appScript).toContain('isSidebarCollapsed.value = !isSidebarCollapsed.value;');
+    expect(appTemplate).toContain(':sidebar-collapsed="isSidebarCollapsed"');
+    expect(appTemplate).toContain('@toggle-sidebar="toggleSidebar"');
+    expect(appTemplate).toContain('<Sidebar :active-view="activeView" :collapsed="isSidebarCollapsed" @view-select="onViewSelect" />');
+
+    expect(headerScript).toContain("sidebarCollapsed: { type: Boolean, default: false },");
+    expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);");
+    expect(headerScript).toContain('function toggleSidebar() {');
+    expect(headerTemplate).toContain('data-testid="header-sidebar-toggle"');
+    expect(headerTemplate).toContain('@click="toggleSidebar"');
+    expect(headerTemplate).toContain(":aria-pressed=\"sidebarCollapsed ? 'true' : 'false'\"");
+    expect(headerStyle).toContain('.hamburger:focus-visible');
+
+    expect(sidebarScript).toContain("collapsed: {\n    type: Boolean,\n    default: false,\n  },");
+    expect(sidebarTemplate).toContain(":class=\"{ 'is-collapsed': collapsed }\"");
+    expect(sidebarTemplate).toContain(':title="collapsed ? item.label : undefined"');
+    expect(sidebarStyle).toContain('.sidebar.is-collapsed');
+    expect(sidebarStyle).toContain('.sidebar.is-collapsed .label');
+  });
+});

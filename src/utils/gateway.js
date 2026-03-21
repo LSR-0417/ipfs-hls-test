@@ -3,7 +3,8 @@ export const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
 export const gatewayProbeTimeoutMs = 5000;
 export const gatewayRateLimitBackoffMs = 30 * 60 * 1000;
 export const gatewayProbeSegmentSampleCount = 3;
-export const gatewayProbeReadyThresholdMs = 2000;
+export const gatewayProbePlaybackRateThreshold = 1.2;
+export const gatewayProbeSmoothPlaybackRateThreshold = 1.8;
 const disabledGatewayHostnames = new Set(['gateway.pinata.cloud']);
 export const publicGatewayOptions = [
   {
@@ -188,8 +189,10 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     fetchImpl = globalThis.fetch,
     timeoutMs = gatewayProbeTimeoutMs,
     nowFn = defaultNow,
-    readyThresholdMs = gatewayProbeReadyThresholdMs,
     onProgress = null,
+    cacheMode = 'no-store',
+    segmentSampleCount = gatewayProbeSegmentSampleCount,
+    playbackRateThreshold = gatewayProbePlaybackRateThreshold,
   } = options;
   const playlistUrl = buildGatewayIndexUrl(gatewayUrl, cid);
 
@@ -200,6 +203,10 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       durationMs: null,
       httpStatus: null,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   }
 
@@ -214,7 +221,7 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
   let phase = 'index';
 
   try {
-    const playlistResponse = await fetchGatewayTextResource(playlistUrl, fetchImpl, controller.signal);
+    const playlistResponse = await fetchGatewayTextResource(playlistUrl, fetchImpl, controller.signal, cacheMode);
     if (!playlistResponse?.ok) {
       return buildProbeFailureResult(
         playlistResponse,
@@ -229,18 +236,27 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
       httpStatus: playlistResponse.status,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     }));
 
     const playlistText = await readTextResponse(playlistResponse);
     const parsedPlaylist = parseHlsPlaylist(playlistText, playlistUrl);
-    let segmentUrls = parsedPlaylist.segmentUrls;
+    let segmentEntries = parsedPlaylist.segmentEntries;
 
-    if (!segmentUrls.length) {
-      const variantUrls = parsedPlaylist.variantPlaylistUrls;
+    if (!segmentEntries.length) {
+      const variantPlaylists = orderVariantPlaylistsByBandwidth(parsedPlaylist.variantPlaylists);
 
-      for (const variantUrl of variantUrls) {
+      for (const variantPlaylist of variantPlaylists) {
         phase = 'media';
-        const variantResponse = await fetchGatewayTextResource(variantUrl, fetchImpl, controller.signal);
+        const variantResponse = await fetchGatewayTextResource(
+          variantPlaylist.url,
+          fetchImpl,
+          controller.signal,
+          cacheMode
+        );
         if (!variantResponse?.ok) {
           return buildProbeFailureResult(
             variantResponse,
@@ -255,32 +271,78 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
         }
 
         const variantText = await readTextResponse(variantResponse);
-        segmentUrls = parseHlsPlaylist(variantText, variantUrl).segmentUrls;
-        if (segmentUrls.length) {
+        segmentEntries = parseHlsPlaylist(variantText, variantPlaylist.url).segmentEntries;
+        if (segmentEntries.length) {
           break;
         }
       }
     }
 
-    if (!segmentUrls.length) {
+    if (!segmentEntries.length) {
       return {
         state: 'degraded',
         detail: '已找到 index.m3u8，但播放清單內找不到可驗證的媒體片段',
         durationMs: Math.max(0, Math.round(nowFn() - startedAt)),
         httpStatus: playlistResponse.status,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       };
     }
 
     phase = 'segment';
-    const segmentSampleUrls = segmentUrls.slice(0, gatewayProbeSegmentSampleCount);
+    const segmentSamples = segmentEntries.slice(0, Math.max(1, segmentSampleCount));
     let httpStatus = playlistResponse.status;
+    let completedSampleCount = 0;
+    let sampledBytes = 0;
+    let sampledDurationSeconds = 0;
 
-    for (const segmentUrl of segmentSampleUrls) {
-      const segmentResponse = await fetchGatewayMediaResource(segmentUrl, fetchImpl, controller.signal);
-      if (!segmentResponse?.ok) {
+    try {
+      const sampleResults = await Promise.all(
+        segmentSamples.map(async (segmentSample) => {
+          const segmentResponse = await fetchGatewayMediaResource(
+            segmentSample.url,
+            fetchImpl,
+            controller.signal,
+            cacheMode
+          );
+          if (!segmentResponse?.ok) {
+            throw new ProbeHttpError(segmentResponse);
+          }
+
+          const bytes = await readMediaProbeBytes(segmentResponse);
+          httpStatus = segmentResponse.status;
+          completedSampleCount += 1;
+          sampledBytes += bytes;
+          sampledDurationSeconds += Number.isFinite(segmentSample.durationSeconds) ? segmentSample.durationSeconds : 0;
+
+          emitProbeProgress(onProgress, () =>
+            buildSegmentProbeProgress({
+              nowFn,
+              startedAt,
+              httpStatus: segmentResponse.status,
+              completedSampleCount,
+              sampleSegmentCount: segmentSamples.length,
+              sampledBytes,
+              sampledDurationSeconds,
+            })
+          );
+
+          return {
+            status: segmentResponse.status,
+          };
+        })
+      );
+
+      if (sampleResults.length) {
+        httpStatus = sampleResults[sampleResults.length - 1].status;
+      }
+    } catch (error) {
+      if (error instanceof ProbeHttpError) {
         return buildProbeFailureResult(
-          segmentResponse,
+          error.response,
           Math.max(0, Math.round(nowFn() - startedAt)),
           '已找到 index.m3u8，但前幾個片段不可用',
           {
@@ -291,27 +353,37 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
         );
       }
 
-      httpStatus = segmentResponse.status;
-      await readMediaProbeChunk(segmentResponse);
+      throw error;
     }
 
     const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
-    if (readyThresholdMs > 0 && durationMs > readyThresholdMs) {
+    const throughputMbps = calculateThroughputMbps(sampledBytes, durationMs);
+    const playbackRate = calculatePlaybackRate(sampledDurationSeconds, durationMs);
+
+    if (playbackRate != null && playbackRate < playbackRateThreshold) {
       return {
         state: 'playlist_ready',
-        detail: `已找到 index.m3u8，前 ${segmentSampleUrls.length} 個片段可取但偏慢`,
+        detail: `已預載前 ${segmentSamples.length} 個片段，但下載速度偏慢`,
         durationMs,
         httpStatus,
         retryAfterMs: null,
+        throughputMbps,
+        playbackRate,
+        sampleSegmentCount: segmentSamples.length,
+        completedSampleCount,
       };
     }
 
     return {
       state: 'ready',
-      detail: `已快速驗證前 ${segmentSampleUrls.length} 個片段`,
+      detail: `已預載前 ${segmentSamples.length} 個片段，可開始播放`,
       durationMs,
       httpStatus,
       retryAfterMs: null,
+      throughputMbps,
+      playbackRate,
+      sampleSegmentCount: segmentSamples.length,
+      completedSampleCount,
     };
   } catch (error) {
     const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
@@ -327,6 +399,10 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
         durationMs,
         httpStatus: null,
         retryAfterMs: null,
+        throughputMbps: null,
+        playbackRate: null,
+        sampleSegmentCount: 0,
+        completedSampleCount: 0,
       };
     }
 
@@ -341,6 +417,10 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       durationMs,
       httpStatus: null,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   } finally {
     if (timeoutId) {
@@ -364,6 +444,10 @@ function buildProbeFailureResult(response, durationMs, fallbackDetail, options =
       durationMs,
       httpStatus: status,
       retryAfterMs: parseRetryAfterHeader(response) ?? gatewayRateLimitBackoffMs,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   }
 
@@ -374,6 +458,10 @@ function buildProbeFailureResult(response, durationMs, fallbackDetail, options =
       durationMs,
       httpStatus: status,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   }
 
@@ -384,6 +472,10 @@ function buildProbeFailureResult(response, durationMs, fallbackDetail, options =
       durationMs,
       httpStatus: status,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   }
 
@@ -394,6 +486,10 @@ function buildProbeFailureResult(response, durationMs, fallbackDetail, options =
       durationMs,
       httpStatus: status,
       retryAfterMs: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
     };
   }
 
@@ -403,6 +499,10 @@ function buildProbeFailureResult(response, durationMs, fallbackDetail, options =
     durationMs,
     httpStatus: status,
     retryAfterMs: null,
+    throughputMbps: null,
+    playbackRate: null,
+    sampleSegmentCount: 0,
+    completedSampleCount: 0,
   };
 }
 
@@ -419,10 +519,12 @@ function emitProbeProgress(onProgress, getPayload) {
 }
 
 function parseHlsPlaylist(playlistText, baseUrl) {
-  const variantPlaylistUrls = [];
-  const segmentUrls = [];
+  const variantPlaylists = [];
+  const segmentEntries = [];
   const lines = String(playlistText || '').split(/\r?\n/);
   let expectsVariantUri = false;
+  let pendingVariantBandwidth = null;
+  let pendingSegmentDuration = null;
 
   lines.forEach((rawLine) => {
     const line = rawLine.trim();
@@ -432,12 +534,21 @@ function parseHlsPlaylist(playlistText, baseUrl) {
     if (initSegmentUrl) {
       const resolvedInitSegmentUrl = resolvePlaylistResourceUrl(baseUrl, initSegmentUrl);
       if (resolvedInitSegmentUrl) {
-        segmentUrls.push(resolvedInitSegmentUrl);
+        segmentEntries.push({
+          url: resolvedInitSegmentUrl,
+          durationSeconds: 0,
+        });
       }
     }
 
     if (line.startsWith('#EXT-X-STREAM-INF')) {
       expectsVariantUri = true;
+      pendingVariantBandwidth = parseBandwidth(line);
+      return;
+    }
+
+    if (line.startsWith('#EXTINF')) {
+      pendingSegmentDuration = parseExtinfDuration(line);
       return;
     }
 
@@ -452,22 +563,52 @@ function parseHlsPlaylist(playlistText, baseUrl) {
     }
 
     if (expectsVariantUri || isPlaylistLikeUrl(resolvedUrl)) {
-      variantPlaylistUrls.push(resolvedUrl);
+      variantPlaylists.push({
+        url: resolvedUrl,
+        bandwidth: pendingVariantBandwidth,
+      });
       expectsVariantUri = false;
+      pendingVariantBandwidth = null;
       return;
     }
 
-    segmentUrls.push(resolvedUrl);
+    segmentEntries.push({
+      url: resolvedUrl,
+      durationSeconds: pendingSegmentDuration,
+    });
+    pendingSegmentDuration = null;
   });
 
   return {
-    variantPlaylistUrls: dedupeUrls(variantPlaylistUrls),
-    segmentUrls: dedupeUrls(segmentUrls),
+    variantPlaylists: dedupeVariantPlaylists(variantPlaylists),
+    segmentEntries: dedupeSegmentEntries(segmentEntries),
   };
 }
 
-function dedupeUrls(urls) {
-  return [...new Set(urls.filter(Boolean))];
+function dedupeVariantPlaylists(playlists) {
+  const seen = new Set();
+
+  return playlists.filter((playlist) => {
+    if (!playlist?.url || seen.has(playlist.url)) {
+      return false;
+    }
+
+    seen.add(playlist.url);
+    return true;
+  });
+}
+
+function dedupeSegmentEntries(entries) {
+  const seen = new Set();
+
+  return entries.filter((entry) => {
+    if (!entry?.url || seen.has(entry.url)) {
+      return false;
+    }
+
+    seen.add(entry.url);
+    return true;
+  });
 }
 
 function parsePlaylistTagUri(line, tagPrefix) {
@@ -477,6 +618,29 @@ function parsePlaylistTagUri(line, tagPrefix) {
 
   const match = line.match(/(?:^|,)URI="([^"]+)"/i);
   return match?.[1] || '';
+}
+
+function parseBandwidth(line) {
+  const match = line.match(/(?:^|,)BANDWIDTH=(\d+)/i);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function parseExtinfDuration(line) {
+  const match = line.match(/^#EXTINF:([0-9]+(?:\.[0-9]+)?)/i);
+  return match ? Number.parseFloat(match[1]) : null;
+}
+
+function orderVariantPlaylistsByBandwidth(variantPlaylists) {
+  return [...variantPlaylists].sort((left, right) => {
+    const leftBandwidth = Number.isFinite(left?.bandwidth) ? left.bandwidth : Number.MAX_SAFE_INTEGER;
+    const rightBandwidth = Number.isFinite(right?.bandwidth) ? right.bandwidth : Number.MAX_SAFE_INTEGER;
+
+    if (leftBandwidth !== rightBandwidth) {
+      return leftBandwidth - rightBandwidth;
+    }
+
+    return String(left?.url || '').localeCompare(String(right?.url || ''));
+  });
 }
 
 function resolvePlaylistResourceUrl(baseUrl, resourcePath) {
@@ -496,10 +660,10 @@ function isPlaylistLikeUrl(resourceUrl) {
   }
 }
 
-function fetchGatewayTextResource(url, fetchImpl, signal) {
+function fetchGatewayTextResource(url, fetchImpl, signal, cacheMode = 'no-store') {
   return fetchImpl(url, {
     method: 'GET',
-    cache: 'no-store',
+    cache: cacheMode,
     headers: {
       Accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, text/plain;q=0.8, */*;q=0.1',
     },
@@ -507,10 +671,10 @@ function fetchGatewayTextResource(url, fetchImpl, signal) {
   });
 }
 
-function fetchGatewayMediaResource(url, fetchImpl, signal) {
+function fetchGatewayMediaResource(url, fetchImpl, signal, cacheMode = 'no-store') {
   return fetchImpl(url, {
     method: 'GET',
-    cache: 'no-store',
+    cache: cacheMode,
     headers: {
       Accept: 'video/mp2t, video/mp4, application/octet-stream;q=0.8, */*;q=0.1',
     },
@@ -526,11 +690,22 @@ async function readTextResponse(response) {
   return '';
 }
 
-async function readMediaProbeChunk(response) {
+async function readMediaProbeBytes(response) {
   const reader = response?.body?.getReader?.();
   if (reader) {
     try {
-      await reader.read();
+      let totalBytes = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        totalBytes += value?.byteLength ?? value?.length ?? 0;
+      }
+
+      return totalBytes;
     } finally {
       try {
         await reader.cancel();
@@ -538,11 +713,69 @@ async function readMediaProbeChunk(response) {
         // Ignore cancellation failures from already-closed streams.
       }
     }
-    return;
   }
 
   if (typeof response?.arrayBuffer === 'function') {
-    await response.arrayBuffer();
+    const buffer = await response.arrayBuffer();
+    return buffer?.byteLength ?? 0;
+  }
+
+  return 0;
+}
+
+function buildSegmentProbeProgress({
+  nowFn,
+  startedAt,
+  httpStatus,
+  completedSampleCount,
+  sampleSegmentCount,
+  sampledBytes,
+  sampledDurationSeconds,
+}) {
+  const durationMs = Math.max(0, Math.round(nowFn() - startedAt));
+
+  return {
+    state: 'probing',
+    detail: `已預載 ${completedSampleCount}/${sampleSegmentCount} 個片段`,
+    durationMs,
+    httpStatus,
+    retryAfterMs: null,
+    throughputMbps: calculateThroughputMbps(sampledBytes, durationMs),
+    playbackRate: calculatePlaybackRate(sampledDurationSeconds, durationMs),
+    sampleSegmentCount,
+    completedSampleCount,
+  };
+}
+
+function calculateThroughputMbps(sampledBytes, durationMs) {
+  if (!(sampledBytes > 0) || !(durationMs > 0)) {
+    return null;
+  }
+
+  return roundMetric((sampledBytes * 8) / (durationMs / 1000) / 1000000);
+}
+
+function calculatePlaybackRate(sampledDurationSeconds, durationMs) {
+  if (!(sampledDurationSeconds > 0) || !(durationMs > 0)) {
+    return null;
+  }
+
+  return roundMetric(sampledDurationSeconds / (durationMs / 1000));
+}
+
+function roundMetric(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
+class ProbeHttpError extends Error {
+  constructor(response) {
+    super(`probe http error (${response?.status ?? 'ERR'})`);
+    this.name = 'ProbeHttpError';
+    this.response = response;
   }
 }
 

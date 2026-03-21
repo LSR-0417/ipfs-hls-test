@@ -42,6 +42,7 @@ const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
 const activeView = ref('home');
 const historyItems = ref([]);
+const isSidebarCollapsed = ref(false);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -439,6 +440,10 @@ function onPlaybackSnapshot(snapshot) {
   if (!snapshot || activeView.value !== 'home') return;
   persistCurrentHistory({ snapshot });
 }
+
+function toggleSidebar() {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+}
 </script>
 
 <template>
@@ -447,10 +452,12 @@ function onPlaybackSnapshot(snapshot) {
     :current-gateway="currentGateway"
     :current-cid="currentCid"
     :current-load-sequence="currentLoadSequence"
+    :sidebar-collapsed="isSidebarCollapsed"
     @gateway-change="onGatewayChange"
+    @toggle-sidebar="toggleSidebar"
   />
   <div class="app-container">
-    <Sidebar :active-view="activeView" @view-select="onViewSelect" />
+    <Sidebar :active-view="activeView" :collapsed="isSidebarCollapsed" @view-select="onViewSelect" />
     <main class="main-content" data-testid="main-content">
       <template v-if="activeView === 'history'">
         <HistoryPage
@@ -463,6 +470,7 @@ function onPlaybackSnapshot(snapshot) {
       <template v-else>
         <WatchPage
           :cid="currentCid"
+          :gateway="currentGateway"
           :ipfs-base-url="currentIpfsBaseUrl"
           :m3u8-url="currentM3u8Url"
           :poster-url="currentPosterUrl"

@@ -28,8 +28,9 @@ const props = defineProps({
   currentGateway: { type: String, default: '' },
   currentCid: { type: String, default: '' },
   currentLoadSequence: { type: Number, default: 0 },
+  sidebarCollapsed: { type: Boolean, default: false },
 });
-const emit = defineEmits(['search', 'gateway-change']);
+const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);
 
 const searchQuery = ref('');
 const isCompactHeader = ref(false);
@@ -64,11 +65,9 @@ const orderedBuiltInGateways = computed(() =>
       return rankDiff;
     }
 
-    if (leftState.state === 'ready' && rightState.state === 'ready') {
-      const durationDiff = (leftState.durationMs ?? Number.MAX_SAFE_INTEGER) - (rightState.durationMs ?? Number.MAX_SAFE_INTEGER);
-      if (durationDiff !== 0) {
-        return durationDiff;
-      }
+    const performanceDiff = compareProbePerformance(leftState, rightState);
+    if (performanceDiff !== 0) {
+      return performanceDiff;
     }
 
     return (builtInGatewayOrder[left.id] ?? 0) - (builtInGatewayOrder[right.id] ?? 0);
@@ -88,19 +87,23 @@ const recommendedGatewayId = computed(() => {
     },
   ];
 
-  const readyCandidates = candidates.filter(({ probeState }) => probeState.state === 'ready');
-  if (!readyCandidates.length) return '';
+  const rankedCandidates = candidates
+    .filter(({ probeState }) => ['ready', 'playlist_ready'].includes(probeState.state))
+    .sort((left, right) => {
+      const rankDiff = probeSortRank(left.probeState) - probeSortRank(right.probeState);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
 
-  readyCandidates.sort((left, right) => {
-    const durationDiff = (left.probeState.durationMs ?? Number.MAX_SAFE_INTEGER) - (right.probeState.durationMs ?? Number.MAX_SAFE_INTEGER);
-    if (durationDiff !== 0) {
-      return durationDiff;
-    }
+      const performanceDiff = compareProbePerformance(left.probeState, right.probeState);
+      if (performanceDiff !== 0) {
+        return performanceDiff;
+      }
 
-    return left.order - right.order;
-  });
+      return left.order - right.order;
+    });
 
-  return readyCandidates[0].id;
+  return rankedCandidates[0]?.id || '';
 });
 const currentGatewayProbeState = computed(() => {
   const current = currentGatewayValue.value;
@@ -295,6 +298,10 @@ async function clearSearchQuery() {
   focusSearchInput();
 }
 
+function toggleSidebar() {
+  emit('toggle-sidebar');
+}
+
 function syncLocalFromGateway(urlStr) {
   if (!isDevMode) return;
 
@@ -414,6 +421,10 @@ function createIdleProbeState(detail = '') {
     httpStatus: null,
     retryAfterMs: null,
     nextProbeAt: null,
+    throughputMbps: null,
+    playbackRate: null,
+    sampleSegmentCount: 0,
+    completedSampleCount: 0,
   };
 }
 
@@ -431,6 +442,10 @@ function setGatewayProbeState(id, state, detail, durationMs = null, extras = {})
       httpStatus: null,
       retryAfterMs: null,
       nextProbeAt: null,
+      throughputMbps: null,
+      playbackRate: null,
+      sampleSegmentCount: 0,
+      completedSampleCount: 0,
       ...extras,
     },
   };
@@ -556,6 +571,10 @@ async function runGatewayProbe() {
               httpStatus: progressState.httpStatus,
               retryAfterMs: progressState.retryAfterMs,
               nextProbeAt: progressState.nextProbeAt ?? null,
+              throughputMbps: progressState.throughputMbps ?? null,
+              playbackRate: progressState.playbackRate ?? null,
+              sampleSegmentCount: progressState.sampleSegmentCount ?? 0,
+              completedSampleCount: progressState.completedSampleCount ?? 0,
             });
           },
         }),
@@ -571,6 +590,10 @@ async function runGatewayProbe() {
           httpStatus: result.httpStatus,
           retryAfterMs: result.retryAfterMs,
           nextProbeAt,
+          throughputMbps: result.throughputMbps ?? null,
+          playbackRate: result.playbackRate ?? null,
+          sampleSegmentCount: result.sampleSegmentCount ?? 0,
+          completedSampleCount: result.completedSampleCount ?? 0,
         });
         return;
       }
@@ -579,6 +602,10 @@ async function runGatewayProbe() {
       setGatewayProbeState(id, result.state, result.detail, result.durationMs, {
         httpStatus: result.httpStatus,
         retryAfterMs: result.retryAfterMs,
+        throughputMbps: result.throughputMbps ?? null,
+        playbackRate: result.playbackRate ?? null,
+        sampleSegmentCount: result.sampleSegmentCount ?? 0,
+        completedSampleCount: result.completedSampleCount ?? 0,
       });
     });
   } finally {
@@ -609,7 +636,7 @@ function formatProbeStateText(probeState) {
 }
 
 function isRecommendedGateway(id) {
-  return recommendedGatewayId.value === id && probeStateFor(id).state === 'ready';
+  return recommendedGatewayId.value === id && ['ready', 'playlist_ready'].includes(probeStateFor(id).state);
 }
 
 function getGatewayDialogFocusableElements() {
@@ -669,6 +696,24 @@ function probeSortRank(probeState) {
   return 7;
 }
 
+function compareProbePerformance(leftState, rightState) {
+  const leftPlaybackRate = Number.isFinite(leftState?.playbackRate) ? leftState.playbackRate : -1;
+  const rightPlaybackRate = Number.isFinite(rightState?.playbackRate) ? rightState.playbackRate : -1;
+
+  if (leftPlaybackRate !== rightPlaybackRate) {
+    return rightPlaybackRate - leftPlaybackRate;
+  }
+
+  const leftThroughput = Number.isFinite(leftState?.throughputMbps) ? leftState.throughputMbps : -1;
+  const rightThroughput = Number.isFinite(rightState?.throughputMbps) ? rightState.throughputMbps : -1;
+
+  if (leftThroughput !== rightThroughput) {
+    return rightThroughput - leftThroughput;
+  }
+
+  return (leftState?.durationMs ?? Number.MAX_SAFE_INTEGER) - (rightState?.durationMs ?? Number.MAX_SAFE_INTEGER);
+}
+
 function createRateLimitedProbeState(nextProbeAt) {
   return {
     state: 'rate_limited',
@@ -677,6 +722,10 @@ function createRateLimitedProbeState(nextProbeAt) {
     httpStatus: 429,
     retryAfterMs: Math.max(0, nextProbeAt - Date.now()),
     nextProbeAt,
+    throughputMbps: null,
+    playbackRate: null,
+    sampleSegmentCount: 0,
+    completedSampleCount: 0,
   };
 }
 
@@ -782,9 +831,17 @@ onBeforeUnmount(() => {
 <template>
   <header class="header glass-panel" data-testid="app-header">
     <div class="logo-area" data-testid="header-logo-area">
-      <div class="hamburger">
+      <button
+        type="button"
+        class="hamburger"
+        @click="toggleSidebar"
+        :aria-label="sidebarCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'"
+        :aria-pressed="sidebarCollapsed ? 'true' : 'false'"
+        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        data-testid="header-sidebar-toggle"
+      >
         <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
-      </div>
+      </button>
       <div class="logo">
         <span class="logo-icon">▲</span>
         <span class="logo-text">Astra<span class="neon-text">Stream</span></span>
@@ -1105,10 +1162,18 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   transition: background 0.2s;
+  background: transparent;
+  border: none;
+  color: inherit;
 }
 
-.hamburger:hover {
+.hamburger:hover,
+.hamburger:focus-visible {
   background: var(--interactive-hover);
+}
+
+.hamburger:focus-visible {
+  outline: none;
 }
 
 .logo {

@@ -81,6 +81,31 @@ test.describe('Responsive Page Shell', () => {
       }
     });
   }
+
+  test('collapses the desktop sidebar from the header toggle', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page);
+
+    const sidebar = page.getByTestId('app-sidebar');
+    const toggle = page.getByTestId('header-sidebar-toggle');
+    const readSidebarWidth = () =>
+      sidebar.evaluate((node) => {
+        const styles = window.getComputedStyle(node);
+        return parseFloat(styles.width);
+      });
+
+    const expandedWidth = await readSidebarWidth();
+    expect(expandedWidth).toBeGreaterThan(200);
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(readSidebarWidth).toBeLessThan(expandedWidth - 100);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(readSidebarWidth).toBeGreaterThan(expandedWidth - 2);
+  });
 });
 
 test.describe('Responsive Video Actions', () => {

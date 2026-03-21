@@ -6,6 +6,10 @@ const props = defineProps({
     type: String,
     default: 'home',
   },
+  collapsed: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['view-select']);
@@ -48,7 +52,7 @@ function handleMenuItemClick(item) {
 </script>
 
 <template>
-  <nav class="sidebar glass-panel" data-testid="app-sidebar">
+  <nav class="sidebar glass-panel" :class="{ 'is-collapsed': collapsed }" data-testid="app-sidebar">
     <div class="menu" data-testid="sidebar-menu">
       <button
         v-for="item in menuItems" 
@@ -57,6 +61,7 @@ function handleMenuItemClick(item) {
         :class="{ active: isMenuItemActive(item), 'is-disabled': !item.targetView }"
         :data-testid="`sidebar-item-${item.id}`"
         type="button"
+        :title="collapsed ? item.label : undefined"
         :disabled="!item.targetView"
         @click="handleMenuItemClick(item)"
       >
@@ -95,6 +100,8 @@ function handleMenuItemClick(item) {
   align-items: stretch;
   padding: 16px 12px;
   z-index: 90;
+  overflow: hidden;
+  transition: width 0.24s ease, padding 0.24s ease;
 }
 
 .menu {
@@ -114,12 +121,12 @@ function handleMenuItemClick(item) {
   padding: 12px 16px;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.2s;
   border-radius: 12px;
   width: 100%;
   text-align: left;
   background: transparent;
   border: none;
+  transition: background 0.2s, color 0.2s, padding 0.24s ease;
 }
 
 .menu-item:hover {
@@ -145,6 +152,7 @@ function handleMenuItemClick(item) {
   display: flex;
   align-items: center;
   gap: 16px;
+  transition: gap 0.24s ease, justify-content 0.24s ease;
 }
 
 .icon-container {
@@ -167,6 +175,9 @@ function handleMenuItemClick(item) {
 .label {
   display: block;
   font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.18s ease, width 0.24s ease;
 }
 
 .sidebar-build-info {
@@ -175,6 +186,13 @@ function handleMenuItemClick(item) {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: grid;
   gap: 10px;
+  max-height: 200px;
+  overflow: hidden;
+  transition:
+    opacity 0.18s ease,
+    max-height 0.24s ease,
+    padding 0.24s ease,
+    border-color 0.24s ease;
 }
 
 .sidebar-build-info.is-dev {
@@ -200,6 +218,33 @@ function handleMenuItemClick(item) {
   line-height: 1.35;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   word-break: break-word;
+}
+
+.sidebar.is-collapsed {
+  width: var(--sidebar-collapsed-width);
+  padding: 16px 10px;
+}
+
+.sidebar.is-collapsed .menu-item {
+  padding: 12px;
+}
+
+.sidebar.is-collapsed .menu-item-main {
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.is-collapsed .label {
+  opacity: 0;
+  width: 0;
+}
+
+.sidebar.is-collapsed .sidebar-build-info {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  border-top-color: transparent;
+  pointer-events: none;
 }
 
 @media (max-width: 768px) {
@@ -239,6 +284,25 @@ function handleMenuItemClick(item) {
   
   .label {
     font-size: 0.65rem;
+  }
+
+  .sidebar.is-collapsed {
+    width: 100%;
+    padding: 0;
+  }
+
+  .sidebar.is-collapsed .menu-item {
+    padding: 4px;
+  }
+
+  .sidebar.is-collapsed .menu-item-main {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sidebar.is-collapsed .label {
+    opacity: 1;
+    width: auto;
   }
 
   .sidebar-build-info {

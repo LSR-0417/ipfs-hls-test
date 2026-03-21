@@ -12,6 +12,27 @@
     </div>
 
     <div
+      v-if="showStartupGate"
+      class="startup-gate"
+      data-testid="video-player-startup-gate"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="startup-gate-copy">
+        <p class="startup-gate-title">{{ startupGateTitle }}</p>
+        <p class="startup-gate-detail">{{ startupGateDetail }}</p>
+      </div>
+      <button
+        v-if="startupGateCanBypass"
+        type="button"
+        class="startup-gate-action"
+        @click="overrideStartupGate"
+      >
+        立即播放
+      </button>
+    </div>
+
+    <div
       v-if="isHotkeyHelpOpen"
       class="hotkey-help-backdrop"
       data-testid="video-player-hotkey-help-backdrop"
@@ -68,6 +89,11 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+import {
+  gatewayProbePlaybackRateThreshold,
+  gatewayProbeSegmentSampleCount,
+  probeGatewayAvailability,
+} from '../utils/gateway';
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
@@ -83,6 +109,14 @@ if (typeof window !== 'undefined') {
 }
 
 const props = defineProps({
+  cid: {
+    type: String,
+    default: '',
+  },
+  gateway: {
+    type: String,
+    default: '',
+  },
   m3u8Url: {
     type: String,
     required: false,
@@ -116,6 +150,7 @@ const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']
 const SEEK_STEP_SECONDS = 5;
 const LONG_SEEK_STEP_SECONDS = 10;
 const PROGRESS_EMIT_STEP_SECONDS = 5;
+const STARTUP_BUFFER_THRESHOLD_SECONDS = 10;
 
 const hotkeyHelpSections = Object.freeze([
   {
@@ -196,6 +231,15 @@ let textTrackList = null;
 let lastFocusedElement = null;
 let isSwitchingSource = false;
 let lastProgressSnapshotTime = -1;
+let startupGateSourceSeq = 0;
+let startupGateReady = false;
+let startupGateWaitingForBuffer = false;
+let startupGateBypassed = false;
+let startupGateMeasuredPlaybackRate = null;
+const showStartupGate = ref(false);
+const startupGateTitle = ref('');
+const startupGateDetail = ref('');
+const startupGateCanBypass = ref(false);
 
 function isHelpHotkeyEvent(event) {
   return event?.key === '?' || (event?.code === 'Slash' && event?.shiftKey === true);
@@ -329,6 +373,130 @@ function toggleHotkeyHelp() {
   return true;
 }
 
+function shouldRunStartupWarmup() {
+  return Boolean(props.cid && props.gateway && props.m3u8Url && !(props.startTime > 0));
+}
+
+function resetStartupGate(seq = sourceSeq) {
+  startupGateSourceSeq = seq;
+  startupGateReady = false;
+  startupGateWaitingForBuffer = false;
+  startupGateBypassed = false;
+  startupGateMeasuredPlaybackRate = null;
+  showStartupGate.value = false;
+  startupGateTitle.value = '';
+  startupGateDetail.value = '';
+  startupGateCanBypass.value = false;
+}
+
+function updateStartupGate(title, detail, options = {}) {
+  const { canBypass = false } = options;
+  showStartupGate.value = true;
+  startupGateTitle.value = title;
+  startupGateDetail.value = detail;
+  startupGateCanBypass.value = canBypass;
+}
+
+function formatPlaybackRateLabel(playbackRate) {
+  if (!Number.isFinite(playbackRate)) {
+    return '';
+  }
+
+  return `${playbackRate.toFixed(1)}x`;
+}
+
+function formatBufferedAheadLabel(bufferedAheadSeconds) {
+  if (!(bufferedAheadSeconds > 0)) {
+    return '0.0';
+  }
+
+  return bufferedAheadSeconds.toFixed(1);
+}
+
+function getBufferedAheadSeconds() {
+  if (!player) return 0;
+
+  const buffered = player.buffered?.();
+  if (!buffered || buffered.length === 0) return 0;
+
+  const currentTime = Number.isFinite(player.currentTime?.()) ? player.currentTime() : 0;
+
+  for (let index = 0; index < buffered.length; index += 1) {
+    const start = buffered.start(index);
+    const end = buffered.end(index);
+
+    if (currentTime >= start && currentTime <= end) {
+      return Math.max(0, end - currentTime);
+    }
+
+    if (currentTime < start) {
+      return Math.max(0, end - start);
+    }
+  }
+
+  return 0;
+}
+
+function emitReadyStatus() {
+  if (props.startTime > 0) {
+    const formattedTime = formatTime(props.startTime);
+    emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
+    return;
+  }
+
+  emit('status-update', '播放器已就緒');
+}
+
+async function unlockStartupGate(seq = startupGateSourceSeq) {
+  if (!player || seq !== sourceSeq || startupGateReady) return;
+
+  startupGateReady = true;
+  startupGateWaitingForBuffer = false;
+  startupGateCanBypass.value = false;
+  showStartupGate.value = false;
+
+  if (props.shouldAutoplay) {
+    if (player.readyState() >= 3) {
+      await resumePlaybackIfNeeded();
+      return;
+    }
+
+    player.one('canplay', () => {
+      if (!player || seq !== sourceSeq) return;
+      void resumePlaybackIfNeeded();
+    });
+    return;
+  }
+
+  emitReadyStatus();
+}
+
+function overrideStartupGate() {
+  startupGateBypassed = true;
+  void unlockStartupGate();
+}
+
+function updateStartupGateFromBuffer() {
+  if (!player || !startupGateWaitingForBuffer || startupGateBypassed) return;
+
+  const bufferedAheadSeconds = getBufferedAheadSeconds();
+  const playbackRatePrefix = Number.isFinite(startupGateMeasuredPlaybackRate)
+    ? `預載速度約 ${formatPlaybackRateLabel(startupGateMeasuredPlaybackRate)}，`
+    : '';
+
+  updateStartupGate(
+    '正在累積可播緩衝',
+    `${playbackRatePrefix}已緩衝 ${formatBufferedAheadLabel(bufferedAheadSeconds)} / ${STARTUP_BUFFER_THRESHOLD_SECONDS} 秒`,
+    {
+      canBypass: true,
+    }
+  );
+
+  if (bufferedAheadSeconds >= STARTUP_BUFFER_THRESHOLD_SECONDS) {
+    void unlockStartupGate();
+  }
+}
+
 async function resumePlaybackIfNeeded() {
   if (!player || !props.shouldAutoplay) return;
 
@@ -349,6 +517,7 @@ function beginSourceSwitch() {
   if (!player) return 0;
 
   const seq = ++sourceSeq;
+  resetStartupGate(seq);
   isSwitchingSource = true;
   resetSnapshotTracking();
   isApplyingSubtitlePreference = true;
@@ -412,9 +581,37 @@ function applySubtitleTracks(subtitles, seq = sourceSeq) {
   isApplyingSubtitlePreference = false;
 }
 
-function setupSourceAndTracks(m3u8Url, subtitles) {
+async function setupSourceAndTracks(m3u8Url, subtitles) {
   if (!player) return;
   const seq = beginSourceSwitch();
+  let warmupResult = null;
+
+  if (shouldRunStartupWarmup()) {
+    updateStartupGate('正在預載影片', `準備下載前 ${gatewayProbeSegmentSampleCount} 個片段`);
+    emit('status-update', '正在預載前幾個片段...');
+
+    warmupResult = await probeGatewayAvailability(props.gateway, props.cid, {
+      cacheMode: 'default',
+      segmentSampleCount: gatewayProbeSegmentSampleCount,
+      playbackRateThreshold: gatewayProbePlaybackRateThreshold,
+      onProgress(progressState) {
+        if (!player || seq !== sourceSeq || progressState.state !== 'probing') return;
+
+        const progressLabel =
+          progressState.sampleSegmentCount > 0
+            ? `已完成 ${progressState.completedSampleCount}/${progressState.sampleSegmentCount} 個片段`
+            : '正在測速';
+        const speedLabel = Number.isFinite(progressState.playbackRate)
+          ? `，目前約 ${formatPlaybackRateLabel(progressState.playbackRate)}`
+          : '';
+        startupGateMeasuredPlaybackRate = Number.isFinite(progressState.playbackRate) ? progressState.playbackRate : null;
+
+        updateStartupGate('正在預載影片', `${progressLabel}${speedLabel}`);
+      },
+    });
+
+    if (!player || seq !== sourceSeq) return;
+  }
 
   emit('status-update', '正在載入影片...');
   player.src({
@@ -431,17 +628,34 @@ function setupSourceAndTracks(m3u8Url, subtitles) {
     }
     isSwitchingSource = false;
     emitPlaybackSnapshot('loadedmetadata', { force: true });
-    if (props.shouldAutoplay) {
-      player.one('canplay', () => {
-        if (!player || seq !== sourceSeq) return;
-        void resumePlaybackIfNeeded();
-      });
-    } else if (props.startTime > 0) {
-      const formattedTime = formatTime(props.startTime);
-      emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
-    } else {
-      emit('status-update', '播放器已就緒');
+
+    if (!shouldRunStartupWarmup()) {
+      if (props.shouldAutoplay) {
+        player.one('canplay', () => {
+          if (!player || seq !== sourceSeq) return;
+          void resumePlaybackIfNeeded();
+        });
+      } else {
+        emitReadyStatus();
+      }
+      return;
     }
+
+    if (warmupResult?.state === 'ready') {
+      void unlockStartupGate(seq);
+      return;
+    }
+
+    startupGateWaitingForBuffer = true;
+    startupGateMeasuredPlaybackRate = Number.isFinite(warmupResult?.playbackRate) ? warmupResult.playbackRate : null;
+    const warmupSpeedLabel = Number.isFinite(warmupResult?.playbackRate)
+      ? `預載速度約 ${formatPlaybackRateLabel(warmupResult.playbackRate)}`
+      : '預載速度仍在觀察';
+    updateStartupGate('正在累積可播緩衝', `${warmupSpeedLabel}，等待緩衝達到 ${STARTUP_BUFFER_THRESHOLD_SECONDS} 秒`, {
+      canBypass: true,
+    });
+    emit('status-update', '正在累積可播緩衝...');
+    updateStartupGateFromBuffer();
   });
 }
 
@@ -495,6 +709,10 @@ function syncStartTime(startTime) {
 }
 
 function handleGlobalKeydown(event) {
+  if (showStartupGate.value) {
+    return;
+  }
+
   if (isHotkeyHelpOpen.value) {
     if (isEscapeKey(event) || isHelpHotkeyEvent(event)) {
       event.preventDefault?.();
@@ -570,6 +788,14 @@ function bindPlaybackSnapshotListeners() {
   player.on('timeupdate', handleTimeupdateSnapshot);
 }
 
+function bindStartupGateListeners() {
+  if (!player) return;
+
+  player.on('progress', updateStartupGateFromBuffer);
+  player.on('canplay', updateStartupGateFromBuffer);
+  player.on('loadeddata', updateStartupGateFromBuffer);
+}
+
 function syncPoster(posterUrl) {
   if (!player) return;
 
@@ -601,10 +827,11 @@ function initPlayer() {
     },
     () => {
       bindPlaybackSnapshotListeners();
+      bindStartupGateListeners();
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
-        setupSourceAndTracks(props.m3u8Url, props.subtitles);
+        void setupSourceAndTracks(props.m3u8Url, props.subtitles);
       }
     }
   );
@@ -627,7 +854,7 @@ watch(
     }
 
     if (newUrl !== oldUrl) {
-      setupSourceAndTracks(newUrl, props.subtitles);
+      void setupSourceAndTracks(newUrl, props.subtitles);
       return;
     }
 
@@ -681,6 +908,64 @@ onBeforeUnmount(() => {
 .video-player-shell [data-vjs-player] {
   width: 100%;
   height: 100%;
+}
+
+.startup-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  color: #f6f7fb;
+  background:
+    linear-gradient(180deg, rgba(7, 10, 18, 0.76), rgba(7, 10, 18, 0.9)),
+    radial-gradient(circle at top, rgba(92, 163, 255, 0.18), transparent 48%);
+  backdrop-filter: blur(8px);
+}
+
+.startup-gate-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 30rem;
+}
+
+.startup-gate-title,
+.startup-gate-detail {
+  margin: 0;
+}
+
+.startup-gate-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.startup-gate-detail {
+  color: rgba(246, 247, 251, 0.82);
+  line-height: 1.5;
+}
+
+.startup-gate-action {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: #f6f7fb;
+  background: rgba(255, 255, 255, 0.14);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.startup-gate-action:hover {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
 }
 
 .hotkey-help-backdrop {

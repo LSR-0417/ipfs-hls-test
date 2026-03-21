@@ -6,36 +6,37 @@ describe('formatGatewayPlaybackText', () => {
     expect(
       formatGatewayPlaybackText({
         state: 'ready',
-        durationMs: 420,
+        playbackRate: 2.1,
       })
-    ).toBe('順播穩定');
+    ).toBe('順播穩定 · 2.1x');
   });
 
   it('marks slower ready gateways as playable', () => {
     expect(
       formatGatewayPlaybackText({
         state: 'ready',
-        durationMs: 1600,
+        playbackRate: 1.4,
       })
-    ).toBe('可順播');
+    ).toBe('可順播 · 1.4x');
   });
 
   it('describes playlist-ready slow gateways as playable but slow', () => {
     expect(
       formatGatewayPlaybackText({
         state: 'playlist_ready',
-        detail: '已找到 index.m3u8，前 3 個片段可取但偏慢',
+        playbackRate: 0.9,
       })
-    ).toBe('能播，但偏慢');
+    ).toBe('能播，但偏慢 · 0.9x');
   });
 
   it('describes playlist-ready in-progress gateways as still being checked', () => {
     expect(
       formatGatewayPlaybackText({
-        state: 'playlist_ready',
-        detail: '已找到 index.m3u8，正在驗證片段',
+        state: 'probing',
+        sampleSegmentCount: 3,
+        completedSampleCount: 1,
       })
-    ).toBe('已連上，正在確認順播');
+    ).toBe('正在測速 1/3');
   });
 
   it('describes degraded gateways as likely to stutter', () => {
