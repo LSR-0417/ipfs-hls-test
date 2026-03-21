@@ -424,6 +424,66 @@ describe('probeGatewayAvailability', () => {
     );
   });
 
+  it('samples segments near the requested playback time when probing a handoff', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: [
+            '#EXTM3U',
+            '#EXTINF:5.0,',
+            'segment_000.ts',
+            '#EXTINF:5.0,',
+            'segment_001.ts',
+            '#EXTINF:5.0,',
+            'segment_002.ts',
+            '#EXTINF:5.0,',
+            'segment_003.ts',
+            '#EXTINF:5.0,',
+            'segment_004.ts',
+          ].join('\n'),
+        });
+      }
+
+      if (/segment_00[2-4]\.ts$/.test(url)) {
+        return createResponse();
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const nowFn = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(124);
+
+    await expect(
+      probeGatewayAvailability('https://example.com/ipfs/', 'bafy123', {
+        fetchImpl,
+        nowFn,
+        startTimeSeconds: 12,
+      })
+    ).resolves.toEqual({
+      state: 'ready',
+      detail: '已預載目前播放位置附近 3 個片段，可開始播放',
+      durationMs: 24,
+      httpStatus: 200,
+      retryAfterMs: null,
+      throughputMbps: 262.14,
+      playbackRate: 625,
+      sampleSegmentCount: 3,
+      completedSampleCount: 3,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://example.com/ipfs/bafy123/segment_002.ts',
+      expect.any(Object)
+    );
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://example.com/ipfs/bafy123/segment_004.ts',
+      expect.any(Object)
+    );
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      'https://example.com/ipfs/bafy123/segment_000.ts',
+      expect.any(Object)
+    );
+  });
+
   it('returns a rate-limited result for 429 responses', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: false,

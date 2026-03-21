@@ -97,6 +97,12 @@ import {
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
+  buildQualityLevelPayload,
+  formatQualitySelectorLabel,
+  getStartupInitialRenditionCount,
+  pickStartupInitialPlaylist,
+} from '../utils/startupRenditions';
+import {
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
@@ -147,6 +153,8 @@ const props = defineProps({
 
 const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);
 
+const SOURCE_SWITCH_MODE_DEFAULT = 'direct';
+const SOURCE_SWITCH_MODE_GATEWAY_HANDOFF = 'gateway_handoff';
 const SEEK_STEP_SECONDS = 5;
 const LONG_SEEK_STEP_SECONDS = 10;
 const PROGRESS_EMIT_STEP_SECONDS = 5;
@@ -228,14 +236,19 @@ let player = null;
 let sourceSeq = 0;
 let isApplyingSubtitlePreference = false;
 let textTrackList = null;
+let qualityLevelList = null;
 let lastFocusedElement = null;
 let isSwitchingSource = false;
 let lastProgressSnapshotTime = -1;
+let sourceSetupRequestSeq = 0;
 let startupGateSourceSeq = 0;
 let startupGateReady = false;
 let startupGateWaitingForBuffer = false;
 let startupGateBypassed = false;
 let startupGateMeasuredPlaybackRate = null;
+let startupInitialRenditionCount = null;
+let pendingSourceStartTime = 0;
+let pendingSourceShouldAutoplay = false;
 const showStartupGate = ref(false);
 const startupGateTitle = ref('');
 const startupGateDetail = ref('');
@@ -373,8 +386,47 @@ function toggleHotkeyHelp() {
   return true;
 }
 
-function shouldRunStartupWarmup() {
-  return Boolean(props.cid && props.gateway && props.m3u8Url && !(props.startTime > 0));
+function resolveSourceSwitchMode(nextUrl, previous = {}) {
+  const { oldUrl = '', oldCid = '', oldGateway = '' } = previous;
+
+  if (!oldUrl || !nextUrl) {
+    return SOURCE_SWITCH_MODE_DEFAULT;
+  }
+
+  if (props.cid && props.cid === oldCid && props.gateway && props.gateway !== oldGateway) {
+    return SOURCE_SWITCH_MODE_GATEWAY_HANDOFF;
+  }
+
+  return SOURCE_SWITCH_MODE_DEFAULT;
+}
+
+function shouldRunStartupWarmup(options = {}) {
+  const {
+    switchMode = SOURCE_SWITCH_MODE_DEFAULT,
+    startTime = props.startTime,
+    cid = props.cid,
+    gateway = props.gateway,
+    m3u8Url = props.m3u8Url,
+  } = options;
+
+  return Boolean(cid && gateway && m3u8Url && (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF || !(startTime > 0)));
+}
+
+function getCurrentSourceSwitchSnapshot() {
+  if (!player) {
+    return {
+      time: props.startTime > 0 ? props.startTime : 0,
+      shouldAutoplay: props.shouldAutoplay,
+    };
+  }
+
+  const currentTime = Number.isFinite(player.currentTime?.()) ? Math.max(0, player.currentTime()) : 0;
+  const isReady = player.readyState?.() > 0;
+
+  return {
+    time: isReady ? currentTime : props.startTime > 0 ? props.startTime : 0,
+    shouldAutoplay: isReady ? !player.paused() : props.shouldAutoplay,
+  };
 }
 
 function resetStartupGate(seq = sourceSeq) {
@@ -383,6 +435,7 @@ function resetStartupGate(seq = sourceSeq) {
   startupGateWaitingForBuffer = false;
   startupGateBypassed = false;
   startupGateMeasuredPlaybackRate = null;
+  startupInitialRenditionCount = null;
   showStartupGate.value = false;
   startupGateTitle.value = '';
   startupGateDetail.value = '';
@@ -395,6 +448,50 @@ function updateStartupGate(title, detail, options = {}) {
   startupGateTitle.value = title;
   startupGateDetail.value = detail;
   startupGateCanBypass.value = canBypass;
+}
+
+function emitQualityLevels() {
+  if (!player || typeof player.qualityLevels !== 'function') return;
+
+  emit('levels-loaded', buildQualityLevelPayload(player.qualityLevels()));
+}
+
+function syncQualitySelectorButtonLabel() {
+  if (!player) return;
+
+  const labelEl =
+    player.el()?.querySelector?.('.vjs-quality-selector .vjs-icon-placeholder') || null;
+
+  if (!labelEl || typeof player.qualityLevels !== 'function') {
+    return;
+  }
+
+  labelEl.textContent = formatQualitySelectorLabel(player.qualityLevels());
+}
+
+function createStartupInitialPlaylistSelector(maxInitialRenditions) {
+  return function selectStartupInitialPlaylist() {
+    return pickStartupInitialPlaylist(this?.playlists?.main?.playlists, maxInitialRenditions);
+  };
+}
+
+function configureStartupRenditionStrategy(warmupResult, options = {}) {
+  const vhs = player?.tech_?.vhs;
+  const { runStartupWarmup = false } = options;
+
+  startupInitialRenditionCount = runStartupWarmup ? getStartupInitialRenditionCount(warmupResult?.playbackRate) : null;
+
+  if (vhs?.playlistController_) {
+    if (Number.isFinite(startupInitialRenditionCount)) {
+      vhs.playlistController_.enableLowInitialPlaylist = true;
+      vhs.playlistController_.selectInitialPlaylist = createStartupInitialPlaylistSelector(
+        startupInitialRenditionCount
+      ).bind(vhs);
+    } else if (videojs.Vhs?.INITIAL_PLAYLIST_SELECTOR) {
+      vhs.playlistController_.enableLowInitialPlaylist = false;
+      vhs.playlistController_.selectInitialPlaylist = videojs.Vhs.INITIAL_PLAYLIST_SELECTOR.bind(vhs);
+    }
+  }
 }
 
 function formatPlaybackRateLabel(playbackRate) {
@@ -438,8 +535,8 @@ function getBufferedAheadSeconds() {
 }
 
 function emitReadyStatus() {
-  if (props.startTime > 0) {
-    const formattedTime = formatTime(props.startTime);
+  if (pendingSourceStartTime > 0) {
+    const formattedTime = formatTime(pendingSourceStartTime);
     emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
     return;
   }
@@ -455,7 +552,7 @@ async function unlockStartupGate(seq = startupGateSourceSeq) {
   startupGateCanBypass.value = false;
   showStartupGate.value = false;
 
-  if (props.shouldAutoplay) {
+  if (pendingSourceShouldAutoplay) {
     if (player.readyState() >= 3) {
       await resumePlaybackIfNeeded();
       return;
@@ -498,14 +595,14 @@ function updateStartupGateFromBuffer() {
 }
 
 async function resumePlaybackIfNeeded() {
-  if (!player || !props.shouldAutoplay) return;
+  if (!player || !pendingSourceShouldAutoplay) return;
 
   try {
     await player.play();
     emit('status-update', '播放器已就緒，繼續播放中');
   } catch (_) {
-    if (props.startTime > 0) {
-      const formattedTime = formatTime(props.startTime);
+    if (pendingSourceStartTime > 0) {
+      const formattedTime = formatTime(pendingSourceStartTime);
       emit('status-update', `✅ 資源就緒！請手動播放 (將從 ${formattedTime} 開始)。`);
     } else {
       emit('status-update', '播放器已就緒，請手動播放');
@@ -523,6 +620,7 @@ function beginSourceSwitch() {
   isApplyingSubtitlePreference = true;
   player.pause();
   clearTracks();
+  clearQualityLevels();
   player.reset();
   player.poster(props.posterUrl || '');
   isApplyingSubtitlePreference = false;
@@ -581,21 +679,38 @@ function applySubtitleTracks(subtitles, seq = sourceSeq) {
   isApplyingSubtitlePreference = false;
 }
 
-async function setupSourceAndTracks(m3u8Url, subtitles) {
+async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
   if (!player) return;
-  const seq = beginSourceSwitch();
+
+  const {
+    switchMode = SOURCE_SWITCH_MODE_DEFAULT,
+    requestedStartTime = props.startTime,
+  } = options;
+  const setupRequestId = ++sourceSetupRequestSeq;
+  const handoffSnapshot = switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? getCurrentSourceSwitchSnapshot() : null;
+  const probeStartTime = switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? handoffSnapshot?.time ?? 0 : requestedStartTime;
+  const runStartupWarmup = shouldRunStartupWarmup({
+    switchMode,
+    startTime: requestedStartTime,
+    m3u8Url,
+  });
   let warmupResult = null;
 
-  if (shouldRunStartupWarmup()) {
-    updateStartupGate('正在預載影片', `準備下載前 ${gatewayProbeSegmentSampleCount} 個片段`);
-    emit('status-update', '正在預載前幾個片段...');
+  if (runStartupWarmup) {
+    if (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF) {
+      emit('status-update', '正在為新 gateway 預載目前播放位置...');
+    } else {
+      updateStartupGate('正在預載影片', `準備下載前 ${gatewayProbeSegmentSampleCount} 個片段`);
+      emit('status-update', '正在預載前幾個片段...');
+    }
 
     warmupResult = await probeGatewayAvailability(props.gateway, props.cid, {
       cacheMode: 'default',
       segmentSampleCount: gatewayProbeSegmentSampleCount,
       playbackRateThreshold: gatewayProbePlaybackRateThreshold,
+      startTimeSeconds: probeStartTime,
       onProgress(progressState) {
-        if (!player || seq !== sourceSeq || progressState.state !== 'probing') return;
+        if (!player || setupRequestId !== sourceSetupRequestSeq || progressState.state !== 'probing') return;
 
         const progressLabel =
           progressState.sampleSegmentCount > 0
@@ -606,33 +721,60 @@ async function setupSourceAndTracks(m3u8Url, subtitles) {
           : '';
         startupGateMeasuredPlaybackRate = Number.isFinite(progressState.playbackRate) ? progressState.playbackRate : null;
 
+        if (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF) {
+          emit('status-update', `新 gateway 預載中：${progressLabel}${speedLabel}`);
+          return;
+        }
+
         updateStartupGate('正在預載影片', `${progressLabel}${speedLabel}`);
       },
     });
 
-    if (!player || seq !== sourceSeq) return;
+    if (!player || setupRequestId !== sourceSetupRequestSeq) return;
   }
 
-  emit('status-update', '正在載入影片...');
+  const cutoverSnapshot =
+    switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? getCurrentSourceSwitchSnapshot() : null;
+  pendingSourceStartTime = switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? cutoverSnapshot?.time ?? 0 : requestedStartTime;
+  pendingSourceShouldAutoplay =
+    switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? cutoverSnapshot?.shouldAutoplay ?? false : props.shouldAutoplay;
+
+  const seq = beginSourceSwitch();
+
+  if (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF) {
+    updateStartupGate(
+      '正在切換網關',
+      warmupResult?.state === 'ready' ? '新來源已預載，正在接手播放' : '正在切換到新來源並等待緩衝'
+    );
+    emit('status-update', '正在切換到新 gateway...');
+  } else {
+    emit('status-update', '正在載入影片...');
+  }
+
   player.src({
     src: m3u8Url,
     type: 'application/x-mpegURL',
+    enableLowInitialPlaylist: runStartupWarmup,
   });
+  bindQualityLevelListeners();
+  configureStartupRenditionStrategy(warmupResult, { runStartupWarmup });
   applySubtitleTracks(subtitles, seq);
 
   player.one('loadedmetadata', () => {
-    if (!player || seq !== sourceSeq) return;
+    if (!player || seq !== sourceSeq || setupRequestId !== sourceSetupRequestSeq) return;
 
-    if (props.startTime > 0) {
-      player.currentTime(props.startTime);
+    if (pendingSourceStartTime > 0) {
+      player.currentTime(pendingSourceStartTime);
     }
     isSwitchingSource = false;
     emitPlaybackSnapshot('loadedmetadata', { force: true });
+    emitQualityLevels();
+    syncQualitySelectorButtonLabel();
 
-    if (!shouldRunStartupWarmup()) {
-      if (props.shouldAutoplay) {
+    if (!runStartupWarmup) {
+      if (pendingSourceShouldAutoplay) {
         player.one('canplay', () => {
-          if (!player || seq !== sourceSeq) return;
+          if (!player || seq !== sourceSeq || setupRequestId !== sourceSetupRequestSeq) return;
           void resumePlaybackIfNeeded();
         });
       } else {
@@ -669,6 +811,18 @@ function clearTracks() {
   while (i--) {
     player.removeRemoteTextTrack(oldTracks[i]);
   }
+}
+
+function clearQualityLevels() {
+  if (!player || typeof player.qualityLevels !== 'function') return;
+
+  const qualityLevels = player.qualityLevels();
+
+  while (qualityLevels?.length > 0) {
+    qualityLevels.removeQualityLevel(qualityLevels[0]);
+  }
+
+  emitQualityLevels();
 }
 
 function handleSubtitleTrackChange() {
@@ -788,6 +942,34 @@ function bindPlaybackSnapshotListeners() {
   player.on('timeupdate', handleTimeupdateSnapshot);
 }
 
+function handleQualityLevelsChanged() {
+  emitQualityLevels();
+  syncQualitySelectorButtonLabel();
+}
+
+function bindQualityLevelListeners() {
+  if (!player || typeof player.qualityLevels !== 'function') return;
+
+  const nextQualityLevelList = player.qualityLevels();
+
+  if (!nextQualityLevelList || qualityLevelList === nextQualityLevelList) {
+    handleQualityLevelsChanged();
+    return;
+  }
+
+  if (qualityLevelList?.off) {
+    qualityLevelList.off('addqualitylevel', handleQualityLevelsChanged);
+    qualityLevelList.off('change', handleQualityLevelsChanged);
+    qualityLevelList.off('removequalitylevel', handleQualityLevelsChanged);
+  }
+
+  qualityLevelList = nextQualityLevelList;
+  qualityLevelList.on?.('addqualitylevel', handleQualityLevelsChanged);
+  qualityLevelList.on?.('change', handleQualityLevelsChanged);
+  qualityLevelList.on?.('removequalitylevel', handleQualityLevelsChanged);
+  handleQualityLevelsChanged();
+}
+
 function bindStartupGateListeners() {
   if (!player) return;
 
@@ -828,10 +1010,14 @@ function initPlayer() {
     () => {
       bindPlaybackSnapshotListeners();
       bindStartupGateListeners();
+      bindQualityLevelListeners();
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
-        void setupSourceAndTracks(props.m3u8Url, props.subtitles);
+        void setupSourceAndTracks(props.m3u8Url, props.subtitles, {
+          switchMode: SOURCE_SWITCH_MODE_DEFAULT,
+          requestedStartTime: props.startTime,
+        });
       }
     }
   );
@@ -843,18 +1029,27 @@ onMounted(() => {
 });
 
 watch(
-  () => [props.m3u8Url, props.startTime],
-  ([newUrl, newStartTime], [oldUrl, oldStartTime] = []) => {
+  () => [props.m3u8Url, props.startTime, props.cid, props.gateway],
+  ([newUrl, newStartTime, newCid, newGateway], [oldUrl, oldStartTime, oldCid, oldGateway] = []) => {
     if (!player) return;
 
     if (!newUrl) {
+      pendingSourceStartTime = 0;
+      pendingSourceShouldAutoplay = false;
       beginSourceSwitch();
       emit('status-update', '準備就緒');
       return;
     }
 
     if (newUrl !== oldUrl) {
-      void setupSourceAndTracks(newUrl, props.subtitles);
+      void setupSourceAndTracks(newUrl, props.subtitles, {
+        switchMode: resolveSourceSwitchMode(newUrl, {
+          oldUrl,
+          oldCid,
+          oldGateway,
+        }),
+        requestedStartTime: newStartTime,
+      });
       return;
     }
 
@@ -890,6 +1085,12 @@ onBeforeUnmount(() => {
   if (textTrackList) {
     textTrackList.removeEventListener('change', handleSubtitleTrackChange);
     textTrackList = null;
+  }
+  if (qualityLevelList?.off) {
+    qualityLevelList.off('addqualitylevel', handleQualityLevelsChanged);
+    qualityLevelList.off('change', handleQualityLevelsChanged);
+    qualityLevelList.off('removequalitylevel', handleQualityLevelsChanged);
+    qualityLevelList = null;
   }
   if (player) {
     emitPlaybackSnapshot('before-unmount', { force: true });

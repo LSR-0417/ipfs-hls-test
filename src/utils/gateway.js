@@ -193,6 +193,7 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     cacheMode = 'no-store',
     segmentSampleCount = gatewayProbeSegmentSampleCount,
     playbackRateThreshold = gatewayProbePlaybackRateThreshold,
+    startTimeSeconds = 0,
   } = options;
   const playlistUrl = buildGatewayIndexUrl(gatewayUrl, cid);
 
@@ -293,7 +294,7 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     }
 
     phase = 'segment';
-    const segmentSamples = segmentEntries.slice(0, Math.max(1, segmentSampleCount));
+    const segmentSamples = selectSegmentSamplesAroundTime(segmentEntries, segmentSampleCount, startTimeSeconds);
     let httpStatus = playlistResponse.status;
     let completedSampleCount = 0;
     let sampledBytes = 0;
@@ -363,7 +364,7 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
     if (playbackRate != null && playbackRate < playbackRateThreshold) {
       return {
         state: 'playlist_ready',
-        detail: `已預載前 ${segmentSamples.length} 個片段，但下載速度偏慢`,
+        detail: formatSegmentProbeDetail(segmentSamples.length, startTimeSeconds, 'slow'),
         durationMs,
         httpStatus,
         retryAfterMs: null,
@@ -376,7 +377,7 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
 
     return {
       state: 'ready',
-      detail: `已預載前 ${segmentSamples.length} 個片段，可開始播放`,
+      detail: formatSegmentProbeDetail(segmentSamples.length, startTimeSeconds, 'ready'),
       durationMs,
       httpStatus,
       retryAfterMs: null,
@@ -427,6 +428,49 @@ export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
       clearTimeout(timeoutId);
     }
   }
+}
+
+function selectSegmentSamplesAroundTime(segmentEntries, segmentSampleCount, startTimeSeconds = 0) {
+  const normalizedSampleCount = Math.max(1, Math.floor(segmentSampleCount || 1));
+
+  if (!Array.isArray(segmentEntries) || segmentEntries.length === 0) {
+    return [];
+  }
+
+  if (!(startTimeSeconds > 0)) {
+    return segmentEntries.slice(0, normalizedSampleCount);
+  }
+
+  let elapsedSeconds = 0;
+  let targetIndex = 0;
+
+  for (let index = 0; index < segmentEntries.length; index += 1) {
+    const segmentDuration = Number.isFinite(segmentEntries[index]?.durationSeconds) ? segmentEntries[index].durationSeconds : 0;
+    const segmentEnd = elapsedSeconds + segmentDuration;
+
+    if (startTimeSeconds < segmentEnd || index === segmentEntries.length - 1) {
+      targetIndex = index;
+      break;
+    }
+
+    elapsedSeconds = segmentEnd;
+  }
+
+  const maxStartIndex = Math.max(0, segmentEntries.length - normalizedSampleCount);
+  const startIndex = Math.min(targetIndex, maxStartIndex);
+
+  return segmentEntries.slice(startIndex, startIndex + normalizedSampleCount);
+}
+
+function formatSegmentProbeDetail(sampleCount, startTimeSeconds, mode) {
+  const segmentScope =
+    startTimeSeconds > 0 ? `目前播放位置附近 ${sampleCount} 個片段` : `前 ${sampleCount} 個片段`;
+
+  if (mode === 'slow') {
+    return `已預載${segmentScope}，但下載速度偏慢`;
+  }
+
+  return `已預載${segmentScope}，可開始播放`;
 }
 
 function buildProbeFailureResult(response, durationMs, fallbackDetail, options = {}) {
