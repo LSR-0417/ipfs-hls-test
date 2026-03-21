@@ -33,6 +33,7 @@ const emit = defineEmits(['search', 'gateway-change']);
 
 const searchQuery = ref('');
 const isCompactHeader = ref(false);
+const searchInputRef = ref(null);
 const settingsOpen = ref(false);
 const gatewayButtonRef = ref(null);
 const gatewayDialogRef = ref(null);
@@ -52,6 +53,7 @@ const currentGatewayValue = computed(
   () => normalizeGatewayUrl(props.currentGateway, { allowPrivateHosts: isDevMode }) || props.currentGateway
 );
 const currentCidValue = computed(() => props.currentCid.trim());
+const isSearchQueryEmpty = computed(() => searchQuery.value.trim().length === 0);
 const orderedBuiltInGateways = computed(() =>
   [...builtInGateways].sort((left, right) => {
     const leftState = probeStateFor(left.id);
@@ -281,6 +283,16 @@ function onSearch() {
   if (trimmed) {
     emit('search', trimmed);
   }
+}
+
+function focusSearchInput() {
+  searchInputRef.value?.focus();
+}
+
+async function clearSearchQuery() {
+  searchQuery.value = '';
+  await nextTick();
+  focusSearchInput();
 }
 
 function syncLocalFromGateway(urlStr) {
@@ -781,16 +793,34 @@ onBeforeUnmount(() => {
 
     <div class="search-area" data-testid="header-search-area">
       <div class="search-bar" data-testid="header-search-bar">
-        <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-        <input 
+        <input
+          ref="searchInputRef"
           type="text" 
           v-model="searchQuery" 
           :placeholder="searchPlaceholder"
           @keyup.enter="onSearch"
         />
-        <button class="icon-btn search-submit-btn" @click="onSearch" aria-label="Search">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M22 12l-4-4v3H3v2h15v3z"/></svg>
-        </button>
+        <div class="search-actions">
+          <button
+            v-if="!isSearchQueryEmpty"
+            class="icon-btn search-clear-btn"
+            @click="clearSearchQuery"
+            aria-label="Clear search"
+            title="Clear search text"
+            data-testid="header-search-clear-button"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z" /></svg>
+          </button>
+          <button
+            class="icon-btn search-submit-btn"
+            @click="onSearch"
+            aria-label="Search"
+            title="Search CID"
+            data-testid="header-search-submit-button"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" /></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1124,11 +1154,6 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.5);
 }
 
-.search-icon {
-  color: var(--text-secondary);
-  margin-right: 12px;
-}
-
 .search-bar input {
   flex: 1;
   background: transparent;
@@ -1143,11 +1168,19 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
 }
 
+.search-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  gap: 4px;
+}
+
+.search-clear-btn,
 .search-submit-btn {
   padding: 4px;
-  margin-left: 8px;
   color: var(--text-secondary);
 }
+.search-clear-btn:hover,
 .search-submit-btn:hover {
   color: var(--accent-neon);
   background: rgba(255, 255, 255, 0.05);
