@@ -12,7 +12,6 @@
   "dependencies": {
     "hls.js": "^1.4.0",
     "video.js": "^8.23.7",
-    "videojs-contrib-quality-levels": "^4.1.0",
     "videojs-hls-quality-selector": "^2.0.0",
     "vue": "^3.3.4"
   },
