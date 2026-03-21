@@ -12,6 +12,41 @@ function getVideoJsPlayer(win) {
   return null;
 }
 
+function createEmptyPlaybackSnapshot() {
+  return {
+    time: 0,
+    duration: 0,
+    isPlaying: false,
+    hasEnded: false,
+  };
+}
+
+function normalizePlaybackTime(value) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function normalizePlaybackDuration(value) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function resolvePlaybackSnapshot(getters) {
+  try {
+    const time = normalizePlaybackTime(getters.getTime());
+    const duration = normalizePlaybackDuration(getters.getDuration());
+    const hasEnded = getters.getEnded() === true || (duration > 0 && time >= duration);
+    const isPlaying = getters.getPaused() === false && hasEnded !== true;
+
+    return {
+      time: hasEnded && duration > 0 ? duration : time,
+      duration,
+      isPlaying,
+      hasEnded,
+    };
+  } catch (_) {
+    return createEmptyPlaybackSnapshot();
+  }
+}
+
 const INTERACTIVE_HOTKEY_TARGET_SELECTOR = [
   'input',
   'textarea',
@@ -39,43 +74,31 @@ function getHtmlVideo(win) {
 }
 
 export function getCurrentPlaybackTime(win) {
-  if (!win) return 0;
+  return getPlaybackSnapshot(win).time;
+}
 
-  try {
-    const player = getVideoJsPlayer(win);
-    if (player && typeof player.currentTime === 'function') {
-      const t = player.currentTime();
-      return Number.isFinite(t) && t > 0 ? Math.floor(t) : 0;
-    }
-  } catch (_) {
-    // ignore
+export function getPlayerPlaybackSnapshot(player) {
+  if (!player) {
+    return createEmptyPlaybackSnapshot();
   }
 
-  try {
-    const video = getHtmlVideo(win);
-    const t = video?.currentTime;
-    return Number.isFinite(t) && t > 0 ? Math.floor(t) : 0;
-  } catch (_) {
-    // ignore
-  }
-
-  return 0;
+  return resolvePlaybackSnapshot({
+    getTime: () => (typeof player.currentTime === 'function' ? player.currentTime() : player.currentTime),
+    getDuration: () => (typeof player.duration === 'function' ? player.duration() : player.duration),
+    getPaused: () => (typeof player.paused === 'function' ? player.paused() : player.paused),
+    getEnded: () => (typeof player.ended === 'function' ? player.ended() : player.ended),
+  });
 }
 
 export function getPlaybackSnapshot(win) {
   if (!win) {
-    return { time: 0, isPlaying: false };
+    return createEmptyPlaybackSnapshot();
   }
 
   try {
     const player = getVideoJsPlayer(win);
     if (player) {
-      const t = typeof player.currentTime === 'function' ? player.currentTime() : 0;
-      const paused = typeof player.paused === 'function' ? player.paused() : true;
-      return {
-        time: Number.isFinite(t) && t > 0 ? Math.floor(t) : 0,
-        isPlaying: paused === false,
-      };
+      return getPlayerPlaybackSnapshot(player);
     }
   } catch (_) {
     // ignore
@@ -84,17 +107,18 @@ export function getPlaybackSnapshot(win) {
   try {
     const video = getHtmlVideo(win);
     if (video) {
-      const t = video.currentTime;
-      return {
-        time: Number.isFinite(t) && t > 0 ? Math.floor(t) : 0,
-        isPlaying: video.paused === false && video.ended !== true,
-      };
+      return resolvePlaybackSnapshot({
+        getTime: () => video.currentTime,
+        getDuration: () => video.duration,
+        getPaused: () => video.paused,
+        getEnded: () => video.ended,
+      });
     }
   } catch (_) {
     // ignore
   }
 
-  return { time: 0, isPlaying: false };
+  return createEmptyPlaybackSnapshot();
 }
 
 export function clampSeekTime(currentTime, duration, deltaSeconds) {
