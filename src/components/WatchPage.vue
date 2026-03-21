@@ -28,6 +28,18 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  subtitleSelection: {
+    type: Object,
+    default: () => ({
+      mode: 'off',
+      primaryLang: '',
+      secondaryLang: '',
+    }),
+  },
+  remoteSubtitleStatus: {
+    type: String,
+    default: 'idle',
+  },
   remoteSubtitles: {
     type: Array,
     default: () => [],
@@ -50,7 +62,14 @@ defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-import', 'subtitle-remove']);
+const emit = defineEmits([
+  'status-update',
+  'levels-loaded',
+  'playback-snapshot',
+  'subtitle-import',
+  'subtitle-remove',
+  'subtitle-selection-change',
+]);
 
 function handleStatusUpdate(nextStatus) {
   emit('status-update', nextStatus);
@@ -71,6 +90,10 @@ function handleSubtitleImport(importedTrack) {
 function handleSubtitleRemove(trackId) {
   emit('subtitle-remove', trackId);
 }
+
+function handleSubtitleSelectionChange(nextSelection) {
+  emit('subtitle-selection-change', nextSelection);
+}
 </script>
 
 <template>
@@ -83,22 +106,29 @@ function handleSubtitleRemove(trackId) {
       :m3u8-url="m3u8Url"
       :poster-url="posterUrl"
       :subtitles="subtitles"
+      :subtitle-selection="subtitleSelection"
+      :subtitle-catalog-status="remoteSubtitleStatus"
       :frame-rate="videoInfo.fps"
       :start-time="startTime"
       :should-autoplay="shouldAutoplay"
       @status-update="handleStatusUpdate"
       @levels-loaded="handleLevelsLoaded"
       @playback-snapshot="handlePlaybackSnapshot"
+      @subtitle-selection-change="handleSubtitleSelectionChange"
     />
     <h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>
     <VideoInfo
       :cid="cid"
       :ipfs-base-url="ipfsBaseUrl"
+      :subtitles="subtitles"
+      :subtitle-selection="subtitleSelection"
+      :remote-subtitle-status="remoteSubtitleStatus"
       :video-info="videoInfo"
       :remote-subtitles="remoteSubtitles"
       :imported-subtitles="importedSubtitles"
       @subtitle-import="handleSubtitleImport"
       @subtitle-remove="handleSubtitleRemove"
+      @subtitle-selection-change="handleSubtitleSelectionChange"
     />
   </section>
 </template>

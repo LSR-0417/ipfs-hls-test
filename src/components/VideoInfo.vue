@@ -20,6 +20,22 @@ const defaultTags = ['IPFS', 'Web3', 'Decentralized'];
 const props = defineProps({
   cid: { type: String, default: '' },
   ipfsBaseUrl: { type: String, default: '' },
+  subtitles: {
+    type: Array,
+    default: () => [],
+  },
+  subtitleSelection: {
+    type: Object,
+    default: () => ({
+      mode: 'off',
+      primaryLang: '',
+      secondaryLang: '',
+    }),
+  },
+  remoteSubtitleStatus: {
+    type: String,
+    default: 'idle',
+  },
   remoteSubtitles: {
     type: Array,
     default: () => [],
@@ -34,7 +50,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['subtitle-import', 'subtitle-remove']);
+const emit = defineEmits(['subtitle-import', 'subtitle-remove', 'subtitle-selection-change']);
 
 const shareDialogRef = ref(null);
 const shareUrlInputRef = ref(null);
@@ -454,6 +470,10 @@ function handleSubtitleImport(importedTrack) {
 
 function handleSubtitleRemove(trackId) {
   emit('subtitle-remove', trackId);
+}
+
+function handleSubtitleSelectionChange(nextSelection) {
+  emit('subtitle-selection-change', nextSelection);
 }
 
 function openShareDialog() {
@@ -880,11 +900,15 @@ onBeforeUnmount(() => {
 
     <SubtitleDialog
       :open="isSubtitleDialogOpen"
+      :subtitles="subtitles"
+      :subtitle-selection="subtitleSelection"
+      :remote-subtitle-status="remoteSubtitleStatus"
       :remote-subtitles="remoteSubtitles"
       :imported-subtitles="importedSubtitles"
       @close="closeSubtitleDialog"
       @subtitle-import="handleSubtitleImport"
       @subtitle-remove="handleSubtitleRemove"
+      @subtitle-selection-change="handleSubtitleSelectionChange"
     />
 
     <div

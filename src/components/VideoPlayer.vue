@@ -1,5 +1,5 @@
 <template>
-  <div class="video-player-shell">
+  <div ref="playerShellRef" class="video-player-shell">
     <div data-vjs-player>
       <video
         ref="videoRef"
@@ -30,6 +30,80 @@
       >
         立即播放
       </button>
+    </div>
+
+    <div
+      v-if="isPrimarySubtitleMenuOpen"
+      class="primary-subtitle-menu-backdrop"
+      data-testid="primary-subtitle-menu-backdrop"
+      @click="closePrimarySubtitleMenu"
+    >
+      <section
+        ref="primarySubtitleMenuRef"
+        class="primary-subtitle-menu glass-panel"
+        :style="primarySubtitleMenuStyle"
+        role="menu"
+        aria-label="主字幕"
+        tabindex="-1"
+        data-testid="primary-subtitle-menu"
+        @click.stop
+      >
+        <div class="primary-subtitle-menu-header">
+          <p class="primary-subtitle-menu-title">{{ primarySubtitleMenuTitle }}</p>
+          <p class="primary-subtitle-menu-hint">{{ primarySubtitleMenuHint }}</p>
+        </div>
+
+        <div v-if="primarySubtitleMenuStatusMessage" class="primary-subtitle-menu-status" data-testid="primary-subtitle-menu-status">
+          {{ primarySubtitleMenuStatusMessage }}
+        </div>
+
+        <div v-else class="primary-subtitle-menu-body">
+          <button
+            type="button"
+            class="primary-subtitle-menu-item"
+            :class="{ 'primary-subtitle-menu-item--selected': resolvedSubtitleSelection.mode !== 'showing' }"
+            data-testid="primary-subtitle-menu-off"
+            @click="selectPrimarySubtitle('')"
+          >
+            <span class="primary-subtitle-menu-item-label">關閉主字幕</span>
+          </button>
+
+          <button
+            v-for="track in primarySubtitleMenuItems"
+            :key="track.menuKey"
+            type="button"
+            class="primary-subtitle-menu-item"
+            :class="{
+              'primary-subtitle-menu-item--selected': track.isPrimary,
+              'primary-subtitle-menu-item--secondary': track.isSecondary,
+            }"
+            :disabled="track.isSecondary"
+            :data-testid="`primary-subtitle-menu-track-${track.lang}`"
+            @click="selectPrimarySubtitle(track.lang)"
+          >
+            <span class="primary-subtitle-menu-item-main">
+              <span class="primary-subtitle-menu-item-label">{{ track.label }}</span>
+              <span class="primary-subtitle-menu-badges">
+                <span v-if="track.isPrimary" class="primary-subtitle-menu-badge primary-subtitle-menu-badge--primary">
+                  主字幕
+                </span>
+                <span
+                  v-if="track.isSecondary"
+                  class="primary-subtitle-menu-badge primary-subtitle-menu-badge--secondary"
+                >
+                  次字幕
+                </span>
+                <span v-if="track.isLocal" class="primary-subtitle-menu-badge primary-subtitle-menu-badge--local">
+                  本機
+                </span>
+              </span>
+            </span>
+            <span v-if="track.isSecondary" class="primary-subtitle-menu-item-detail">
+              次字幕請到 Subtitles 視窗設定
+            </span>
+          </button>
+        </div>
+      </section>
     </div>
 
     <div
@@ -86,7 +160,7 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import {
@@ -97,15 +171,159 @@ import {
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
-  persistSubtitlePreference,
-  readStoredSubtitlePreference,
   reconcileSubtitlePreference,
+  resolvePlayerControlledSubtitlePreference,
   resolveToggledSubtitlePreference,
 } from '../utils/subtitles';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
 if (typeof window !== 'undefined') {
   window.videojs = videojs;
+}
+
+const primarySubtitleButtonComponentName = 'PrimarySubtitleControlButton';
+const primarySubtitleControlStateEventName = 'primarysubtitlecontrolstatechange';
+const primarySubtitleMenuTitle = '主字幕';
+const primarySubtitleMenuHint = '此處只切換主字幕，次字幕請到 Subtitles 視窗設定';
+const primarySubtitleTriggerLabel = '主';
+const dualSubtitleSwapButtonComponentName = 'DualSubtitleSwapButton';
+const dualSubtitleSwapStateEventName = 'dualsubtitleswapstatechange';
+
+function registerPrimarySubtitleControlButton() {
+  if (typeof videojs.getComponent !== 'function' || videojs.getComponent(primarySubtitleButtonComponentName)) {
+    return;
+  }
+
+  const Button = videojs.getComponent('Button');
+  if (!Button) {
+    return;
+  }
+
+  class PrimarySubtitleControlButton extends Button {
+    constructor(player, options = {}) {
+      super(player, options);
+      this.controlText(primarySubtitleMenuTitle);
+      this.on(player, primarySubtitleControlStateEventName, () => this.updateState());
+      this.updateState();
+    }
+
+    buildCSSClass() {
+      return `vjs-primary-subtitle-button ${super.buildCSSClass()}`;
+    }
+
+    createEl() {
+      const el = super.createEl();
+      const iconPlaceholder = el.querySelector('.vjs-icon-placeholder');
+      if (iconPlaceholder) {
+        iconPlaceholder.setAttribute('aria-hidden', 'true');
+        iconPlaceholder.textContent = '';
+      }
+
+      const labelEl = el.ownerDocument.createElement('span');
+      labelEl.className = 'vjs-primary-subtitle-trigger-label';
+      labelEl.setAttribute('aria-hidden', 'true');
+      labelEl.textContent = primarySubtitleTriggerLabel;
+
+      const controlTextEl = el.querySelector('.vjs-control-text');
+      el.insertBefore(labelEl, controlTextEl || null);
+      return el;
+    }
+
+    handleClick() {
+      this.player_.primarySubtitleMenuToggle_?.();
+    }
+
+    updateState() {
+      const state = this.player_.primarySubtitleControlState_ || {};
+      const buttonEl = this.el();
+
+      this.show();
+      if (buttonEl) {
+        buttonEl.setAttribute('title', state.tooltip || primarySubtitleMenuTitle);
+        buttonEl.setAttribute('aria-label', state.tooltip || primarySubtitleMenuTitle);
+        buttonEl.setAttribute('aria-haspopup', 'menu');
+        buttonEl.setAttribute('aria-expanded', state.expanded ? 'true' : 'false');
+      }
+
+      if (state.enabled === false) {
+        this.disable();
+      } else {
+        this.enable();
+      }
+
+      if (state.expanded) {
+        this.addClass('vjs-primary-subtitle-button--active');
+      } else {
+        this.removeClass('vjs-primary-subtitle-button--active');
+      }
+    }
+  }
+
+  videojs.registerComponent(primarySubtitleButtonComponentName, PrimarySubtitleControlButton);
+}
+
+function registerDualSubtitleSwapButton() {
+  if (typeof videojs.getComponent !== 'function' || videojs.getComponent(dualSubtitleSwapButtonComponentName)) {
+    return;
+  }
+
+  const Button = videojs.getComponent('Button');
+  if (!Button) {
+    return;
+  }
+
+  class DualSubtitleSwapButton extends Button {
+    constructor(player, options = {}) {
+      super(player, options);
+      this.controlText('Swap primary and secondary subtitles');
+      this.on(player, dualSubtitleSwapStateEventName, () => this.updateState());
+      this.updateState();
+    }
+
+    buildCSSClass() {
+      return `vjs-dual-subtitle-swap-button ${super.buildCSSClass()}`;
+    }
+
+    createEl() {
+      const el = super.createEl();
+      const iconPlaceholder = el.querySelector('.vjs-icon-placeholder');
+      if (iconPlaceholder) {
+        iconPlaceholder.setAttribute('aria-hidden', 'true');
+        iconPlaceholder.textContent = '';
+      }
+
+      const iconEl = el.ownerDocument.createElement('span');
+      iconEl.className = 'vjs-dual-subtitle-swap-icon';
+      iconEl.setAttribute('aria-hidden', 'true');
+      iconEl.textContent = 'A/B';
+
+      const controlTextEl = el.querySelector('.vjs-control-text');
+      el.insertBefore(iconEl, controlTextEl || null);
+      return el;
+    }
+
+    handleClick(event) {
+      this.player_.dualSubtitleSwapAction_?.();
+    }
+
+    updateState() {
+      const state = this.player_.dualSubtitleSwapState_ || {};
+
+      if (state.visible === false) {
+        this.hide();
+      } else {
+        this.show();
+      }
+
+      if (state.enabled === false) {
+        this.disable();
+      } else {
+        this.enable();
+      }
+    }
+  }
+
+  videojs.registerComponent(dualSubtitleSwapButtonComponentName, DualSubtitleSwapButton);
 }
 
 const props = defineProps({
@@ -131,6 +349,18 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  subtitleCatalogStatus: {
+    type: String,
+    default: 'idle',
+  },
+  subtitleSelection: {
+    type: Object,
+    default: () => ({
+      mode: 'off',
+      primaryLang: '',
+      secondaryLang: '',
+    }),
+  },
   frameRate: {
     type: Number,
     default: Number.NaN,
@@ -145,7 +375,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);
+const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-selection-change']);
 
 const SEEK_STEP_SECONDS = 5;
 const LONG_SEEK_STEP_SECONDS = 10;
@@ -221,6 +451,13 @@ const hotkeyHelpSections = Object.freeze([
   },
 ]);
 
+const playerShellRef = ref(null);
+const primarySubtitleMenuRef = ref(null);
+const isPrimarySubtitleMenuOpen = ref(false);
+const primarySubtitleMenuPosition = ref({
+  bottom: 56,
+  right: 16,
+});
 const hotkeyHelpDialogRef = ref(null);
 const isHotkeyHelpOpen = ref(false);
 const videoRef = ref(null);
@@ -231,6 +468,7 @@ let textTrackList = null;
 let lastFocusedElement = null;
 let isSwitchingSource = false;
 let lastProgressSnapshotTime = -1;
+let subtitleCueRoleSyncFrame = 0;
 let startupGateSourceSeq = 0;
 let startupGateReady = false;
 let startupGateWaitingForBuffer = false;
@@ -240,6 +478,53 @@ const showStartupGate = ref(false);
 const startupGateTitle = ref('');
 const startupGateDetail = ref('');
 const startupGateCanBypass = ref(false);
+const primarySubtitleCueClass = 'vjs-text-track-cue--primary';
+const secondarySubtitleCueClass = 'vjs-text-track-cue--secondary';
+const secondarySubtitleOffsetCssVar = '--dual-subtitle-offset-y';
+const primarySubtitleControlInsertBefore = ['audioTrackButton', 'pictureInPictureToggle', 'fullscreenToggle'];
+
+const hasAvailableSubtitleTracks = computed(() => Array.isArray(props.subtitles) && props.subtitles.length > 0);
+const resolvedSubtitleSelection = computed(() => resolveSubtitlePreference(props.subtitles));
+const primarySubtitleMenuStyle = computed(() => ({
+  bottom: `${primarySubtitleMenuPosition.value.bottom}px`,
+  right: `${primarySubtitleMenuPosition.value.right}px`,
+}));
+const primarySubtitleMenuStatusMessage = computed(() => {
+  if (hasAvailableSubtitleTracks.value) {
+    return '';
+  }
+
+  if (props.subtitleCatalogStatus === 'loading') {
+    return '字幕載入中...';
+  }
+
+  if (props.subtitleCatalogStatus === 'error') {
+    return '字幕載入失敗';
+  }
+
+  return '沒有可用字幕';
+});
+const primarySubtitleMenuItems = computed(() =>
+  props.subtitles.map((track, index) => {
+    const trackLocale = normalizeLocale(track?.lang);
+    const primaryLocale =
+      resolvedSubtitleSelection.value.mode === 'showing'
+        ? normalizeLocale(resolvedSubtitleSelection.value.primaryLang)
+        : '';
+    const secondaryLocale =
+      resolvedSubtitleSelection.value.mode === 'showing'
+        ? normalizeLocale(resolvedSubtitleSelection.value.secondaryLang)
+        : '';
+
+    return {
+      ...track,
+      menuKey: `${track?.source || 'remote'}:${track?.lang || index}:${track?.order ?? index}`,
+      isLocal: track?.source === 'local',
+      isPrimary: Boolean(trackLocale) && trackLocale === primaryLocale,
+      isSecondary: Boolean(trackLocale) && trackLocale === secondaryLocale,
+    };
+  })
+);
 
 function isHelpHotkeyEvent(event) {
   return event?.key === '?' || (event?.code === 'Slash' && event?.shiftKey === true);
@@ -251,14 +536,146 @@ function isEscapeKey(event) {
 
 function resolveSubtitlePreference(subtitles) {
   const target = typeof window !== 'undefined' ? window : null;
-  const storedPreference = readStoredSubtitlePreference(target);
-  const nextPreference = reconcileSubtitlePreference(storedPreference, subtitles, target?.navigator);
+  return reconcileSubtitlePreference(props.subtitleSelection, subtitles, target?.navigator);
+}
 
-  if (storedPreference.mode !== nextPreference.mode || storedPreference.lang !== nextPreference.lang) {
-    persistSubtitlePreference(nextPreference, target);
+function normalizeLocale(value) {
+  return typeof value === 'string' ? value.trim().replace(/_/g, '-').toLowerCase() : '';
+}
+
+function findSubtitleTrackByLanguage(lang) {
+  const targetLocale = normalizeLocale(lang);
+  if (!targetLocale) {
+    return null;
   }
 
-  return nextPreference;
+  return props.subtitles.find((track) => normalizeLocale(track?.lang) === targetLocale) || null;
+}
+
+function resolvePrimarySubtitleControlState() {
+  if (hasAvailableSubtitleTracks.value) {
+    return {
+      enabled: true,
+      tooltip: primarySubtitleMenuTitle,
+      mode: 'ready',
+    };
+  }
+
+  if (props.subtitleCatalogStatus === 'loading') {
+    return {
+      enabled: true,
+      tooltip: '字幕載入中...',
+      mode: 'loading',
+    };
+  }
+
+  if (props.subtitleCatalogStatus === 'error') {
+    return {
+      enabled: true,
+      tooltip: '字幕載入失敗',
+      mode: 'error',
+    };
+  }
+
+  return {
+    enabled: false,
+    tooltip: '沒有可用字幕',
+    mode: props.subtitleCatalogStatus === 'idle' ? 'idle' : 'empty',
+  };
+}
+
+function updatePrimarySubtitleControl() {
+  if (!player) {
+    return;
+  }
+
+  player.primarySubtitleControlState_ = {
+    ...resolvePrimarySubtitleControlState(),
+    expanded: isPrimarySubtitleMenuOpen.value,
+  };
+  player.trigger(primarySubtitleControlStateEventName);
+}
+
+function updatePrimarySubtitleMenuPosition() {
+  const shellElement = playerShellRef.value;
+  const controlBar = player?.getChild?.('controlBar');
+  const buttonElement = controlBar?.getChild?.(primarySubtitleButtonComponentName)?.el?.();
+
+  if (!shellElement) {
+    return;
+  }
+
+  if (!buttonElement) {
+    primarySubtitleMenuPosition.value = {
+      bottom: 56,
+      right: 16,
+    };
+    return;
+  }
+
+  const shellRect = shellElement.getBoundingClientRect();
+  const buttonRect = buttonElement.getBoundingClientRect();
+
+  primarySubtitleMenuPosition.value = {
+    bottom: Math.max(56, shellRect.bottom - buttonRect.top + 8),
+    right: Math.max(12, shellRect.right - buttonRect.right),
+  };
+}
+
+function closePrimarySubtitleMenu() {
+  if (!isPrimarySubtitleMenuOpen.value) {
+    updatePrimarySubtitleControl();
+    return;
+  }
+
+  isPrimarySubtitleMenuOpen.value = false;
+  updatePrimarySubtitleControl();
+}
+
+function openPrimarySubtitleMenu() {
+  if (!resolvePrimarySubtitleControlState().enabled) {
+    return;
+  }
+
+  updatePrimarySubtitleMenuPosition();
+  isPrimarySubtitleMenuOpen.value = true;
+  updatePrimarySubtitleControl();
+  void nextTick(() => {
+    primarySubtitleMenuRef.value?.focus?.();
+  });
+}
+
+function togglePrimarySubtitleMenu() {
+  if (isPrimarySubtitleMenuOpen.value) {
+    closePrimarySubtitleMenu();
+    return;
+  }
+
+  openPrimarySubtitleMenu();
+}
+
+function selectPrimarySubtitle(lang) {
+  const subtitlePreference = resolveSubtitlePreference(props.subtitles);
+  const nextTrack = findSubtitleTrackByLanguage(lang);
+  const nextPrimaryLang = nextTrack?.lang || '';
+  const nextSelection = nextPrimaryLang
+    ? {
+        mode: 'showing',
+        primaryLang: nextPrimaryLang,
+        secondaryLang:
+          normalizeLocale(subtitlePreference.secondaryLang) === normalizeLocale(nextPrimaryLang)
+            ? ''
+            : subtitlePreference.secondaryLang,
+      }
+    : {
+        mode: 'off',
+        primaryLang: subtitlePreference.primaryLang,
+        secondaryLang: subtitlePreference.secondaryLang,
+      };
+
+  emit('subtitle-selection-change', nextSelection);
+  emit('status-update', formatSubtitleSelectionStatus(nextSelection));
+  closePrimarySubtitleMenu();
 }
 
 function getSubtitleTracks() {
@@ -269,33 +686,199 @@ function getSubtitleTrackLanguage(track) {
   return track?.language || track?.srclang || '';
 }
 
-function getActiveSubtitleLanguage() {
+function getActiveSubtitleLanguages() {
   const tracks = getSubtitleTracks();
-  if (!tracks) return '';
+  if (!tracks) return [];
+
+  const activeLanguages = [];
 
   for (let i = 0; i < tracks.length; i += 1) {
     const track = tracks[i];
     if (track.mode === 'showing') {
-      return getSubtitleTrackLanguage(track);
+      const language = getSubtitleTrackLanguage(track);
+      if (!language) {
+        continue;
+      }
+
+      if (activeLanguages.some((value) => normalizeLocale(value) === normalizeLocale(language))) {
+        continue;
+      }
+
+      activeLanguages.push(language);
     }
   }
 
-  return '';
+  return activeLanguages.slice(0, 2);
 }
 
-function setActiveSubtitleLanguage(activeLang = '') {
+function getOrderedActiveSubtitleLanguages(selection = props.subtitleSelection) {
+  const activeLanguages = getActiveSubtitleLanguages();
+  if (activeLanguages.length <= 1) {
+    return activeLanguages;
+  }
+
+  const orderedLanguages = [];
+  const activeLanguageMap = new Map(activeLanguages.map((language) => [normalizeLocale(language), language]));
+
+  getShowingSubtitleLanguages(selection).forEach((language) => {
+    const matchedLanguage = activeLanguageMap.get(normalizeLocale(language));
+    if (!matchedLanguage) {
+      return;
+    }
+
+    if (orderedLanguages.some((value) => normalizeLocale(value) === normalizeLocale(matchedLanguage))) {
+      return;
+    }
+
+    orderedLanguages.push(matchedLanguage);
+  });
+
+  activeLanguages.forEach((language) => {
+    if (orderedLanguages.some((value) => normalizeLocale(value) === normalizeLocale(language))) {
+      return;
+    }
+
+    orderedLanguages.push(language);
+  });
+
+  return orderedLanguages.slice(0, 2);
+}
+
+function getShowingSubtitleLanguages(selection = props.subtitleSelection) {
+  const target = typeof window !== 'undefined' ? window : null;
+  const subtitlePreference = reconcileSubtitlePreference(selection, props.subtitles, target?.navigator);
+
+  if (subtitlePreference.mode !== 'showing') {
+    return [];
+  }
+
+  const showingLanguages = [];
+  [subtitlePreference.primaryLang, subtitlePreference.secondaryLang].forEach((language) => {
+    if (!language) {
+      return;
+    }
+
+    if (showingLanguages.some((value) => normalizeLocale(value) === normalizeLocale(language))) {
+      return;
+    }
+
+    showingLanguages.push(language);
+  });
+
+  return showingLanguages;
+}
+
+function scheduleSubtitleCueRoleClassSync() {
+  if (!player || typeof window === 'undefined') {
+    return;
+  }
+
+  if (typeof window.requestAnimationFrame !== 'function') {
+    syncSubtitleCueRoleClasses();
+    return;
+  }
+
+  if (subtitleCueRoleSyncFrame) {
+    window.cancelAnimationFrame(subtitleCueRoleSyncFrame);
+  }
+
+  subtitleCueRoleSyncFrame = window.requestAnimationFrame(() => {
+    subtitleCueRoleSyncFrame = 0;
+    syncSubtitleCueRoleClasses();
+  });
+}
+
+function syncSubtitleCueRoleClasses() {
+  const playerElement = player?.el?.();
+  if (!playerElement) {
+    return;
+  }
+
+  const activeLanguages = getOrderedActiveSubtitleLanguages();
+  const primaryLang = normalizeLocale(activeLanguages[0]);
+  const secondaryLang = normalizeLocale(activeLanguages[1]);
+  const cueElements = playerElement.querySelectorAll('.vjs-text-track-cue');
+  const primaryCueElements = [];
+  const secondaryCueElements = [];
+
+  cueElements.forEach((cueElement) => {
+    cueElement.classList.remove(primarySubtitleCueClass, secondarySubtitleCueClass);
+    cueElement.style.removeProperty(secondarySubtitleOffsetCssVar);
+
+    const cueLang = normalizeLocale(cueElement.getAttribute('lang'));
+    if (!cueLang) {
+      return;
+    }
+
+    if (secondaryLang && cueLang === secondaryLang) {
+      cueElement.classList.add(secondarySubtitleCueClass);
+      secondaryCueElements.push(cueElement);
+      return;
+    }
+
+    if (primaryLang && cueLang === primaryLang) {
+      cueElement.classList.add(primarySubtitleCueClass);
+      primaryCueElements.push(cueElement);
+    }
+  });
+
+  syncSecondaryCueOffsets(primaryCueElements, secondaryCueElements);
+}
+
+function syncSecondaryCueOffsets(primaryCueElements, secondaryCueElements) {
+  if (primaryCueElements.length === 0 || secondaryCueElements.length === 0) {
+    return;
+  }
+
+  const primaryRects = primaryCueElements
+    .map((cueElement) => cueElement.getBoundingClientRect())
+    .sort((left, right) => left.top - right.top);
+
+  secondaryCueElements.forEach((cueElement) => {
+    const secondaryRect = cueElement.getBoundingClientRect();
+    let closestGap = Number.POSITIVE_INFINITY;
+
+    primaryRects.forEach((primaryRect) => {
+      const gap = primaryRect.top - secondaryRect.bottom;
+      if (gap < 0 || gap >= closestGap) {
+        return;
+      }
+
+      closestGap = gap;
+    });
+
+    if (!Number.isFinite(closestGap) || closestGap <= 0) {
+      return;
+    }
+
+    cueElement.style.setProperty(secondarySubtitleOffsetCssVar, `${closestGap}px`);
+  });
+}
+
+function setActiveSubtitleLanguages(selection = props.subtitleSelection) {
   const tracks = getSubtitleTracks();
   if (!tracks || tracks.length === 0) return false;
 
-  let matched = activeLang === '';
+  const targetLanguages = getShowingSubtitleLanguages(selection);
+  const targetLanguageSet = new Set(targetLanguages.map((language) => normalizeLocale(language)));
+  const targetPrimaryLang = normalizeLocale(targetLanguages[0]);
+  const targetSecondaryLang = normalizeLocale(targetLanguages[1]);
+  let matchedPrimary = targetLanguages.length === 0;
+  let matchedSecondary = !targetSecondaryLang;
   isApplyingSubtitlePreference = true;
 
   try {
     for (let i = 0; i < tracks.length; i += 1) {
       const track = tracks[i];
-      const shouldShow = Boolean(activeLang) && getSubtitleTrackLanguage(track) === activeLang;
+      const trackLanguage = normalizeLocale(getSubtitleTrackLanguage(track));
+      const shouldShow = Boolean(trackLanguage) && targetLanguageSet.has(trackLanguage);
       if (shouldShow) {
-        matched = true;
+        if (trackLanguage === targetPrimaryLang) {
+          matchedPrimary = true;
+        }
+        if (trackLanguage === targetSecondaryLang) {
+          matchedSecondary = true;
+        }
       }
       track.mode = shouldShow ? 'showing' : 'disabled';
     }
@@ -303,7 +886,8 @@ function setActiveSubtitleLanguage(activeLang = '') {
     isApplyingSubtitlePreference = false;
   }
 
-  return matched;
+  scheduleSubtitleCueRoleClassSync();
+  return matchedPrimary && matchedSecondary;
 }
 
 function subtitleLabelForLanguage(lang) {
@@ -312,6 +896,62 @@ function subtitleLabelForLanguage(lang) {
     : null;
 
   return matchedSubtitle?.label || lang || '字幕';
+}
+
+function formatSubtitleSelectionStatus(selection) {
+  if (selection.mode !== 'showing') {
+    return '字幕已關閉';
+  }
+
+  const labels = getShowingSubtitleLanguages(selection).map((language) => subtitleLabelForLanguage(language));
+  return labels.length > 0 ? `字幕已開啟：${labels.join(' / ')}` : '字幕已關閉';
+}
+
+function canSwapSubtitleRoles(selection = props.subtitleSelection) {
+  const subtitlePreference = resolveSubtitlePreference(props.subtitles);
+  const target = typeof window !== 'undefined' ? window : null;
+  const targetSelection =
+    selection === props.subtitleSelection
+      ? subtitlePreference
+      : reconcileSubtitlePreference(selection, props.subtitles, target?.navigator);
+
+  return (
+    targetSelection.mode === 'showing' &&
+    Boolean(targetSelection.primaryLang) &&
+    Boolean(targetSelection.secondaryLang)
+  );
+}
+
+function updateDualSubtitleSwapControl(selection = props.subtitleSelection) {
+  if (!player) {
+    return;
+  }
+
+  const canSwapRoles = canSwapSubtitleRoles(selection);
+  const nextState = {
+    visible: canSwapRoles,
+    enabled: canSwapRoles,
+  };
+
+  player.dualSubtitleSwapState_ = nextState;
+  player.trigger(dualSubtitleSwapStateEventName);
+}
+
+function swapSubtitleRoles() {
+  if (!canSwapSubtitleRoles(props.subtitleSelection)) {
+    return false;
+  }
+
+  const subtitlePreference = resolveSubtitlePreference(props.subtitles);
+  const nextPreference = {
+    mode: 'showing',
+    primaryLang: subtitlePreference.secondaryLang,
+    secondaryLang: subtitlePreference.primaryLang,
+  };
+
+  emit('subtitle-selection-change', nextPreference);
+  emit('status-update', formatSubtitleSelectionStatus(nextPreference));
+  return true;
 }
 
 function toggleSubtitleVisibility() {
@@ -323,23 +963,19 @@ function toggleSubtitleVisibility() {
 
   const target = typeof window !== 'undefined' ? window : null;
   const nextPreference = resolveToggledSubtitlePreference(
-    readStoredSubtitlePreference(target),
+    props.subtitleSelection,
     props.subtitles,
     target?.navigator,
-    getActiveSubtitleLanguage()
+    getOrderedActiveSubtitleLanguages()
   );
-  const nextLang = nextPreference.mode === 'showing' ? nextPreference.lang : '';
 
-  if (!setActiveSubtitleLanguage(nextLang)) {
+  if (!setActiveSubtitleLanguages(nextPreference)) {
     return false;
   }
 
-  persistSubtitlePreference(nextPreference, target);
-
-  emit(
-    'status-update',
-    nextPreference.mode === 'showing' ? `字幕已開啟：${subtitleLabelForLanguage(nextLang)}` : '字幕已關閉'
-  );
+  emit('subtitle-selection-change', nextPreference);
+  emit('status-update', formatSubtitleSelectionStatus(nextPreference));
+  updatePrimarySubtitleControl();
 
   return true;
 }
@@ -347,11 +983,84 @@ function toggleSubtitleVisibility() {
 function openHotkeyHelp() {
   if (isHotkeyHelpOpen.value) return;
 
+  closePrimarySubtitleMenu();
   lastFocusedElement = typeof document !== 'undefined' ? document.activeElement : null;
   isHotkeyHelpOpen.value = true;
   void nextTick(() => {
     hotkeyHelpDialogRef.value?.focus?.();
   });
+}
+
+function ensureDualSubtitleSwapControl() {
+  if (!player) {
+    return;
+  }
+
+  registerDualSubtitleSwapButton();
+  player.dualSubtitleSwapAction_ = swapSubtitleRoles;
+
+  const controlBar = player.getChild('controlBar');
+  if (!controlBar) {
+    return;
+  }
+
+  if (!controlBar.getChild(dualSubtitleSwapButtonComponentName)) {
+    const children = typeof controlBar.children === 'function' ? controlBar.children() : [];
+    const subtitleButtonIndex = children.findIndex((child) =>
+      [primarySubtitleButtonComponentName, 'SubsCapsButton'].includes(String(child?.name?.() || ''))
+    );
+    const insertIndex = subtitleButtonIndex >= 0 ? subtitleButtonIndex + 1 : children.length;
+    controlBar.addChild(dualSubtitleSwapButtonComponentName, {}, insertIndex);
+  }
+
+  updateDualSubtitleSwapControl();
+}
+
+function ensurePrimarySubtitleControl() {
+  if (!player) {
+    return;
+  }
+
+  registerPrimarySubtitleControlButton();
+  player.primarySubtitleMenuToggle_ = togglePrimarySubtitleMenu;
+
+  const controlBar = player.getChild('controlBar');
+  if (!controlBar) {
+    return;
+  }
+
+  if (!controlBar.getChild(primarySubtitleButtonComponentName)) {
+    const children = typeof controlBar.children === 'function' ? controlBar.children() : [];
+    const defaultSubtitleButton = controlBar.getChild('SubsCapsButton');
+    const subtitleButtonIndex = children.findIndex((child) => String(child?.name?.() || '') === 'SubsCapsButton');
+    const fallbackInsertIndex = children.findIndex((child) =>
+      primarySubtitleControlInsertBefore.includes(String(child?.name?.() || ''))
+    );
+
+    if (defaultSubtitleButton) {
+      controlBar.removeChild(defaultSubtitleButton);
+      defaultSubtitleButton.dispose?.();
+    }
+
+    const insertIndex =
+      subtitleButtonIndex >= 0
+        ? subtitleButtonIndex
+        : fallbackInsertIndex >= 0
+          ? fallbackInsertIndex
+          : children.length;
+    if (videojs.getComponent(primarySubtitleButtonComponentName)) {
+      controlBar.addChild(
+        primarySubtitleButtonComponentName,
+        {
+          name: primarySubtitleButtonComponentName,
+          title: primarySubtitleMenuTitle,
+        },
+        insertIndex
+      );
+    }
+  }
+
+  updatePrimarySubtitleControl();
 }
 
 function closeHotkeyHelp() {
@@ -516,6 +1225,7 @@ async function resumePlaybackIfNeeded() {
 function beginSourceSwitch() {
   if (!player) return 0;
 
+  closePrimarySubtitleMenu();
   const seq = ++sourceSeq;
   resetStartupGate(seq);
   isSwitchingSource = true;
@@ -547,6 +1257,73 @@ function bindSubtitleTrackChangeListener() {
   textTrackList.addEventListener('change', handleSubtitleTrackChange);
 }
 
+function orderSubtitleTracksForDisplay(subtitles, selection = props.subtitleSelection) {
+  if (!Array.isArray(subtitles) || subtitles.length <= 1) {
+    return Array.isArray(subtitles) ? subtitles : [];
+  }
+
+  const preferredLanguages = getShowingSubtitleLanguages(selection).map((language) => normalizeLocale(language));
+  if (preferredLanguages.length === 0) {
+    return subtitles;
+  }
+
+  const preferredOrder = new Map(preferredLanguages.map((language, index) => [language, index]));
+
+  return subtitles
+    .map((subtitle, index) => ({ subtitle, index }))
+    .sort((left, right) => {
+      const leftLang = normalizeLocale(left.subtitle?.lang);
+      const rightLang = normalizeLocale(right.subtitle?.lang);
+      const leftPreferred = preferredOrder.has(leftLang) ? preferredOrder.get(leftLang) : Number.MAX_SAFE_INTEGER;
+      const rightPreferred = preferredOrder.has(rightLang) ? preferredOrder.get(rightLang) : Number.MAX_SAFE_INTEGER;
+
+      if (leftPreferred !== rightPreferred) {
+        return leftPreferred - rightPreferred;
+      }
+
+      const leftOrder = Number.isFinite(Number(left.subtitle?.order)) ? Number(left.subtitle.order) : left.index;
+      const rightOrder = Number.isFinite(Number(right.subtitle?.order)) ? Number(right.subtitle.order) : right.index;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.subtitle);
+}
+
+function hasPreferredShowingTrackOrder(selection = props.subtitleSelection) {
+  const preferredLanguages = getShowingSubtitleLanguages(selection).map((language) => normalizeLocale(language));
+  if (preferredLanguages.length <= 1) {
+    return true;
+  }
+
+  const tracks = getSubtitleTracks();
+  if (!tracks || tracks.length === 0) {
+    return false;
+  }
+
+  const currentShowingOrder = [];
+  for (let i = 0; i < tracks.length; i += 1) {
+    const language = normalizeLocale(getSubtitleTrackLanguage(tracks[i]));
+    if (!language || !preferredLanguages.includes(language)) {
+      continue;
+    }
+
+    if (currentShowingOrder.includes(language)) {
+      continue;
+    }
+
+    currentShowingOrder.push(language);
+  }
+
+  if (currentShowingOrder.length < preferredLanguages.length) {
+    return false;
+  }
+
+  return preferredLanguages.every((language, index) => currentShowingOrder[index] === language);
+}
+
 function applySubtitleTracks(subtitles, seq = sourceSeq) {
   if (!player || seq !== sourceSeq) return;
 
@@ -560,9 +1337,11 @@ function applySubtitleTracks(subtitles, seq = sourceSeq) {
   }
 
   const subtitlePreference = resolveSubtitlePreference(subtitles);
+  const showingLanguages = new Set(getShowingSubtitleLanguages(subtitlePreference).map((language) => normalizeLocale(language)));
+  const orderedSubtitles = orderSubtitleTracksForDisplay(subtitles, subtitlePreference);
 
-  subtitles.forEach((sub) => {
-    const shouldShow = subtitlePreference.mode === 'showing' && sub.lang === subtitlePreference.lang;
+  orderedSubtitles.forEach((sub) => {
+    const shouldShow = showingLanguages.has(normalizeLocale(sub.lang));
     const trackEl = player.addRemoteTextTrack(
       {
         kind: 'captions',
@@ -579,6 +1358,8 @@ function applySubtitleTracks(subtitles, seq = sourceSeq) {
   });
 
   isApplyingSubtitlePreference = false;
+  updatePrimarySubtitleControl();
+  scheduleSubtitleCueRoleClassSync();
 }
 
 async function setupSourceAndTracks(m3u8Url, subtitles) {
@@ -672,21 +1453,24 @@ function clearTracks() {
 }
 
 function handleSubtitleTrackChange() {
-  if (!player || isApplyingSubtitlePreference) return;
+  if (!player) return;
+  if (isApplyingSubtitlePreference) {
+    scheduleSubtitleCueRoleClassSync();
+    return;
+  }
 
-  const activeLang = getActiveSubtitleLanguage();
+  const activeLanguages = getOrderedActiveSubtitleLanguages();
   const target = typeof window !== 'undefined' ? window : null;
-  const currentPreference = readStoredSubtitlePreference(target);
-  const nextPreference = reconcileSubtitlePreference(
-    {
-      mode: activeLang ? 'showing' : 'off',
-      lang: activeLang || currentPreference.lang,
-    },
+  const nextPreference = resolvePlayerControlledSubtitlePreference(
+    props.subtitleSelection,
     props.subtitles,
-    target?.navigator
+    target?.navigator,
+    activeLanguages
   );
 
-  persistSubtitlePreference(nextPreference, target);
+  emit('subtitle-selection-change', nextPreference);
+  emit('status-update', formatSubtitleSelectionStatus(nextPreference));
+  scheduleSubtitleCueRoleClassSync();
 }
 
 function syncStartTime(startTime) {
@@ -710,6 +1494,14 @@ function syncStartTime(startTime) {
 
 function handleGlobalKeydown(event) {
   if (showStartupGate.value) {
+    return;
+  }
+
+  if (isPrimarySubtitleMenuOpen.value) {
+    if (isEscapeKey(event)) {
+      event.preventDefault?.();
+      closePrimarySubtitleMenu();
+    }
     return;
   }
 
@@ -805,6 +1597,8 @@ function syncPoster(posterUrl) {
 function initPlayer() {
   if (!videoRef.value) return;
 
+  registerPrimarySubtitleControlButton();
+  registerDualSubtitleSwapButton();
   player = videojs(
     videoRef.value,
     {
@@ -812,6 +1606,12 @@ function initPlayer() {
       controls: true,
       responsive: true,
       fluid: true,
+      controlBar: {
+        subsCapsButton: false,
+      },
+      textTrackDisplay: {
+        allowMultipleShowingTracks: true,
+      },
       html5: {
         vhs: {
           overrideNative: true,
@@ -828,6 +1628,22 @@ function initPlayer() {
     () => {
       bindPlaybackSnapshotListeners();
       bindStartupGateListeners();
+      player.on('texttrackchange', scheduleSubtitleCueRoleClassSync);
+      player.on('playerresize', () => {
+        scheduleSubtitleCueRoleClassSync();
+        if (isPrimarySubtitleMenuOpen.value) {
+          updatePrimarySubtitleMenuPosition();
+        }
+      });
+      player.on('fullscreenchange', () => {
+        scheduleSubtitleCueRoleClassSync();
+        if (isPrimarySubtitleMenuOpen.value) {
+          updatePrimarySubtitleMenuPosition();
+        }
+      });
+      ensurePrimarySubtitleControl();
+      ensureDualSubtitleSwapControl();
+      updatePrimarySubtitleControl();
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
@@ -874,9 +1690,54 @@ watch(
   (newSubtitles) => {
     if (!player || !props.m3u8Url) return;
     applySubtitleTracks(newSubtitles);
+    updatePrimarySubtitleControl();
+    updateDualSubtitleSwapControl();
   },
   { deep: true }
 );
+
+watch(
+  () => [
+    props.subtitleSelection?.mode,
+    props.subtitleSelection?.primaryLang,
+    props.subtitleSelection?.secondaryLang,
+  ],
+  () => {
+    if (!player || !props.m3u8Url) return;
+    if (!hasPreferredShowingTrackOrder(props.subtitleSelection)) {
+      applySubtitleTracks(props.subtitles);
+      updatePrimarySubtitleControl();
+      updateDualSubtitleSwapControl(props.subtitleSelection);
+      return;
+    }
+
+    setActiveSubtitleLanguages(props.subtitleSelection);
+    updatePrimarySubtitleControl();
+    updateDualSubtitleSwapControl(props.subtitleSelection);
+  }
+);
+
+watch(
+  () => [props.subtitleCatalogStatus, props.cid, props.m3u8Url],
+  () => {
+    if (!player) return;
+    if (!props.m3u8Url || !props.cid) {
+      closePrimarySubtitleMenu();
+    }
+    updatePrimarySubtitleControl();
+  }
+);
+
+watch(isPrimarySubtitleMenuOpen, async (isOpen) => {
+  updatePrimarySubtitleControl();
+  if (!isOpen) {
+    return;
+  }
+
+  await nextTick();
+  updatePrimarySubtitleMenuPosition();
+  primarySubtitleMenuRef.value?.focus?.();
+});
 
 watch(
   () => props.posterUrl,
@@ -887,11 +1748,19 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  if (subtitleCueRoleSyncFrame && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(subtitleCueRoleSyncFrame);
+    subtitleCueRoleSyncFrame = 0;
+  }
   if (textTrackList) {
     textTrackList.removeEventListener('change', handleSubtitleTrackChange);
     textTrackList = null;
   }
   if (player) {
+    player.dualSubtitleSwapAction_ = null;
+    player.dualSubtitleSwapState_ = null;
+    player.primarySubtitleMenuToggle_ = null;
+    player.primarySubtitleControlState_ = null;
     emitPlaybackSnapshot('before-unmount', { force: true });
     player.dispose();
   }
@@ -908,6 +1777,185 @@ onBeforeUnmount(() => {
 .video-player-shell [data-vjs-player] {
   width: 100%;
   height: 100%;
+}
+
+.video-player-shell .vjs-text-track-cue--secondary {
+  opacity: 0.92;
+  transform: translateY(var(--dual-subtitle-offset-y, 0px)) scale(0.76);
+  transform-origin: center bottom;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-icon-placeholder {
+  display: none;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25em;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.video-player-shell .vjs-primary-subtitle-button.vjs-primary-subtitle-button--active {
+  color: #b9e7ff;
+}
+
+.primary-subtitle-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+
+.primary-subtitle-menu {
+  position: absolute;
+  min-width: min(320px, calc(100% - 24px));
+  max-width: min(360px, calc(100% - 24px));
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(12, 15, 26, 0.96);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+}
+
+.primary-subtitle-menu-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.primary-subtitle-menu-title {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #b9e7ff;
+}
+
+.primary-subtitle-menu-hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.primary-subtitle-menu-status {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.88rem;
+}
+
+.primary-subtitle-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.primary-subtitle-menu-item {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f5f7ff;
+  padding: 11px 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.primary-subtitle-menu-item:hover:not(:disabled) {
+  border-color: rgba(185, 231, 255, 0.28);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.primary-subtitle-menu-item:disabled {
+  cursor: not-allowed;
+}
+
+.primary-subtitle-menu-item--selected {
+  border-color: rgba(185, 231, 255, 0.42);
+  background: rgba(84, 165, 255, 0.12);
+}
+
+.primary-subtitle-menu-item--secondary {
+  opacity: 0.72;
+}
+
+.primary-subtitle-menu-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.primary-subtitle-menu-item-label {
+  font-weight: 600;
+}
+
+.primary-subtitle-menu-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.primary-subtitle-menu-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.primary-subtitle-menu-badge--primary {
+  background: rgba(84, 165, 255, 0.18);
+  color: #b9e7ff;
+}
+
+.primary-subtitle-menu-badge--secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.primary-subtitle-menu-badge--local {
+  background: rgba(117, 255, 204, 0.14);
+  color: #8af0cf;
+}
+
+.primary-subtitle-menu-item-detail {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.video-player-shell .vjs-dual-subtitle-swap-button {
+  min-width: 42px;
+}
+
+.video-player-shell .vjs-dual-subtitle-swap-button .vjs-icon-placeholder {
+  display: none;
+}
+
+.video-player-shell .vjs-dual-subtitle-swap-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .startup-gate {

@@ -5,15 +5,18 @@ import {
   createImportedSubtitleTrack,
   createDefaultSubtitlePreference,
   downloadSubtitleTrack,
+  fetchSubtitleCatalog,
   fetchSubtitleManifest,
   mergeSubtitleTracks,
   normalizeSubtitleManifest,
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
+  resolvePlayerControlledSubtitlePreference,
   resolveToggledSubtitlePreference,
   revokeImportedSubtitleTracks,
   resolveSubtitleTracks,
+  subtitleCatalogStatus,
   subtitleManifestFileName,
 } from './subtitles';
 
@@ -87,7 +90,8 @@ describe('createDefaultSubtitlePreference', () => {
   it('defaults to off without a selected language', () => {
     expect(createDefaultSubtitlePreference()).toEqual({
       mode: 'off',
-      lang: '',
+      primaryLang: '',
+      secondaryLang: '',
     });
   });
 });
@@ -107,6 +111,50 @@ describe('normalizeSubtitleManifest', () => {
       { lang: 'en', label: 'English', path: 'en.vtt', order: 0 },
       { lang: 'zh-TW', label: '中文字幕', path: 'zh-TW.vtt', order: 5 },
     ]);
+  });
+});
+
+describe('fetchSubtitleCatalog', () => {
+  it('returns ready status with normalized tracks for a valid manifest', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: createHeaders({ 'content-type': 'application/json' }),
+      json: vi.fn().mockResolvedValue({
+        version: 1,
+        tracks: [{ lang: 'en', path: 'en.vtt' }],
+      }),
+    });
+
+    await expect(fetchSubtitleCatalog('https://example.com/ipfs/bafy123', { fetchImpl })).resolves.toEqual({
+      status: subtitleCatalogStatus.ready,
+      tracks: [{ lang: 'en', label: 'English', path: 'en.vtt', order: 0 }],
+    });
+  });
+
+  it('treats a missing manifest as ready with no tracks', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: createHeaders(),
+    });
+
+    await expect(fetchSubtitleCatalog('https://example.com/ipfs/bafy123', { fetchImpl })).resolves.toEqual({
+      status: subtitleCatalogStatus.ready,
+      tracks: [],
+    });
+  });
+
+  it('returns error when the gateway responds with html', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: createHeaders({ 'content-type': 'text/html; charset=utf-8' }),
+      json: vi.fn(),
+    });
+
+    await expect(fetchSubtitleCatalog('https://example.com/ipfs/bafy123', { fetchImpl })).resolves.toEqual({
+      status: subtitleCatalogStatus.error,
+      tracks: [],
+    });
   });
 });
 
@@ -359,14 +407,27 @@ describe('downloadSubtitleTrack', () => {
 });
 
 describe('subtitle preference storage', () => {
-  it('stores and reads subtitle mode and language', () => {
+  it('stores and reads subtitle mode and primary/secondary language', () => {
     const storage = createStorage();
 
-    persistSubtitlePreference({ mode: 'showing', lang: 'zh-TW' }, storage);
+    persistSubtitlePreference({ mode: 'showing', primaryLang: 'zh-TW', secondaryLang: 'en' }, storage);
 
     expect(readStoredSubtitlePreference(storage)).toEqual({
       mode: 'showing',
-      lang: 'zh-TW',
+      primaryLang: 'zh-TW',
+      secondaryLang: 'en',
+    });
+  });
+
+  it('keeps backward compatibility with the legacy single-language payload', () => {
+    const storage = createStorage();
+
+    storage.setItem('ipfs-hls-subtitle-preference', JSON.stringify({ mode: 'showing', lang: 'ja' }));
+
+    expect(readStoredSubtitlePreference(storage)).toEqual({
+      mode: 'showing',
+      primaryLang: 'ja',
+      secondaryLang: '',
     });
   });
 });
@@ -393,20 +454,36 @@ describe('reconcileSubtitlePreference', () => {
       )
     ).toEqual({
       mode: 'off',
-      lang: 'zh-TW',
+      primaryLang: 'zh-TW',
+      secondaryLang: '',
     });
   });
 
   it('falls back to browser language when a stored track is missing', () => {
     expect(
       reconcileSubtitlePreference(
-        { mode: 'showing', lang: 'ja' },
+        { mode: 'showing', primaryLang: 'ja', secondaryLang: 'zh-TW' },
         [{ lang: 'en' }, { lang: 'zh-TW' }],
         { languages: ['en-US'] }
       )
     ).toEqual({
       mode: 'showing',
-      lang: 'en',
+      primaryLang: 'en',
+      secondaryLang: 'zh-TW',
+    });
+  });
+
+  it('drops the secondary language when it collides with the primary one', () => {
+    expect(
+      reconcileSubtitlePreference(
+        { mode: 'showing', primaryLang: 'en', secondaryLang: 'en-US' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }],
+        { languages: ['zh-TW'] }
+      )
+    ).toEqual({
+      mode: 'showing',
+      primaryLang: 'en',
+      secondaryLang: '',
     });
   });
 });
@@ -421,21 +498,55 @@ describe('resolveToggledSubtitlePreference', () => {
       )
     ).toEqual({
       mode: 'showing',
-      lang: 'zh-TW',
+      primaryLang: 'zh-TW',
+      secondaryLang: '',
     });
   });
 
-  it('turns subtitles off while preserving the active language', () => {
+  it('turns subtitles off while preserving active primary/secondary languages', () => {
     expect(
       resolveToggledSubtitlePreference(
-        { mode: 'showing', lang: 'en' },
-        [{ lang: 'en' }, { lang: 'zh-TW' }],
+        { mode: 'showing', primaryLang: 'en', secondaryLang: 'zh-TW' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }, { lang: 'ja' }],
         { languages: ['zh-TW'] },
-        'en-US'
+        ['en-US', 'zh-HK']
       )
     ).toEqual({
       mode: 'off',
-      lang: 'en',
+      primaryLang: 'en',
+      secondaryLang: 'zh-TW',
+    });
+  });
+});
+
+describe('resolvePlayerControlledSubtitlePreference', () => {
+  it('treats a player menu selection as the next primary subtitle while preserving the configured secondary subtitle', () => {
+    expect(
+      resolvePlayerControlledSubtitlePreference(
+        { mode: 'showing', primaryLang: 'en', secondaryLang: 'zh-TW' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }, { lang: 'ja' }],
+        { languages: ['ja'] },
+        ['ja']
+      )
+    ).toEqual({
+      mode: 'showing',
+      primaryLang: 'ja',
+      secondaryLang: 'zh-TW',
+    });
+  });
+
+  it('clears the secondary subtitle when the player menu selects the same language as the secondary track', () => {
+    expect(
+      resolvePlayerControlledSubtitlePreference(
+        { mode: 'showing', primaryLang: 'en', secondaryLang: 'zh-TW' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }, { lang: 'ja' }],
+        { languages: ['ja'] },
+        ['zh-HK']
+      )
+    ).toEqual({
+      mode: 'showing',
+      primaryLang: 'zh-TW',
+      secondaryLang: '',
     });
   });
 });
