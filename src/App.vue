@@ -8,6 +8,7 @@ import RecommendationsPage from './components/RecommendationsPage.vue';
 import {
   buildGatewayAssetUrl,
   defaultPublicGateway,
+  getDefaultGateway,
   isLoopbackGatewayUrl,
   normalizeGatewayUrl,
   persistGateway,
@@ -31,7 +32,7 @@ import {
 } from './utils/history';
 
 const allowPrivateGateways = import.meta.env.DEV;
-const DEFAULT_GATEWAY = defaultPublicGateway;
+const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
 const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
