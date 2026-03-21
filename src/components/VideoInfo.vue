@@ -32,6 +32,9 @@ const descriptionMeasureRef = ref(null);
 const descriptionMeasureTextRef = ref(null);
 const infoRowRef = ref(null);
 const creatorInfoRef = ref(null);
+const avatarRef = ref(null);
+const creatorTextMeasureRef = ref(null);
+const subscribeButtonRef = ref(null);
 const actionsRef = ref(null);
 const actionGroupRef = ref(null);
 const shareMeasureRef = ref(null);
@@ -39,6 +42,11 @@ const moreMenuRef = ref(null);
 const hiddenActionIds = ref([]);
 const actionsWrapped = ref(false);
 const isMoreMenuOpen = ref(false);
+const creatorTextHidden = ref(false);
+let layoutObserver = null;
+let layoutFrame = 0;
+let syncInProgress = false;
+let syncPending = false;
 
 const shareActionId = 'share';
 const downloadActionId = 'download';
@@ -124,6 +132,7 @@ watch(
     isDescriptionExpanded.value = false;
     isMoreMenuOpen.value = false;
     void updateCollapsedDescription();
+    scheduleActionLayoutSync();
   },
   { immediate: true }
 );
@@ -136,10 +145,9 @@ watch(
   { immediate: true }
 );
 
-let layoutObserver = null;
-let layoutFrame = 0;
-let syncInProgress = false;
-let syncPending = false;
+watch([displayUploader, displayChannelText], () => {
+  scheduleActionLayoutSync();
+});
 
 function scheduleActionLayoutSync() {
   if (typeof window === 'undefined') return;
@@ -157,6 +165,13 @@ function scheduleActionLayoutSync() {
 function getElementWidth(element) {
   if (!element) return 0;
   return element.getBoundingClientRect().width;
+}
+
+function getElementMarginLeft(element) {
+  if (!element || typeof window === 'undefined') return 0;
+
+  const styles = window.getComputedStyle(element);
+  return Number.parseFloat(styles.marginLeft || '0') || 0;
 }
 
 function getFlexGap(element) {
@@ -181,6 +196,11 @@ function areActionIdsEqual(currentIds, nextIds) {
 function resolveLayout() {
   const infoRowWidth = getElementWidth(infoRowRef.value);
   const creatorWidth = getElementWidth(creatorInfoRef.value);
+  const avatarWidth = getElementWidth(avatarRef.value);
+  const creatorTextWidth = getElementWidth(creatorTextMeasureRef.value);
+  const subscribeButtonWidth = getElementWidth(subscribeButtonRef.value);
+  const subscribeButtonMarginLeft = getElementMarginLeft(subscribeButtonRef.value);
+  const creatorGap = getFlexGap(creatorInfoRef.value);
   const actionGroupWidth = getElementWidth(actionGroupRef.value);
   const moreActionsWidth = getElementWidth(moreMenuRef.value);
   const shareWidth = getElementWidth(shareMeasureRef.value);
@@ -188,10 +208,24 @@ function resolveLayout() {
   const actionsGap = getFlexGap(actionsRef.value);
 
   if (!infoRowWidth || !creatorWidth || !actionGroupWidth || !moreActionsWidth) {
-    return { hiddenActionIds: hiddenActionIds.value, actionsWrapped: actionsWrapped.value };
+    return {
+      hiddenActionIds: hiddenActionIds.value,
+      actionsWrapped: actionsWrapped.value,
+      creatorTextHidden: creatorTextHidden.value,
+    };
   }
 
-  const availableActionsWidth = Math.max(0, infoRowWidth - creatorWidth - infoGap);
+  const fullCreatorWidth =
+    avatarWidth && creatorTextWidth && subscribeButtonWidth
+      ? sumWidthsWithGap([avatarWidth, creatorTextWidth, subscribeButtonWidth], creatorGap) + subscribeButtonMarginLeft
+      : creatorWidth;
+  const compactCreatorWidth =
+    avatarWidth && subscribeButtonWidth
+      ? sumWidthsWithGap([avatarWidth, subscribeButtonWidth], creatorGap)
+      : creatorWidth;
+  const nextCreatorTextHidden = fullCreatorWidth > infoRowWidth + 1;
+  const nextCreatorWidth = nextCreatorTextHidden ? compactCreatorWidth : fullCreatorWidth;
+  const availableActionsWidth = Math.max(0, infoRowWidth - nextCreatorWidth - infoGap);
   const visibleActionWidths = [actionGroupWidth];
   const nextHiddenActionIds = [];
 
@@ -218,7 +252,11 @@ function resolveLayout() {
 
   const isWrapped = totalVisibleWidth > availableActionsWidth + 1;
 
-  return { hiddenActionIds: nextHiddenActionIds, actionsWrapped: isWrapped };
+  return {
+    hiddenActionIds: nextHiddenActionIds,
+    actionsWrapped: isWrapped,
+    creatorTextHidden: nextCreatorTextHidden,
+  };
 }
 
 async function syncActionLayout() {
@@ -243,10 +281,15 @@ async function syncActionLayout() {
     layoutChanged = true;
   }
 
+  if (creatorTextHidden.value !== layout.creatorTextHidden) {
+    creatorTextHidden.value = layout.creatorTextHidden;
+    layoutChanged = true;
+  }
+
   if (layoutChanged) {
     await nextTick();
   }
-  
+
   syncInProgress = false;
 
   if (syncPending) {
@@ -561,15 +604,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="video-info" data-testid="video-info">
     <div ref="infoRowRef" class="info-row" data-testid="video-info-row">
-      <div ref="creatorInfoRef" class="creator-info" data-testid="video-info-creator">
-        <div class="avatar">
+      <div
+        ref="creatorInfoRef"
+        class="creator-info"
+        :class="{ 'creator-info-compact': creatorTextHidden }"
+        data-testid="video-info-creator"
+      >
+        <div ref="avatarRef" class="avatar" data-testid="video-info-avatar">
           <img :src="avatarUrl" :alt="displayUploader" @error="handleAvatarError" />
         </div>
-        <div class="creator-text">
+        <div v-if="!creatorTextHidden" class="creator-text" data-testid="video-info-creator-text">
           <div class="creator-name">{{ displayUploader }} <svg viewBox="0 0 24 24" width="16" height="16" class="verified"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div>
           <div class="subscribers">{{ displayChannelText }}</div>
         </div>
-        <button type="button" class="subscribe-btn glass-btn">Follow</button>
+        <button ref="subscribeButtonRef" type="button" class="subscribe-btn glass-btn" data-testid="video-info-follow-button">Follow</button>
       </div>
 
       <div ref="actionsRef" class="actions" :class="{ 'actions-wrapped': actionsWrapped }" data-testid="video-info-actions">
@@ -711,6 +759,11 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <div ref="creatorTextMeasureRef" class="creator-text creator-text-measure" aria-hidden="true">
+      <div class="creator-name">{{ displayUploader }} <svg viewBox="0 0 24 24" width="16" height="16" class="verified"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div>
+      <div class="subscribers">{{ displayChannelText }}</div>
+    </div>
   </div>
 </template>
 
@@ -719,6 +772,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
 }
 
 .info-row {
@@ -755,6 +809,14 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.creator-text-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  left: -9999px;
+  top: 0;
 }
 
 .creator-name {
@@ -802,6 +864,10 @@ onBeforeUnmount(() => {
   background: rgba(0, 210, 255, 0.1);
   color: var(--accent-cyan);
   border-color: rgba(0, 210, 255, 0.3);
+}
+
+.creator-info-compact .subscribe-btn {
+  margin-left: 0;
 }
 
 .subscribe-btn:hover {
@@ -878,6 +944,7 @@ onBeforeUnmount(() => {
   top: calc(100% + 10px);
   right: 0;
   min-width: 180px;
+  border-radius: 20px;
   padding: 8px;
   display: flex;
   flex-direction: column;
