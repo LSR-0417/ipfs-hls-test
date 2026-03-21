@@ -57,6 +57,7 @@ function handleLevelsLoaded(levels) {
       :m3u8-url="m3u8Url"
       :poster-url="posterUrl"
       :subtitles="subtitles"
+      :frame-rate="videoInfo.fps"
       :start-time="startTime"
       :should-autoplay="shouldAutoplay"
       @status-update="handleStatusUpdate"

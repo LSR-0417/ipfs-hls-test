@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   applyPlaybackHotkey,
   clampSeekTime,
@@ -148,61 +148,89 @@ describe('shouldIgnorePlaybackHotkey', () => {
 });
 
 describe('getPlaybackHotkeyAction', () => {
-  it('maps left and right arrows to seek actions', () => {
-    expect(
-      getPlaybackHotkeyAction({
-        key: 'ArrowLeft',
-        target: { tagName: 'DIV', closest: () => null },
-      })
-    ).toEqual({ type: 'seek', deltaSeconds: -5 });
+  function target() {
+    return { tagName: 'DIV', closest: () => null };
+  }
 
-    expect(
-      getPlaybackHotkeyAction({
-        key: 'ArrowRight',
-        target: { tagName: 'DIV', closest: () => null },
-      })
-    ).toEqual({ type: 'seek', deltaSeconds: 5 });
+  it('maps seek hotkeys for arrows and j/l', () => {
+    expect(getPlaybackHotkeyAction({ key: 'ArrowLeft', target: target() })).toEqual({
+      type: 'seek',
+      deltaSeconds: -5,
+    });
+    expect(getPlaybackHotkeyAction({ key: 'ArrowRight', target: target() })).toEqual({
+      type: 'seek',
+      deltaSeconds: 5,
+    });
+    expect(getPlaybackHotkeyAction({ key: 'j', target: target() })).toEqual({
+      type: 'seek',
+      deltaSeconds: -10,
+    });
+    expect(getPlaybackHotkeyAction({ key: 'L', target: target() })).toEqual({
+      type: 'seek',
+      deltaSeconds: 10,
+    });
   });
 
-  it('maps space to playback toggle actions', () => {
-    expect(
-      getPlaybackHotkeyAction({
-        key: ' ',
-        target: { tagName: 'DIV', closest: () => null },
-      })
-    ).toEqual({ type: 'toggle-playback' });
+  it('maps playback, player, subtitle, and help toggles', () => {
+    expect(getPlaybackHotkeyAction({ key: ' ', target: target() })).toEqual({ type: 'toggle-playback' });
+    expect(getPlaybackHotkeyAction({ code: 'Space', target: target() })).toEqual({ type: 'toggle-playback' });
+    expect(getPlaybackHotkeyAction({ key: 'k', target: target() })).toEqual({ type: 'toggle-playback' });
+    expect(getPlaybackHotkeyAction({ key: 'm', target: target() })).toEqual({ type: 'toggle-mute' });
+    expect(getPlaybackHotkeyAction({ key: 'f', target: target() })).toEqual({ type: 'toggle-fullscreen' });
+    expect(getPlaybackHotkeyAction({ key: 'c', target: target() })).toEqual({ type: 'toggle-subtitles' });
+    expect(getPlaybackHotkeyAction({ key: '?', target: target() })).toEqual({ type: 'toggle-help' });
+  });
 
+  it('maps comma and period to frame-step actions', () => {
+    expect(getPlaybackHotkeyAction({ key: ',', code: 'Comma', target: target() })).toEqual({
+      type: 'frame-step',
+      deltaFrames: -1,
+    });
+    expect(getPlaybackHotkeyAction({ key: '.', code: 'Period', target: target() })).toEqual({
+      type: 'frame-step',
+      deltaFrames: 1,
+    });
     expect(
       getPlaybackHotkeyAction({
-        code: 'Space',
-        target: { tagName: 'DIV', closest: () => null },
+        key: '<',
+        code: 'Comma',
+        shiftKey: true,
+        target: target(),
       })
-    ).toEqual({ type: 'toggle-playback' });
+    ).toBeNull();
+  });
+
+  it('supports custom seek step options', () => {
+    expect(
+      getPlaybackHotkeyAction(
+        {
+          key: 'ArrowRight',
+          target: target(),
+        },
+        { seekStepSeconds: 7, longSeekStepSeconds: 12 }
+      )
+    ).toEqual({
+      type: 'seek',
+      deltaSeconds: 7,
+    });
   });
 
   it('returns null for unsupported keys or ignored targets', () => {
-    expect(
-      getPlaybackHotkeyAction({
-        key: 'Enter',
-        target: { tagName: 'DIV', closest: () => null },
-      })
-    ).toBeNull();
-
-    expect(
-      getPlaybackHotkeyAction({
-        key: ' ',
-        target: { tagName: 'INPUT' },
-      })
-    ).toBeNull();
+    expect(getPlaybackHotkeyAction({ key: 'Enter', target: target() })).toBeNull();
+    expect(getPlaybackHotkeyAction({ key: ' ', target: { tagName: 'INPUT' } })).toBeNull();
   });
 });
 
 describe('applyPlaybackHotkey', () => {
-  function createPlayer(initialTime, duration = 120) {
+  function createPlayer(initialTime, duration = 120, options = {}) {
     let current = initialTime;
-    let paused = true;
-    let played = 0;
-    let pausedCalls = 0;
+    let paused = options.paused ?? true;
+    let muted = options.muted ?? false;
+    let fullscreen = options.fullscreen ?? false;
+    let playCalls = 0;
+    let pauseCalls = 0;
+    let requestFullscreenCalls = 0;
+    let exitFullscreenCalls = 0;
 
     return {
       get time() {
@@ -211,11 +239,23 @@ describe('applyPlaybackHotkey', () => {
       get isPaused() {
         return paused;
       },
+      get isMuted() {
+        return muted;
+      },
+      get isFullscreenState() {
+        return fullscreen;
+      },
       get playCalls() {
-        return played;
+        return playCalls;
       },
       get pauseCalls() {
-        return pausedCalls;
+        return pauseCalls;
+      },
+      get requestFullscreenCalls() {
+        return requestFullscreenCalls;
+      },
+      get exitFullscreenCalls() {
+        return exitFullscreenCalls;
       },
       duration() {
         return duration;
@@ -230,24 +270,43 @@ describe('applyPlaybackHotkey', () => {
         return paused;
       },
       play() {
-        played += 1;
+        playCalls += 1;
         paused = false;
         return Promise.resolve();
       },
       pause() {
-        pausedCalls += 1;
+        pauseCalls += 1;
         paused = true;
+      },
+      muted(nextMuted) {
+        if (typeof nextMuted === 'boolean') {
+          muted = nextMuted;
+        }
+        return muted;
+      },
+      isFullscreen() {
+        return fullscreen;
+      },
+      requestFullscreen() {
+        requestFullscreenCalls += 1;
+        fullscreen = true;
+      },
+      exitFullscreen() {
+        exitFullscreenCalls += 1;
+        fullscreen = false;
       },
     };
   }
 
-  function createKeyboardEvent(key, target = { tagName: 'DIV', closest: () => null }) {
+  function createKeyboardEvent({ key = '', code = '', shiftKey = false, target = null } = {}) {
     let defaultPrevented = false;
 
     return {
       event: {
         key,
-        target,
+        code,
+        shiftKey,
+        target: target || { tagName: 'DIV', closest: () => null },
         preventDefault() {
           defaultPrevented = true;
         },
@@ -260,16 +319,16 @@ describe('applyPlaybackHotkey', () => {
 
   it('seeks forward by 5 seconds on ArrowRight', () => {
     const player = createPlayer(10, 120);
-    const keyboard = createKeyboardEvent('ArrowRight');
+    const keyboard = createKeyboardEvent({ key: 'ArrowRight' });
 
     expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
     expect(player.time).toBe(15);
     expect(keyboard.wasPrevented()).toBe(true);
   });
 
-  it('seeks backward by 5 seconds on ArrowLeft and clamps to zero', () => {
+  it('seeks backward by 10 seconds on j and clamps to zero', () => {
     const player = createPlayer(3, 120);
-    const keyboard = createKeyboardEvent('ArrowLeft');
+    const keyboard = createKeyboardEvent({ key: 'j' });
 
     expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
     expect(player.time).toBe(0);
@@ -278,7 +337,7 @@ describe('applyPlaybackHotkey', () => {
 
   it('ignores hotkeys when focus is inside editable controls', () => {
     const player = createPlayer(10, 120);
-    const keyboard = createKeyboardEvent('ArrowRight', { tagName: 'INPUT' });
+    const keyboard = createKeyboardEvent({ key: 'ArrowRight', target: { tagName: 'INPUT' } });
 
     expect(applyPlaybackHotkey(keyboard.event, player)).toBe(false);
     expect(player.time).toBe(10);
@@ -287,7 +346,7 @@ describe('applyPlaybackHotkey', () => {
 
   it('plays when pressing Space on a paused player', () => {
     const player = createPlayer(10, 120);
-    const keyboard = createKeyboardEvent(' ');
+    const keyboard = createKeyboardEvent({ key: ' ' });
 
     expect(player.isPaused).toBe(true);
     expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
@@ -296,16 +355,89 @@ describe('applyPlaybackHotkey', () => {
     expect(keyboard.wasPrevented()).toBe(true);
   });
 
-  it('pauses when pressing Space on a playing player', () => {
-    const player = createPlayer(10, 120);
-    const startPlayback = createKeyboardEvent(' ');
-    const pausePlayback = createKeyboardEvent(' ');
+  it('pauses when pressing k on a playing player', () => {
+    const player = createPlayer(10, 120, { paused: false });
+    const keyboard = createKeyboardEvent({ key: 'k' });
 
-    applyPlaybackHotkey(startPlayback.event, player);
-
-    expect(applyPlaybackHotkey(pausePlayback.event, player)).toBe(true);
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
     expect(player.isPaused).toBe(true);
     expect(player.pauseCalls).toBe(1);
-    expect(pausePlayback.wasPrevented()).toBe(true);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('toggles mute on m', () => {
+    const player = createPlayer(10, 120);
+    const keyboard = createKeyboardEvent({ key: 'm' });
+
+    expect(player.isMuted).toBe(false);
+    expect(applyPlaybackHotkey(keyboard.event, player)).toBe(true);
+    expect(player.isMuted).toBe(true);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('toggles fullscreen on f', () => {
+    const player = createPlayer(10, 120);
+    const openFullscreen = createKeyboardEvent({ key: 'f' });
+    const closeFullscreen = createKeyboardEvent({ key: 'f' });
+
+    expect(applyPlaybackHotkey(openFullscreen.event, player)).toBe(true);
+    expect(player.isFullscreenState).toBe(true);
+    expect(player.requestFullscreenCalls).toBe(1);
+
+    expect(applyPlaybackHotkey(closeFullscreen.event, player)).toBe(true);
+    expect(player.isFullscreenState).toBe(false);
+    expect(player.exitFullscreenCalls).toBe(1);
+  });
+
+  it('steps frames while paused using the provided frame rate', () => {
+    const player = createPlayer(10, 120, { paused: true });
+    const keyboard = createKeyboardEvent({ key: '.', code: 'Period' });
+
+    expect(
+      applyPlaybackHotkey(keyboard.event, player, {
+        frameRate: 20,
+      })
+    ).toBe(true);
+    expect(player.time).toBeCloseTo(10.05, 5);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('does not step frames while the player is still playing', () => {
+    const player = createPlayer(10, 120, { paused: false });
+    const keyboard = createKeyboardEvent({ key: ',', code: 'Comma' });
+
+    expect(applyPlaybackHotkey(keyboard.event, player, { frameRate: 20 })).toBe(false);
+    expect(player.time).toBe(10);
+    expect(keyboard.wasPrevented()).toBe(false);
+  });
+
+  it('runs the subtitle toggle callback without requiring a player method', () => {
+    let toggles = 0;
+    const keyboard = createKeyboardEvent({ key: 'c' });
+
+    expect(
+      applyPlaybackHotkey(keyboard.event, null, {
+        onToggleSubtitles() {
+          toggles += 1;
+        },
+      })
+    ).toBe(true);
+    expect(toggles).toBe(1);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('runs the help toggle callback for question-mark', () => {
+    let toggles = 0;
+    const keyboard = createKeyboardEvent({ key: '?', code: 'Slash', shiftKey: true });
+
+    expect(
+      applyPlaybackHotkey(keyboard.event, null, {
+        onToggleHelp() {
+          toggles += 1;
+        },
+      })
+    ).toBe(true);
+    expect(toggles).toBe(1);
+    expect(keyboard.wasPrevented()).toBe(true);
   });
 });

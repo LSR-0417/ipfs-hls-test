@@ -7,6 +7,7 @@ import {
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
+  resolveToggledSubtitlePreference,
   resolveSubtitleTracks,
   subtitleManifestFileName,
 } from './subtitles';
@@ -168,6 +169,35 @@ describe('reconcileSubtitlePreference', () => {
       )
     ).toEqual({
       mode: 'showing',
+      lang: 'en',
+    });
+  });
+});
+
+describe('resolveToggledSubtitlePreference', () => {
+  it('turns subtitles on with the reconciled language when nothing is currently showing', () => {
+    expect(
+      resolveToggledSubtitlePreference(
+        createDefaultSubtitlePreference(),
+        [{ lang: 'en' }, { lang: 'zh-TW' }],
+        { languages: ['zh-TW'] }
+      )
+    ).toEqual({
+      mode: 'showing',
+      lang: 'zh-TW',
+    });
+  });
+
+  it('turns subtitles off while preserving the active language', () => {
+    expect(
+      resolveToggledSubtitlePreference(
+        { mode: 'showing', lang: 'en' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }],
+        { languages: ['zh-TW'] },
+        'en-US'
+      )
+    ).toEqual({
+      mode: 'off',
       lang: 'en',
     });
   });

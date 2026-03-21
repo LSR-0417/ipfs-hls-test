@@ -150,6 +150,26 @@ export function reconcileSubtitlePreference(preference, subtitles = [], navigato
   };
 }
 
+export function resolveToggledSubtitlePreference(preference, subtitles = [], navigatorLike = null, activeLang = '') {
+  const reconciledPreference = reconcileSubtitlePreference(preference, subtitles, navigatorLike);
+  if (!Array.isArray(subtitles) || subtitles.length === 0) {
+    return reconciledPreference;
+  }
+
+  const matchedActiveLang = matchAvailableSubtitleLanguage(subtitles, activeLang);
+  if (matchedActiveLang) {
+    return {
+      mode: 'off',
+      lang: matchedActiveLang || reconciledPreference.lang,
+    };
+  }
+
+  return {
+    mode: 'showing',
+    lang: reconciledPreference.lang || choosePreferredSubtitleLanguage(subtitles, navigatorLike),
+  };
+}
+
 export function choosePreferredSubtitleLanguage(subtitles = [], navigatorLike = null) {
   if (!Array.isArray(subtitles) || subtitles.length === 0) return '';
 

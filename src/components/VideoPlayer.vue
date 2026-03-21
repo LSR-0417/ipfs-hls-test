@@ -1,30 +1,86 @@
 <template>
-  <div data-vjs-player>
-    <video
-      ref="videoRef"
-      class="video-js vjs-big-play-centered"
-      crossorigin="anonymous"
-      :poster="posterUrl"
-      playsinline
-      webkit-playsinline
-    ></video>
+  <div class="video-player-shell">
+    <div data-vjs-player>
+      <video
+        ref="videoRef"
+        class="video-js vjs-big-play-centered"
+        crossorigin="anonymous"
+        :poster="posterUrl"
+        playsinline
+        webkit-playsinline
+      ></video>
+    </div>
+
+    <div
+      v-if="isHotkeyHelpOpen"
+      class="hotkey-help-backdrop"
+      data-testid="video-player-hotkey-help-backdrop"
+      @click.self="closeHotkeyHelp"
+    >
+      <div
+        ref="hotkeyHelpDialogRef"
+        class="hotkey-help-dialog glass-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="videoPlayerHotkeyHelpTitle"
+        tabindex="-1"
+        data-testid="video-player-hotkey-help-dialog"
+      >
+        <div class="hotkey-help-header">
+          <div class="hotkey-help-copy">
+            <p class="hotkey-help-kicker">Keyboard Shortcuts</p>
+            <h2 id="videoPlayerHotkeyHelpTitle">播放器快捷鍵</h2>
+            <p class="hotkey-help-summary">精簡鍵位表。焦點在輸入框或按鈕上時不會攔截按鍵。</p>
+          </div>
+          <button class="hotkey-help-close" type="button" @click="closeHotkeyHelp" aria-label="關閉快捷鍵說明">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="hotkey-help-body">
+          <section v-for="section in hotkeyHelpSections" :key="section.id" class="hotkey-help-section">
+            <div class="hotkey-help-section-header">
+              <p class="hotkey-help-section-title">{{ section.title }}</p>
+            </div>
+
+            <ul class="hotkey-help-list">
+              <li v-for="item in section.items" :key="item.id" class="hotkey-help-row">
+                <div class="hotkey-help-keys" :aria-label="`${item.label} 快捷鍵`">
+                  <kbd v-for="key in item.keys" :key="key" class="hotkey-chip">{{ key }}</kbd>
+                </div>
+                <strong class="hotkey-help-label">{{ item.label }}</strong>
+                <span class="hotkey-help-detail">{{ item.detail }}</span>
+              </li>
+            </ul>
+          </section>
+        </div>
+
+        <p class="hotkey-help-hint">
+          按 <kbd class="hotkey-chip hotkey-chip--inline">?</kbd> 或
+          <kbd class="hotkey-chip hotkey-chip--inline">Esc</kbd> 關閉
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey } from '../utils/playback';
 import {
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
+  resolveToggledSubtitlePreference,
 } from '../utils/subtitles';
+import { formatTime } from '../utils/time';
 
 // 確保 videojs 綁定到 window，才能讓較舊的擴充套件可以成功註冊
-window.videojs = videojs;
+if (typeof window !== 'undefined') {
+  window.videojs = videojs;
+}
 
 const props = defineProps({
   m3u8Url: {
@@ -41,6 +97,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  frameRate: {
+    type: Number,
+    default: Number.NaN,
+  },
   startTime: {
     type: Number,
     default: 0,
@@ -53,12 +113,95 @@ const props = defineProps({
 
 const emit = defineEmits(['status-update', 'levels-loaded']);
 
-const videoRef = ref(null);
 const SEEK_STEP_SECONDS = 5;
+const LONG_SEEK_STEP_SECONDS = 10;
+
+const hotkeyHelpSections = Object.freeze([
+  {
+    id: 'transport',
+    title: '播放控制',
+    items: [
+      {
+        id: 'playback',
+        keys: ['Space', 'K'],
+        label: '播放 / 暫停',
+        detail: '切換播放',
+      },
+      {
+        id: 'seek-short',
+        keys: ['←', '→'],
+        label: '5 秒微調',
+        detail: '左右 5 秒',
+      },
+      {
+        id: 'seek-long',
+        keys: ['J', 'L'],
+        label: '10 秒跳轉',
+        detail: '前後 10 秒',
+      },
+    ],
+  },
+  {
+    id: 'view',
+    title: '觀看狀態',
+    items: [
+      {
+        id: 'mute',
+        keys: ['M'],
+        label: '靜音',
+        detail: '切換聲音',
+      },
+      {
+        id: 'fullscreen',
+        keys: ['F'],
+        label: '全螢幕',
+        detail: '切換畫面',
+      },
+      {
+        id: 'subtitles',
+        keys: ['C'],
+        label: '字幕',
+        detail: '切回上次語言',
+      },
+    ],
+  },
+  {
+    id: 'precision',
+    title: '精準操作',
+    items: [
+      {
+        id: 'frame-step',
+        keys: [',', '.'],
+        label: '逐幀播放',
+        detail: '暫停時前後一格',
+      },
+      {
+        id: 'help',
+        keys: ['?'],
+        label: '快捷鍵說明',
+        detail: '顯示 / 關閉',
+      },
+    ],
+  },
+]);
+
+const hotkeyHelpDialogRef = ref(null);
+const isHotkeyHelpOpen = ref(false);
+const videoRef = ref(null);
+
 let player = null;
 let sourceSeq = 0;
 let isApplyingSubtitlePreference = false;
 let textTrackList = null;
+let lastFocusedElement = null;
+
+function isHelpHotkeyEvent(event) {
+  return event?.key === '?' || (event?.code === 'Slash' && event?.shiftKey === true);
+}
+
+function isEscapeKey(event) {
+  return event?.key === 'Escape' || event?.key === 'Esc' || event?.code === 'Escape';
+}
 
 function resolveSubtitlePreference(subtitles) {
   const target = typeof window !== 'undefined' ? window : null;
@@ -70,6 +213,118 @@ function resolveSubtitlePreference(subtitles) {
   }
 
   return nextPreference;
+}
+
+function getSubtitleTracks() {
+  return player && typeof player.remoteTextTracks === 'function' ? player.remoteTextTracks() : null;
+}
+
+function getSubtitleTrackLanguage(track) {
+  return track?.language || track?.srclang || '';
+}
+
+function getActiveSubtitleLanguage() {
+  const tracks = getSubtitleTracks();
+  if (!tracks) return '';
+
+  for (let i = 0; i < tracks.length; i += 1) {
+    const track = tracks[i];
+    if (track.mode === 'showing') {
+      return getSubtitleTrackLanguage(track);
+    }
+  }
+
+  return '';
+}
+
+function setActiveSubtitleLanguage(activeLang = '') {
+  const tracks = getSubtitleTracks();
+  if (!tracks || tracks.length === 0) return false;
+
+  let matched = activeLang === '';
+  isApplyingSubtitlePreference = true;
+
+  try {
+    for (let i = 0; i < tracks.length; i += 1) {
+      const track = tracks[i];
+      const shouldShow = Boolean(activeLang) && getSubtitleTrackLanguage(track) === activeLang;
+      if (shouldShow) {
+        matched = true;
+      }
+      track.mode = shouldShow ? 'showing' : 'disabled';
+    }
+  } finally {
+    isApplyingSubtitlePreference = false;
+  }
+
+  return matched;
+}
+
+function subtitleLabelForLanguage(lang) {
+  const matchedSubtitle = Array.isArray(props.subtitles)
+    ? props.subtitles.find((subtitle) => subtitle.lang === lang)
+    : null;
+
+  return matchedSubtitle?.label || lang || '字幕';
+}
+
+function toggleSubtitleVisibility() {
+  if (!player || !Array.isArray(props.subtitles) || props.subtitles.length === 0) {
+    return false;
+  }
+
+  bindSubtitleTrackChangeListener();
+
+  const target = typeof window !== 'undefined' ? window : null;
+  const nextPreference = resolveToggledSubtitlePreference(
+    readStoredSubtitlePreference(target),
+    props.subtitles,
+    target?.navigator,
+    getActiveSubtitleLanguage()
+  );
+  const nextLang = nextPreference.mode === 'showing' ? nextPreference.lang : '';
+
+  if (!setActiveSubtitleLanguage(nextLang)) {
+    return false;
+  }
+
+  persistSubtitlePreference(nextPreference, target);
+
+  emit(
+    'status-update',
+    nextPreference.mode === 'showing' ? `字幕已開啟：${subtitleLabelForLanguage(nextLang)}` : '字幕已關閉'
+  );
+
+  return true;
+}
+
+function openHotkeyHelp() {
+  if (isHotkeyHelpOpen.value) return;
+
+  lastFocusedElement = typeof document !== 'undefined' ? document.activeElement : null;
+  isHotkeyHelpOpen.value = true;
+  void nextTick(() => {
+    hotkeyHelpDialogRef.value?.focus?.();
+  });
+}
+
+function closeHotkeyHelp() {
+  const nextFocusTarget = lastFocusedElement;
+  lastFocusedElement = null;
+  isHotkeyHelpOpen.value = false;
+  void nextTick(() => {
+    nextFocusTarget?.focus?.();
+  });
+}
+
+function toggleHotkeyHelp() {
+  if (isHotkeyHelpOpen.value) {
+    closeHotkeyHelp();
+    return true;
+  }
+
+  openHotkeyHelp();
+  return true;
 }
 
 async function resumePlaybackIfNeeded() {
@@ -199,19 +454,7 @@ function clearTracks() {
 function handleSubtitleTrackChange() {
   if (!player || isApplyingSubtitlePreference) return;
 
-  const tracks = player.remoteTextTracks();
-  if (!tracks) return;
-
-  let activeLang = '';
-
-  for (let i = 0; i < tracks.length; i += 1) {
-    const track = tracks[i];
-    if (track.mode === 'showing') {
-      activeLang = track.language || track.srclang || '';
-      break;
-    }
-  }
-
+  const activeLang = getActiveSubtitleLanguage();
   const target = typeof window !== 'undefined' ? window : null;
   const currentPreference = readStoredSubtitlePreference(target);
   const nextPreference = reconcileSubtitlePreference(
@@ -246,7 +489,25 @@ function syncStartTime(startTime) {
 }
 
 function handleGlobalKeydown(event) {
-  applyPlaybackHotkey(event, player, SEEK_STEP_SECONDS);
+  if (isHotkeyHelpOpen.value) {
+    if (isEscapeKey(event) || isHelpHotkeyEvent(event)) {
+      event.preventDefault?.();
+      if (isEscapeKey(event)) {
+        closeHotkeyHelp();
+      } else {
+        toggleHotkeyHelp();
+      }
+    }
+    return;
+  }
+
+  applyPlaybackHotkey(event, player, {
+    seekStepSeconds: SEEK_STEP_SECONDS,
+    longSeekStepSeconds: LONG_SEEK_STEP_SECONDS,
+    frameRate: props.frameRate,
+    onToggleHelp: toggleHotkeyHelp,
+    onToggleSubtitles: toggleSubtitleVisibility,
+  });
 }
 
 function syncPoster(posterUrl) {
@@ -349,8 +610,295 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
+.video-player-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.video-player-shell [data-vjs-player] {
+  width: 100%;
+  height: 100%;
+}
+
+.hotkey-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(7, 9, 16, 0.54), rgba(7, 9, 16, 0.8)),
+    radial-gradient(circle at 18% 14%, rgba(162, 82, 255, 0.14), transparent 30%),
+    radial-gradient(circle at 84% 12%, rgba(0, 210, 255, 0.1), transparent 26%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.hotkey-help-dialog {
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(500px, calc(100vh - 24px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(18, 21, 36, 0.96), rgba(11, 14, 26, 0.98)),
+    radial-gradient(circle at top right, rgba(0, 210, 255, 0.08), transparent 38%);
+  color: #f4f7fb;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.48);
+}
+
+.hotkey-help-dialog:focus {
+  outline: 2px solid rgba(0, 210, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.hotkey-help-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hotkey-help-copy {
+  min-width: 0;
+  max-width: 22rem;
+}
+
+.hotkey-help-copy h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.02rem, 0.96rem + 0.32vw, 1.18rem);
+  line-height: 1.12;
+}
+
+.hotkey-help-kicker {
+  margin: 0;
+  color: rgba(180, 213, 255, 0.82);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hotkey-help-summary {
+  margin: 0;
+  color: rgba(232, 238, 246, 0.78);
+  font-size: 0.76rem;
+  line-height: 1.38;
+}
+
+.hotkey-help-close {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.hotkey-help-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.hotkey-help-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px 12px;
+  display: grid;
+  gap: 12px;
+  overscroll-behavior: contain;
+}
+
+.hotkey-help-section {
+  display: grid;
+  gap: 8px;
+}
+
+.hotkey-help-section-header {
+  margin-bottom: -2px;
+}
+
+.hotkey-help-section-title {
+  margin: 0;
+  color: rgba(244, 247, 251, 0.96);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hotkey-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.hotkey-help-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(86px, 102px) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 10px 10px 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hotkey-help-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.hotkey-chip {
+  min-width: 28px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f7fb;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.hotkey-chip--inline {
+  min-width: auto;
+  padding-inline: 8px;
+  font-size: 0.74rem;
+}
+
+.hotkey-help-label {
+  min-width: 0;
+  font-size: 0.84rem;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.hotkey-help-detail {
+  color: rgba(232, 238, 246, 0.62);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.hotkey-help-hint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(232, 238, 246, 0.72);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
 /* 確保畫質切換圖示正常顯示 */
 .vjs-quality-selector .vjs-menu-button-popup .vjs-menu {
   display: block;
+}
+
+@media (max-width: 720px) {
+  .hotkey-help-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .hotkey-help-dialog {
+    width: 100%;
+    max-height: min(54vh, calc(100vh - env(safe-area-inset-top, 0px) - 4px));
+    border-radius: 18px 18px 0 0;
+  }
+
+  .hotkey-help-header {
+    padding: 12px 12px 8px;
+  }
+
+  .hotkey-help-copy h2 {
+    margin-bottom: 6px;
+    font-size: 0.96rem;
+  }
+
+  .hotkey-help-kicker {
+    font-size: 0.64rem;
+  }
+
+  .hotkey-help-summary {
+    font-size: 0.72rem;
+  }
+
+  .hotkey-help-body {
+    padding: 8px 12px 10px;
+    gap: 10px;
+  }
+
+  .hotkey-help-list {
+    gap: 5px;
+  }
+
+  .hotkey-help-row {
+    grid-template-columns: minmax(74px, 88px) minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px 9px 9px 10px;
+  }
+
+  .hotkey-help-label {
+    font-size: 0.8rem;
+  }
+
+  .hotkey-help-detail {
+    grid-column: 2;
+    white-space: normal;
+    text-align: left;
+    font-size: 0.68rem;
+  }
+
+  .hotkey-help-hint {
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .hotkey-help-dialog {
+    max-height: min(50vh, calc(100vh - env(safe-area-inset-top, 0px) - 2px));
+  }
+
+  .hotkey-help-row {
+    grid-template-columns: minmax(68px, 82px) minmax(0, 1fr);
+  }
+
+  .hotkey-chip {
+    min-width: 24px;
+    padding: 3px 6px;
+    font-size: 0.72rem;
+  }
 }
 </style>

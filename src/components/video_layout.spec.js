@@ -51,6 +51,7 @@ describe('WatchPage layout contract', () => {
     expect(template).toContain('<section class="watch-page" data-testid="watch-page">');
     expect(template).toContain('class="player-container glass-panel"');
     expect(template).toContain('data-testid="player-container"');
+    expect(template).toContain(':frame-rate="videoInfo.fps"');
     expect(playerContainerIndex).toBeGreaterThan(-1);
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
@@ -67,6 +68,35 @@ describe('WatchPage layout contract', () => {
     expect(style).toContain('.player-container');
     expect(style).toContain('.player-title');
     expect(style).toContain('padding: 0;');
+  });
+});
+
+describe('VideoPlayer hotkey contract', () => {
+  it('keeps the expanded shortcut map and the help dialog in the player template', () => {
+    const descriptor = readDescriptor(new URL('./VideoPlayer.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('data-testid="video-player-hotkey-help-dialog"');
+    expect(template).toContain('v-if="isHotkeyHelpOpen"');
+    expect(template).toContain('v-for="section in hotkeyHelpSections"');
+    expect(template).toContain('v-for="item in section.items"');
+    expect(template).toContain('class="hotkey-help-list"');
+    expect(template).toContain('class="hotkey-help-row"');
+    expect(template).toContain('class="hotkey-help-hint"');
+    expect(script).toContain('const LONG_SEEK_STEP_SECONDS = 10;');
+    expect(script).toContain('const hotkeyHelpSections = Object.freeze([');
+    expect(script).toContain('frameRate: {');
+    expect(script).toContain('resolveToggledSubtitlePreference');
+    expect(script).toContain('onToggleHelp: toggleHotkeyHelp');
+    expect(script).toContain('onToggleSubtitles: toggleSubtitleVisibility');
+    expect(style).toContain('position: fixed;');
+    expect(style).toContain('.hotkey-help-dialog');
+    expect(style).toContain('.hotkey-help-list');
+    expect(style).toContain('.hotkey-help-row');
+    expect(style).toContain('.hotkey-help-detail');
+    expect(style).toContain('.hotkey-chip');
   });
 });
 
