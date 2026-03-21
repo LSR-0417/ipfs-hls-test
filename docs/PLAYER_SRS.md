@@ -202,6 +202,37 @@ fallback 規則如下：
 
 目前不會把 `gateway` 寫進 URL query；gateway 由 `localStorage` 持久化。
 
+### FR-STATE-2 本機觀看歷史
+
+系統應在瀏覽器端維護觀看歷史，且目前只保存在本機。
+
+每筆觀看歷史至少應包含：
+
+- `cid`
+- `title`
+- `uploader`
+- `posterUrl`
+- `durationString` / `durationSeconds`
+- `progressSeconds`
+- `lastWatchedAt`
+- `gateway`
+
+系統應在以下情境更新觀看歷史：
+
+- 載入新影片時建立或更新一筆紀錄
+- 播放器 `pause` 時更新目前進度
+- 播放器 `seeked` 後更新目前進度
+- 播放器 `ended` 時記錄為接近完整長度的已看完狀態
+- 分頁切到背景或頁面關閉前補寫最後一次進度
+
+觀看歷史 UI 應提供：
+
+- `尚未開始`
+- `繼續觀看`
+- `已看完`
+
+三種可辨識狀態，並可從歷史列表回播指定影片。
+
 ## 4. 驗收準則
 
 - 載入 CID 時，前端會向同層路徑請求 `cover.webp`、`info.json`、`avatar.jpg`、`subtitles.json`
@@ -222,6 +253,10 @@ fallback 規則如下：
 - 當播放器為暫停狀態且焦點不在互動控制項內，按下空白鍵後播放器開始播放
 - 當播放器為播放狀態且焦點不在互動控制項內，按下空白鍵後播放器暫停播放
 - 當焦點在搜尋輸入框或其他可編輯區域時，左右鍵與空白鍵不得接手播放器控制
+- `History` 頁面會顯示最近看過的影片，且重新整理頁面後資料仍保留
+- 在 `pause`、`seeked`、`ended` 後，`History` 內的續播資訊會更新
+- `History` 內可辨識 `尚未開始`、`繼續觀看`、`已看完` 三種狀態
+- 點擊 `History` 項目後，可從最近一次記錄的播放進度附近回播
 
 ## 5. 對應測試
 
@@ -244,9 +279,13 @@ fallback 規則如下：
   - 標題列與 `VideoInfo` 的版面順序
   - 上傳者列 / 動作列佈局契約
   - 描述卡片、overflow menu、收合 / 展開入口
+  - `History` 狀態樣式與播放器事件驅動保存契約
+- `src/utils/history.spec.js`
+  - 觀看歷史讀寫、去重、排序與保留上限
 - `src/utils/playback.spec.js`
   - 空白鍵播放 / 暫停切換
   - 左右鍵 `±5` 秒 seek
   - seek 邊界 clamp
   - 互動元素忽略規則
   - 修飾鍵 / 已攔截事件忽略規則
+  - 播放事件快照（`duration` / `hasEnded`）

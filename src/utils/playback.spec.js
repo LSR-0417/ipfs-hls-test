@@ -4,6 +4,7 @@ import {
   clampSeekTime,
   getPlaybackHotkeyAction,
   getCurrentPlaybackTime,
+  getPlayerPlaybackSnapshot,
   getPlaybackSnapshot,
   shouldIgnorePlaybackHotkey,
 } from './playback';
@@ -65,14 +66,16 @@ describe('getPlaybackSnapshot', () => {
     const win = {
       videojs: {
         getAllPlayers() {
-          return [{ currentTime: () => 88.7, paused: () => false }];
+          return [{ currentTime: () => 88.7, duration: () => 120.3, paused: () => false, ended: () => false }];
         },
       },
     };
 
     expect(getPlaybackSnapshot(win)).toEqual({
       time: 88,
+      duration: 120,
       isPlaying: true,
+      hasEnded: false,
     });
   });
 
@@ -80,21 +83,43 @@ describe('getPlaybackSnapshot', () => {
     const win = {
       document: {
         querySelector() {
-          return { currentTime: 12.9, paused: true, ended: false };
+          return { currentTime: 12.9, duration: 90.8, paused: true, ended: false };
         },
       },
     };
 
     expect(getPlaybackSnapshot(win)).toEqual({
       time: 12,
+      duration: 90,
       isPlaying: false,
+      hasEnded: false,
     });
   });
 
   it('normalizes missing state to stopped snapshot', () => {
     expect(getPlaybackSnapshot(null)).toEqual({
       time: 0,
+      duration: 0,
       isPlaying: false,
+      hasEnded: false,
+    });
+  });
+});
+
+describe('getPlayerPlaybackSnapshot', () => {
+  it('includes duration and ended state for player-driven persistence', () => {
+    expect(
+      getPlayerPlaybackSnapshot({
+        currentTime: () => 102.4,
+        duration: () => 102.9,
+        paused: () => true,
+        ended: () => true,
+      })
+    ).toEqual({
+      time: 102,
+      duration: 102,
+      isPlaying: false,
+      hasEnded: true,
     });
   });
 });

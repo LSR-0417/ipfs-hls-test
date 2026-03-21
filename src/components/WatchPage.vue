@@ -38,7 +38,7 @@ defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded']);
+const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);
 
 function handleStatusUpdate(nextStatus) {
   emit('status-update', nextStatus);
@@ -46,6 +46,10 @@ function handleStatusUpdate(nextStatus) {
 
 function handleLevelsLoaded(levels) {
   emit('levels-loaded', levels);
+}
+
+function handlePlaybackSnapshot(snapshot) {
+  emit('playback-snapshot', snapshot);
 }
 </script>
 
@@ -61,6 +65,7 @@ function handleLevelsLoaded(levels) {
       :should-autoplay="shouldAutoplay"
       @status-update="handleStatusUpdate"
       @levels-loaded="handleLevelsLoaded"
+      @playback-snapshot="handlePlaybackSnapshot"
     />
     <h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>
     <VideoInfo :cid="cid" :ipfs-base-url="ipfsBaseUrl" :video-info="videoInfo" />

@@ -54,9 +54,11 @@ describe('WatchPage layout contract', () => {
     expect(playerContainerIndex).toBeGreaterThan(-1);
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
-    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded']);");
+    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);");
     expect(script).toContain("import VideoPlayer from './VideoPlayer.vue';");
     expect(script).toContain("import VideoInfo from './VideoInfo.vue';");
+    expect(template).toContain('@playback-snapshot="handlePlaybackSnapshot"');
+    expect(script).toContain("function handlePlaybackSnapshot(snapshot) {");
     expect(style).toContain('.watch-page');
     expect(style).toContain('flex: 1;');
     expect(style).toContain('min-width: 0;');
@@ -67,6 +69,51 @@ describe('WatchPage layout contract', () => {
     expect(style).toContain('.player-container');
     expect(style).toContain('.player-title');
     expect(style).toContain('padding: 0;');
+  });
+});
+
+describe('VideoPlayer playback persistence contract', () => {
+  it('emits player-driven playback snapshots on key lifecycle events', () => {
+    const descriptor = readDescriptor(new URL('./VideoPlayer.vue', import.meta.url));
+    const script = descriptor.scriptSetup?.content || '';
+
+    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);");
+    expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
+    expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
+    expect(script).toContain("player.on('pause', handlePauseSnapshot);");
+    expect(script).toContain("player.on('ended', handleEndedSnapshot);");
+    expect(script).toContain("player.on('seeked', handleSeekedSnapshot);");
+    expect(script).toContain("player.on('timeupdate', handleTimeupdateSnapshot);");
+    expect(script).toContain("emit('playback-snapshot', {");
+  });
+});
+
+describe('HistoryPage status contract', () => {
+  it('renders clear visual states for new, in-progress, and completed entries', () => {
+    const descriptor = readDescriptor(new URL('./HistoryPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('class="history-status-badge"');
+    expect(template).toContain('class="history-open-label"');
+    expect(template).toContain(':class="`is-${item.playbackState.id}`"');
+    expect(template).toContain('{{ item.playbackState.statusLabel }}');
+    expect(template).toContain('{{ item.playbackState.actionLabel }}');
+    expect(template).toContain('{{ item.playbackState.progressLabel }}');
+
+    expect(script).toContain('const HISTORY_COMPLETED_MIN_PERCENT = 95;');
+    expect(script).toContain('const HISTORY_COMPLETED_MAX_REMAINING_SECONDS = 5;');
+    expect(script).toContain('function getPlaybackState(item) {');
+    expect(script).toContain("statusLabel: '已看完'");
+    expect(script).toContain("statusLabel: '繼續觀看'");
+    expect(script).toContain("statusLabel: '尚未開始'");
+
+    expect(style).toContain('.history-state-row');
+    expect(style).toContain('.history-status-badge.is-resume');
+    expect(style).toContain('.history-status-badge.is-completed');
+    expect(style).toContain('.history-progress.is-completed');
+    expect(style).toContain('.history-item.is-completed .history-progress-bar span');
   });
 });
 

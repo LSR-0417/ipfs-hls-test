@@ -3,12 +3,19 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
+import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
 import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
 import { fetchSubtitleManifest, resolveSubtitleTracks } from './utils/subtitles';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
+import {
+  clearHistory as clearStoredHistory,
+  readStoredHistory,
+  removeHistoryEntry,
+  upsertHistoryEntry,
+} from './utils/history';
 
 const allowPrivateGateways = import.meta.env.DEV;
 const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
@@ -23,6 +30,8 @@ const currentShouldAutoplay = ref(false);
 const currentCid = ref('');
 const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
+const activeView = ref('home');
+const historyItems = ref([]);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -94,6 +103,7 @@ function syncFromUrl() {
     if (shouldReload) {
       loadVideo(cid, nextGateway, time, { updateUrl: false });
     }
+    activeView.value = 'home';
     return;
   }
 
@@ -136,37 +146,45 @@ function stopUrlSync() {
 }
 
 onMounted(() => {
+  refreshHistory();
   startUrlSync();
   syncFromUrl();
+  startHistorySync();
 });
 
 onBeforeUnmount(() => {
+  stopHistorySync();
   stopUrlSync();
 });
 
 function onSearchCid(cid, time = 0) {
   if (!cid) return;
-  currentCid.value = cid;
   loadVideo(cid, currentGateway.value, time, { updateUrl: true });
+  activeView.value = 'home';
 }
 
 function onGatewayChange(gateway) {
   const nextGateway = resolveGateway(gateway);
-  currentGateway.value = nextGateway;
-  persistGateway(nextGateway, window);
-  if (currentCid.value) {
+  if (currentCid.value && activeView.value === 'home') {
     const snapshot = getPlaybackSnapshot(window);
     loadVideo(currentCid.value, nextGateway, snapshot.time, {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
     });
+    return;
   }
+
+  currentGateway.value = nextGateway;
+  persistGateway(nextGateway, window);
 }
 
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   const requestSeq = ++metadataRequestSeq;
+
+  persistCurrentHistory();
+
   currentCid.value = cid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
@@ -184,6 +202,13 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentSubtitleTracks.value = [];
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
+  persistHistoryEntry({
+    cid,
+    posterUrl,
+    gateway: nextGateway,
+    progressSeconds: startTime,
+    lastWatchedAt: Date.now(),
+  });
   void loadSidecarAssets(ipfsBaseUrl, requestSeq);
 
   if (updateUrl) {
@@ -207,6 +232,19 @@ async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
 
   currentVideoInfo.value = nextVideoInfo;
   currentSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
+  const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
+  persistHistoryEntry({
+    cid: currentCid.value,
+    title: nextVideoInfo.title,
+    uploader: nextVideoInfo.uploader,
+    posterUrl: currentPosterUrl.value,
+    gateway: currentGateway.value,
+    durationString: nextVideoInfo.durationString,
+    durationSeconds: snapshot?.duration ?? 0,
+    progressSeconds: snapshot?.hasEnded && snapshot.duration > 0 ? snapshot.duration : snapshot?.time ?? 0,
+    lastWatchedAt: Date.now(),
+  });
+  persistCurrentHistory();
 }
 
 function resolveGateway(candidate) {
@@ -227,6 +265,110 @@ function readConfiguredGateway() {
 
   return '';
 }
+
+function refreshHistory() {
+  historyItems.value = readStoredHistory(window);
+}
+
+function findHistoryEntry(cid) {
+  const normalizedCid = typeof cid === 'string' ? cid.trim() : '';
+  if (!normalizedCid) return null;
+
+  return historyItems.value.find((item) => item.cid === normalizedCid) || null;
+}
+
+function persistHistoryEntry(entry) {
+  historyItems.value = upsertHistoryEntry(entry, window);
+}
+
+function persistCurrentHistory(options = {}) {
+  const { snapshot = null } = options;
+  if (activeView.value !== 'home') return;
+
+  const cid = currentCid.value.trim();
+  if (!cid) return;
+
+  const currentSnapshot = snapshot || getPlaybackSnapshot(window);
+  const progressSeconds =
+    currentSnapshot.hasEnded && currentSnapshot.duration > 0 ? currentSnapshot.duration : currentSnapshot.time;
+
+  persistHistoryEntry({
+    cid,
+    title: currentVideoInfo.value.title,
+    uploader: currentVideoInfo.value.uploader,
+    posterUrl: currentPosterUrl.value,
+    gateway: currentGateway.value,
+    durationString: currentVideoInfo.value.durationString,
+    durationSeconds: currentSnapshot.duration,
+    progressSeconds,
+    lastWatchedAt: Date.now(),
+  });
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    persistCurrentHistory();
+  }
+}
+
+function handlePageHide() {
+  persistCurrentHistory();
+}
+
+function startHistorySync() {
+  window.addEventListener('beforeunload', handlePageHide);
+  window.addEventListener('pagehide', handlePageHide);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+}
+
+function stopHistorySync() {
+  window.removeEventListener('beforeunload', handlePageHide);
+  window.removeEventListener('pagehide', handlePageHide);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+}
+
+function onViewSelect(nextView) {
+  if (nextView === 'history') {
+    persistCurrentHistory();
+    refreshHistory();
+    activeView.value = 'history';
+    return;
+  }
+
+  if (activeView.value === 'history' && currentCid.value) {
+    const currentHistoryEntry = findHistoryEntry(currentCid.value);
+    const resumeTime =
+      Number.isFinite(currentHistoryEntry?.progressSeconds) && currentHistoryEntry.progressSeconds > 0
+        ? currentHistoryEntry.progressSeconds
+        : currentStartTime.value;
+
+    loadVideo(currentCid.value, currentGateway.value, resumeTime, {
+      updateUrl: false,
+      shouldAutoplay: false,
+    });
+  }
+
+  activeView.value = 'home';
+}
+
+function onHistorySelect(item) {
+  if (!item?.cid) return;
+  loadVideo(item.cid, currentGateway.value, item.progressSeconds || 0, { updateUrl: true });
+  activeView.value = 'home';
+}
+
+function onHistoryRemove(cid) {
+  historyItems.value = removeHistoryEntry(cid, window);
+}
+
+function onHistoryClear() {
+  historyItems.value = clearStoredHistory(window);
+}
+
+function onPlaybackSnapshot(snapshot) {
+  if (!snapshot || activeView.value !== 'home') return;
+  persistCurrentHistory({ snapshot });
+}
 </script>
 
 <template>
@@ -238,21 +380,32 @@ function readConfiguredGateway() {
     @gateway-change="onGatewayChange"
   />
   <div class="app-container">
-    <Sidebar />
+    <Sidebar :active-view="activeView" @view-select="onViewSelect" />
     <main class="main-content" data-testid="main-content">
-      <WatchPage
-        :cid="currentCid"
-        :ipfs-base-url="currentIpfsBaseUrl"
-        :m3u8-url="currentM3u8Url"
-        :poster-url="currentPosterUrl"
-        :subtitles="currentSubtitleTracks"
-        :start-time="currentStartTime"
-        :should-autoplay="currentShouldAutoplay"
-        :video-info="currentVideoInfo"
-        @status-update="onStatusUpdate"
-        @levels-loaded="onLevelsLoaded"
-      />
-      <RecommendationsPage />
+      <template v-if="activeView === 'history'">
+        <HistoryPage
+          :items="historyItems"
+          @select="onHistorySelect"
+          @remove="onHistoryRemove"
+          @clear="onHistoryClear"
+        />
+      </template>
+      <template v-else>
+        <WatchPage
+          :cid="currentCid"
+          :ipfs-base-url="currentIpfsBaseUrl"
+          :m3u8-url="currentM3u8Url"
+          :poster-url="currentPosterUrl"
+          :subtitles="currentSubtitleTracks"
+          :start-time="currentStartTime"
+          :should-autoplay="currentShouldAutoplay"
+          :video-info="currentVideoInfo"
+          @status-update="onStatusUpdate"
+          @levels-loaded="onLevelsLoaded"
+          @playback-snapshot="onPlaybackSnapshot"
+        />
+        <RecommendationsPage />
+      </template>
     </main>
   </div>
 </template>
