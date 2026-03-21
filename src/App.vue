@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import Header from './components/Header.vue';
 import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
@@ -7,7 +7,13 @@ import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
 import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
-import { fetchSubtitleManifest, resolveSubtitleTracks } from './utils/subtitles';
+import {
+  fetchSubtitleManifest,
+  mergeSubtitleTracks,
+  persistSubtitlePreference,
+  resolveSubtitleTracks,
+  revokeImportedSubtitleTracks,
+} from './utils/subtitles';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 import {
@@ -24,7 +30,11 @@ const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
 const currentVideoInfo = ref(createDefaultVideoInfo());
-const currentSubtitleTracks = ref([]);
+const currentRemoteSubtitleTracks = ref([]);
+const currentImportedSubtitleTracks = ref([]);
+const currentSubtitleTracks = computed(() =>
+  mergeSubtitleTracks(currentRemoteSubtitleTracks.value, currentImportedSubtitleTracks.value)
+);
 const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const currentCid = ref('');
@@ -44,10 +54,36 @@ function resetPlaybackState() {
   currentIpfsBaseUrl.value = '';
   currentPosterUrl.value = '';
   currentVideoInfo.value = createDefaultVideoInfo();
-  currentSubtitleTracks.value = [];
+  clearImportedSubtitles();
+  currentRemoteSubtitleTracks.value = [];
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
   status.value = '準備就緒';
+}
+
+function normalizeLocale(value) {
+  return typeof value === 'string' ? value.trim().replace(/_/g, '-').toLowerCase() : '';
+}
+
+function clearImportedSubtitles() {
+  revokeImportedSubtitleTracks(currentImportedSubtitleTracks.value);
+  currentImportedSubtitleTracks.value = [];
+}
+
+function replaceImportedSubtitle(nextTrack) {
+  const nextLocale = normalizeLocale(nextTrack?.lang);
+  const remainingTracks = [];
+
+  currentImportedSubtitleTracks.value.forEach((track) => {
+    if (normalizeLocale(track?.lang) === nextLocale) {
+      revokeImportedSubtitleTracks([track]);
+      return;
+    }
+
+    remainingTracks.push(track);
+  });
+
+  currentImportedSubtitleTracks.value = [...remainingTracks, nextTrack].sort((left, right) => left.order - right.order);
 }
 
 function commitHistoryUrl(mode, url) {
@@ -155,6 +191,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopHistorySync();
   stopUrlSync();
+  clearImportedSubtitles();
 });
 
 function onSearchCid(cid, time = 0) {
@@ -184,7 +221,7 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const requestSeq = ++metadataRequestSeq;
 
   persistCurrentHistory();
-
+  const shouldClearImportedSubtitles = currentCid.value && currentCid.value !== cid;
   currentCid.value = cid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
@@ -199,7 +236,10 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentM3u8Url.value = m3u8Url;
   currentPosterUrl.value = posterUrl;
   currentVideoInfo.value = createDefaultVideoInfo();
-  currentSubtitleTracks.value = [];
+  if (shouldClearImportedSubtitles) {
+    clearImportedSubtitles();
+  }
+  currentRemoteSubtitleTracks.value = [];
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
   persistHistoryEntry({
@@ -222,6 +262,36 @@ function onStatusUpdate(newStatus) {
 
 function onLevelsLoaded(levels) {}
 
+function onSubtitleImport(importedTrack) {
+  if (!importedTrack) {
+    return;
+  }
+
+  replaceImportedSubtitle(importedTrack);
+  persistSubtitlePreference(
+    {
+      mode: 'showing',
+      lang: importedTrack.lang,
+    },
+    window
+  );
+}
+
+function onSubtitleRemove(trackId) {
+  const nextImportedTracks = [];
+
+  currentImportedSubtitleTracks.value.forEach((track) => {
+    if (track.id === trackId) {
+      revokeImportedSubtitleTracks([track]);
+      return;
+    }
+
+    nextImportedTracks.push(track);
+  });
+
+  currentImportedSubtitleTracks.value = nextImportedTracks;
+}
+
 async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
   const [nextVideoInfo, subtitleManifest] = await Promise.all([
     fetchVideoInfo(ipfsBaseUrl).catch(() => createDefaultVideoInfo()),
@@ -231,7 +301,7 @@ async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
   if (requestSeq !== metadataRequestSeq) return;
 
   currentVideoInfo.value = nextVideoInfo;
-  currentSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
+  currentRemoteSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleManifest);
   const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
   persistHistoryEntry({
     cid: currentCid.value,
@@ -397,12 +467,16 @@ function onPlaybackSnapshot(snapshot) {
           :m3u8-url="currentM3u8Url"
           :poster-url="currentPosterUrl"
           :subtitles="currentSubtitleTracks"
+          :remote-subtitles="currentRemoteSubtitleTracks"
+          :imported-subtitles="currentImportedSubtitleTracks"
           :start-time="currentStartTime"
           :should-autoplay="currentShouldAutoplay"
           :video-info="currentVideoInfo"
           @status-update="onStatusUpdate"
           @levels-loaded="onLevelsLoaded"
           @playback-snapshot="onPlaybackSnapshot"
+          @subtitle-import="onSubtitleImport"
+          @subtitle-remove="onSubtitleRemove"
         />
         <RecommendationsPage />
       </template>

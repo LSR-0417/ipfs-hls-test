@@ -205,6 +205,31 @@ test.describe('Responsive Video Actions', () => {
     expect(dialogBox.x).toBeLessThanOrEqual(2);
     expect(dialogBox.y + dialogBox.height).toBeGreaterThanOrEqual(810);
   });
+
+  test('opens the subtitle dialog from the overflow menu and imports a local SRT file', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page, './?cid=bafysubtitleimport123');
+
+    await page.getByTestId('video-info-overflow-trigger').click();
+    await page.getByTestId('video-info-overflow-item-subtitles').click();
+
+    const dialog = page.getByTestId('subtitle-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('Ready');
+    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('0 imported subtitles');
+
+    await page.getByTestId('subtitle-dialog-file-input').setInputFiles({
+      name: 'episode.en.srt',
+      mimeType: 'application/x-subrip',
+      buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,500\nHello from SRT\n'),
+    });
+
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('已匯入 English (Local)');
+    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('Session active');
+    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('1 imported subtitle');
+    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('English (Local)');
+    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.en.vtt');
+  });
 });
 
 test.describe('Responsive Gateway Dialog', () => {
