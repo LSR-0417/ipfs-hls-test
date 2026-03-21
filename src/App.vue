@@ -5,7 +5,14 @@ import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
 import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
-import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
+import {
+  buildGatewayAssetUrl,
+  defaultPublicGateway,
+  isLoopbackGatewayUrl,
+  normalizeGatewayUrl,
+  persistGateway,
+  readStoredGateway,
+} from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
 import {
   fetchSubtitleManifest,
@@ -24,7 +31,7 @@ import {
 } from './utils/history';
 
 const allowPrivateGateways = import.meta.env.DEV;
-const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
+const DEFAULT_GATEWAY = defaultPublicGateway;
 const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
@@ -263,6 +270,20 @@ function onStatusUpdate(newStatus) {
 
 function onLevelsLoaded(levels) {}
 
+function onGatewayFallbackRequest(payload = {}) {
+  const cid = typeof payload?.cid === 'string' ? payload.cid.trim() : '';
+  const failedGateway = typeof payload?.gateway === 'string' ? payload.gateway.trim() : '';
+
+  if (!cid || cid !== currentCid.value || failedGateway !== currentGateway.value || !isLoopbackGatewayUrl(failedGateway)) {
+    return;
+  }
+
+  loadVideo(cid, defaultPublicGateway, payload.startTime || 0, {
+    updateUrl: false,
+    shouldAutoplay: payload.shouldAutoplay === true,
+  });
+}
+
 function onSubtitleImport(importedTrack) {
   if (!importedTrack) {
     return;
@@ -495,6 +516,7 @@ function closeSidebar() {
           :should-autoplay="currentShouldAutoplay"
           :video-info="currentVideoInfo"
           @status-update="onStatusUpdate"
+          @gateway-fallback-request="onGatewayFallbackRequest"
           @levels-loaded="onLevelsLoaded"
           @playback-snapshot="onPlaybackSnapshot"
           @subtitle-import="onSubtitleImport"

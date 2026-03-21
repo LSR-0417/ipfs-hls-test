@@ -50,10 +50,21 @@ defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-import', 'subtitle-remove']);
+const emit = defineEmits([
+  'status-update',
+  'gateway-fallback-request',
+  'levels-loaded',
+  'playback-snapshot',
+  'subtitle-import',
+  'subtitle-remove',
+]);
 
 function handleStatusUpdate(nextStatus) {
   emit('status-update', nextStatus);
+}
+
+function handleGatewayFallbackRequest(payload) {
+  emit('gateway-fallback-request', payload);
 }
 
 function handleLevelsLoaded(levels) {
@@ -87,6 +98,7 @@ function handleSubtitleRemove(trackId) {
       :start-time="startTime"
       :should-autoplay="shouldAutoplay"
       @status-update="handleStatusUpdate"
+      @gateway-fallback-request="handleGatewayFallbackRequest"
       @levels-loaded="handleLevelsLoaded"
       @playback-snapshot="handlePlaybackSnapshot"
     />
