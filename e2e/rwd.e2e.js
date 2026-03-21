@@ -69,6 +69,8 @@ test.describe('Responsive Page Shell', () => {
           position: styles.position,
           width: parseFloat(styles.width),
           height: parseFloat(styles.height),
+          opacity: parseFloat(styles.opacity),
+          pointerEvents: styles.pointerEvents,
         };
       });
 
@@ -76,35 +78,46 @@ test.describe('Responsive Page Shell', () => {
         expect(sidebarStyle.position).toBe('fixed');
         expect(sidebarStyle.height).toBeGreaterThanOrEqual(58);
       } else {
-        expect(sidebarStyle.position).not.toBe('fixed');
-        expect(sidebarStyle.width).toBeGreaterThanOrEqual(80);
+        expect(sidebarStyle.position).toBe('fixed');
+        expect(sidebarStyle.width).toBeGreaterThanOrEqual(200);
+        expect(sidebarStyle.opacity).toBeLessThanOrEqual(0.05);
+        expect(sidebarStyle.pointerEvents).toBe('none');
       }
     });
   }
 
-  test('collapses the desktop sidebar from the header toggle', async ({ page }) => {
+  test('opens the desktop sidebar as a left drawer from the header toggle', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await openApp(page);
 
     const sidebar = page.getByTestId('app-sidebar');
     const toggle = page.getByTestId('header-sidebar-toggle');
-    const readSidebarWidth = () =>
+    const readSidebarOpacity = () =>
       sidebar.evaluate((node) => {
         const styles = window.getComputedStyle(node);
-        return parseFloat(styles.width);
+        return parseFloat(styles.opacity);
+      });
+    const readSidebarRightEdge = () =>
+      sidebar.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.x + rect.width;
       });
 
-    const expandedWidth = await readSidebarWidth();
-    expect(expandedWidth).toBeGreaterThan(200);
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(await readSidebarOpacity()).toBeLessThanOrEqual(0.05);
+    expect(await readSidebarRightEdge()).toBeLessThanOrEqual(24);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('sidebar-backdrop')).toHaveCount(0);
 
     await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(readSidebarWidth).toBeLessThan(expandedWidth - 100);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('sidebar-backdrop')).toBeVisible();
+    await expect.poll(readSidebarOpacity).toBeGreaterThan(0.95);
+    await expect.poll(readSidebarRightEdge).toBeGreaterThan(220);
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await expect.poll(readSidebarWidth).toBeGreaterThan(expandedWidth - 2);
+    await page.getByTestId('sidebar-backdrop').click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('sidebar-backdrop')).toHaveCount(0);
+    await expect.poll(readSidebarOpacity).toBeLessThanOrEqual(0.05);
   });
 });
 

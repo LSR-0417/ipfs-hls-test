@@ -22,11 +22,11 @@
 先看這段，就能理解這組按鈕的核心：
 
 - 右上角按鈕是 header 工具列，不是資訊卡片
-- `Gateway` 與 `Account` 必須共享同一套設計語言
+- `Language`、`Gateway`、`Account` 這類右上角 action 應共享同一套設計語言
 - icon 代表「這是什麼按鈕」，status ring 代表「現在狀態如何」
 - 狀態視覺必須留在按鈕內，不可外溢
 - 搜尋列的可用性比次要按鈕文案更重要
-- 在 `375px` 寬度下，`Gateway` 必須可收斂為 icon-only
+- 在 `375px` 寬度下，`Gateway` 必須可收斂為 icon-only；同系列按鈕應遵守同樣收斂節奏
 
 ## 3. 怎麼閱讀這份文件
 
@@ -103,6 +103,7 @@ icon 的責任是代表「這顆按鈕是什麼」；狀態視覺的責任是代
 - 相同 icon chip 尺寸
 - 相同字級層級
 - 相同 hover / focus 回饋
+- 相同的寬度契約：先定義最小與最大寬度，再在上限內盡量顯示文字
 - 相同 RWD 收斂策略
 
 ### 4.4 規則等級
@@ -112,13 +113,15 @@ icon 的責任是代表「這顆按鈕是什麼」；狀態視覺的責任是代
 - Header action buttons 必須共享同一套 `action-btn` 結構
 - icon 尺寸必須固定，不得因狀態提示而縮小
 - 狀態視覺必須留在按鈕本體內，不得外溢
+- 帶文字的 header action button 必須定義 `min-width` 與 `max-width`
 - 最窄寬度下，`Gateway` 必須允許收斂為 icon-only
 - 搜尋列的可用寬度優先於次要 header action 文案
 
 #### SHOULD
 
-- `Gateway` 與 `Account` 應共享相同的 icon chip 尺寸與按鈕高度
+- `Language`、`Gateway` 與 `Account` 應共享相同的 icon chip 尺寸與按鈕高度
 - hover / focus 應保持低邊界感
+- 文字應在 `max-width` 內盡量完整顯示，超過上限才安全截斷
 - gateway 名稱應優先安全截斷，而不是壓縮搜尋列到不可用
 
 #### MUST NOT
@@ -127,6 +130,7 @@ icon 的責任是代表「這顆按鈕是什麼」；狀態視覺的責任是代
 - 不得把 badge、counter、狀態點同時堆在同一顆 header action 上
 - 不得讓狀態裝飾超出按鈕邊界
 - 不得在最窄寬度下保留會破壞 header 版面的多層文字
+- 不得讓文字型按鈕沒有寬度上限，導致搜尋列被持續擠壓
 
 ## 5. 結構契約
 
@@ -147,6 +151,7 @@ button.action-btn
 - `action-btn-visual` 是 icon chip，不可省略
 - `action-btn-copy` 是文字區，可依 viewport 收合或隱藏
 - 若按鈕需要 live status，狀態視覺必須掛在 `action-btn-visual` 內部
+- 若按鈕需要 menu / popover anchor，可在外層包一層 positioning shell，但可點擊主體仍須是 `button.action-btn`
 
 前端與 LLM 的實作要求：
 
@@ -165,12 +170,16 @@ button.action-btn
 - icon：基準 `18 x 18`
 - 窄版 icon chip：`30 x 30`
 - 窄版 icon：基準 `16 x 16`
+- Desktop 寬度基準：`Language 96px-220px`、`Gateway 104px-244px`、`Account 96px-180px`
+- `<= 768px` 寬度基準：`Language 92px-188px`、`Gateway 100px-196px`
+- `<= 480px` 寬度基準：`Language 88px-160px`、`Gateway 96px-176px`
 
 若 icon path 視覺上偏小，可做有限度的 per-icon scale 補償，但應優先確認是否能改用更合適的 path。
 
 前端與 LLM 應優先：
 
 - 保住共用尺寸
+- 保住既有 `min-width` / `max-width` 寬度契約
 - 再微調個別 icon scale
 
 不應先改壞共用尺寸，再用更多例外規則補救。
@@ -242,7 +251,7 @@ LLM 不應：
 
 ### 6.6 非狀態型按鈕
 
-像 `Account` 這類沒有 live system health 的按鈕，不應勉強套用狀態 ring。
+像 `Language`、`Account` 這類沒有 live system health 的按鈕，不應勉強套用狀態 ring。
 
 這類按鈕只需要：
 
@@ -256,25 +265,35 @@ LLM 不應：
 
 桌面寬度下：
 
-- `Gateway` 與 `Account` 皆顯示
+- `Language`、`Gateway` 與 `Account` 皆可顯示
 - 顯示 `label + title`
-- 允許 gateway 名稱被安全截斷，但不應只剩一兩個字元
+- 各按鈕在各自的 `min-width` / `max-width` 區間內伸縮
+- 允許 title 被安全截斷，但不應在仍有可用寬度時過早退化為 icon-only
 
 ### 7.2 Tablet / 中窄寬度
 
 中窄寬度下：
 
 - `Account` 可優先隱藏
-- `Gateway` 保留 icon 與主要文字
+- `Language` 與 `Gateway` 保留 icon 與主要文字
 - 搜尋列優先取得足夠可輸入空間
 
-### 7.3 最窄寬度
+### 7.3 小螢幕過渡區
+
+以 `<= 480px` 為過渡區時：
+
+- `Language` 與 `Gateway` 仍應優先保留文字
+- 透過更窄的 `min-width` / `max-width` 區間收斂，而不是直接變成 icon-only
+- title 可比桌面更早截斷，但不能破壞搜尋列可用性
+
+### 7.4 最窄寬度
 
 最窄寬度以 `iPhone 13 mini` 的 `375px` 為驗證下限。
 
 規則如下：
 
 - `Account` 隱藏
+- `Language` 可收斂為 icon-only
 - `Gateway` 只保留 icon chip 與 status ring
 - 文字完全隱藏
 - 搜尋 placeholder 可縮短為 `Search CID`
@@ -290,6 +309,7 @@ LLM 不應：
 - 不要把 badge、counter、live dot 同時堆進一顆按鈕
 - 若需要新的狀態語意，應先定義「是類型、是健康狀態，還是未讀數量」
 - 同一顆按鈕只能有一種主要狀態通道，避免語意打架
+- 新增帶文字的 action 時，必須先定義自己的 `min-width` / `max-width`
 
 以下元件不應直接套用這套語言：
 
@@ -304,8 +324,9 @@ LLM 不應：
 1. icon chip 是否仍與同系列按鈕等尺寸
 2. 狀態視覺是否超出按鈕外框
 3. 文字是否遵守 `label` / `title` 兩層限制
-4. `375px` 寬度下搜尋列是否仍可正常使用
-5. `hover` / `focus` 是否像工具列按鈕，而不是卡片
+4. 各按鈕是否仍維持合理的 `min-width` / `max-width`
+5. `480px` 與 `375px` 寬度下搜尋列是否仍可正常使用
+6. `hover` / `focus` 是否像工具列按鈕，而不是卡片
 
 ## 10. LLM 交付清單
 
@@ -313,12 +334,14 @@ LLM 不應：
 
 1. 改了哪些檔案
 2. 是否影響 `src/components/Header.vue`
-3. 是否影響 `375px` 寬度行為
-4. 是否新增或移除了狀態視覺
-5. 是否已執行至少一項驗證
+3. 是否調整了 header action 的 `min-width` / `max-width`
+4. 是否影響 `480px` 或 `375px` 寬度行為
+5. 是否新增或移除了狀態視覺
+6. 是否已執行至少一項驗證
 
 建議驗證方式：
 
 - `npm run build`
 - Desktop 截圖檢查
+- `480px` 窄版截圖檢查
 - `375px` 窄版截圖檢查

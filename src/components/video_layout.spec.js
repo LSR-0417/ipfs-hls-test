@@ -15,6 +15,7 @@ describe('App layout contract', () => {
   it('renders watch and recommendations directly inside main-content and no longer uses the old status message slot', () => {
     const descriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
     const appStyle = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
     const watchPageIndex = template.indexOf('<WatchPage');
@@ -28,6 +29,9 @@ describe('App layout contract', () => {
     expect(template).not.toContain('data-testid="primary-column"');
     expect(template).not.toContain('data-testid="secondary-column"');
     expect(template).not.toContain('data-testid="page-shell"');
+    expect(template).toContain('@gateway-fallback-request="onGatewayFallbackRequest"');
+    expect(script).toContain('defaultPublicGateway');
+    expect(script).toContain('function onGatewayFallbackRequest(payload = {}) {');
     expect(appStyle).toContain('.main-content');
     expect(appStyle).toContain('padding: 0;');
     expect(appStyle).toContain('flex-direction: column;');
@@ -55,14 +59,16 @@ describe('WatchPage layout contract', () => {
     expect(playerContainerIndex).toBeGreaterThan(-1);
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);
-    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot', 'subtitle-import', 'subtitle-remove']);");
+    expect(script).toContain("'gateway-fallback-request'");
     expect(script).toContain("import VideoPlayer from './VideoPlayer.vue';");
     expect(script).toContain("import VideoInfo from './VideoInfo.vue';");
     expect(template).toContain('@playback-snapshot="handlePlaybackSnapshot"');
+    expect(template).toContain('@gateway-fallback-request="handleGatewayFallbackRequest"');
     expect(template).toContain(':remote-subtitles="remoteSubtitles"');
     expect(template).toContain(':imported-subtitles="importedSubtitles"');
     expect(template).toContain('@subtitle-import="handleSubtitleImport"');
     expect(template).toContain('@subtitle-remove="handleSubtitleRemove"');
+    expect(script).toContain("function handleGatewayFallbackRequest(payload) {");
     expect(script).toContain("function handlePlaybackSnapshot(snapshot) {");
     expect(script).toContain("function handleSubtitleImport(importedTrack) {");
     expect(script).toContain("function handleSubtitleRemove(trackId) {");
@@ -113,13 +119,18 @@ describe('VideoPlayer playback persistence contract', () => {
     const descriptor = readDescriptor(new URL('./VideoPlayer.vue', import.meta.url));
     const script = descriptor.scriptSetup?.content || '';
 
-    expect(script).toContain("const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);");
+    expect(script).toContain("const emit = defineEmits(['status-update', 'gateway-fallback-request', 'levels-loaded', 'playback-snapshot']);");
     expect(script).toContain("import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';");
     expect(script).toContain("const PROGRESS_EMIT_STEP_SECONDS = 5;");
+    expect(script).toContain('shouldAutoFallbackGateway');
+    expect(script).toContain('isLoopbackGatewayUrl');
+    expect(script).toContain('function requestGatewayFallback(reason = null, options = {}) {');
+    expect(script).toContain('dedupeKey: `source:${seq}`');
     expect(script).toContain("player.on('pause', handlePauseSnapshot);");
     expect(script).toContain("player.on('ended', handleEndedSnapshot);");
     expect(script).toContain("player.on('seeked', handleSeekedSnapshot);");
     expect(script).toContain("player.on('timeupdate', handleTimeupdateSnapshot);");
+    expect(script).toContain("player.one('error', () => {");
     expect(script).toContain("emit('playback-snapshot', {");
   });
 });
@@ -160,9 +171,11 @@ describe('RecommendationsPage layout contract', () => {
     const style = getFirstStyleContent(descriptor);
 
     expect(template).toContain('<section class="recommendations-page" data-testid="recommendations-page">');
-    expect(template).toContain('<h2 class="recommendations-title" data-testid="recommendations-title">Recommended Next</h2>');
+    expect(template).toContain("<h2 class=\"recommendations-title\" data-testid=\"recommendations-title\">{{ t('recommendations.title') }}</h2>");
     expect(template).toContain('<VideoGrid />');
     expect(script).toContain("import VideoGrid from './VideoGrid.vue';");
+    expect(script).toContain("import { useI18n } from '../i18n';");
+    expect(script).toContain("const { t } = useI18n();");
     expect(style).toContain('.recommendations-page');
     expect(style).toContain('flex-direction: column;');
     expect(style).toContain('margin: 0 0 0 16px;');

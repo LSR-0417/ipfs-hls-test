@@ -5,7 +5,15 @@ import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
 import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
-import { buildGatewayAssetUrl, getDefaultGateway, normalizeGatewayUrl, persistGateway, readStoredGateway } from './utils/gateway';
+import {
+  buildGatewayAssetUrl,
+  defaultPublicGateway,
+  getDefaultGateway,
+  isLoopbackGatewayUrl,
+  normalizeGatewayUrl,
+  persistGateway,
+  readStoredGateway,
+} from './utils/gateway';
 import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
 import {
   fetchSubtitleManifest,
@@ -42,7 +50,7 @@ const currentGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
 const activeView = ref('home');
 const historyItems = ref([]);
-const isSidebarCollapsed = ref(false);
+const isSidebarOpen = ref(false);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -263,6 +271,20 @@ function onStatusUpdate(newStatus) {
 
 function onLevelsLoaded(levels) {}
 
+function onGatewayFallbackRequest(payload = {}) {
+  const cid = typeof payload?.cid === 'string' ? payload.cid.trim() : '';
+  const failedGateway = typeof payload?.gateway === 'string' ? payload.gateway.trim() : '';
+
+  if (!cid || cid !== currentCid.value || failedGateway !== currentGateway.value || !isLoopbackGatewayUrl(failedGateway)) {
+    return;
+  }
+
+  loadVideo(cid, defaultPublicGateway, payload.startTime || 0, {
+    updateUrl: false,
+    shouldAutoplay: payload.shouldAutoplay === true,
+  });
+}
+
 function onSubtitleImport(importedTrack) {
   if (!importedTrack) {
     return;
@@ -403,6 +425,7 @@ function onViewSelect(nextView) {
     persistCurrentHistory();
     refreshHistory();
     activeView.value = 'history';
+    closeSidebar();
     return;
   }
 
@@ -420,6 +443,7 @@ function onViewSelect(nextView) {
   }
 
   activeView.value = 'home';
+  closeSidebar();
 }
 
 function onHistorySelect(item) {
@@ -442,7 +466,11 @@ function onPlaybackSnapshot(snapshot) {
 }
 
 function toggleSidebar() {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+  isSidebarOpen.value = !isSidebarOpen.value;
+}
+
+function closeSidebar() {
+  isSidebarOpen.value = false;
 }
 </script>
 
@@ -452,12 +480,20 @@ function toggleSidebar() {
     :current-gateway="currentGateway"
     :current-cid="currentCid"
     :current-load-sequence="currentLoadSequence"
-    :sidebar-collapsed="isSidebarCollapsed"
+    :sidebar-open="isSidebarOpen"
     @gateway-change="onGatewayChange"
     @toggle-sidebar="toggleSidebar"
   />
   <div class="app-container">
-    <Sidebar :active-view="activeView" :collapsed="isSidebarCollapsed" @view-select="onViewSelect" />
+    <button
+      v-if="isSidebarOpen"
+      type="button"
+      class="sidebar-backdrop"
+      aria-label="Close navigation menu"
+      data-testid="sidebar-backdrop"
+      @click="closeSidebar"
+    ></button>
+    <Sidebar :active-view="activeView" :open="isSidebarOpen" @view-select="onViewSelect" />
     <main class="main-content" data-testid="main-content">
       <template v-if="activeView === 'history'">
         <HistoryPage
@@ -481,6 +517,7 @@ function toggleSidebar() {
           :should-autoplay="currentShouldAutoplay"
           :video-info="currentVideoInfo"
           @status-update="onStatusUpdate"
+          @gateway-fallback-request="onGatewayFallbackRequest"
           @levels-loaded="onLevelsLoaded"
           @playback-snapshot="onPlaybackSnapshot"
           @subtitle-import="onSubtitleImport"

@@ -6,6 +6,7 @@ export const gatewayProbeSegmentSampleCount = 3;
 export const gatewayProbePlaybackRateThreshold = 1.2;
 export const gatewayProbeSmoothPlaybackRateThreshold = 1.8;
 const disabledGatewayHostnames = new Set(['gateway.pinata.cloud']);
+const autoFallbackGatewayStates = new Set(['failed', 'degraded', 'rate_limited', 'redirected']);
 export const publicGatewayOptions = [
   {
     id: 'dweb',
@@ -91,13 +92,39 @@ export function isPrivateHostname(hostname) {
   const normalized = normalizeHostname(hostname);
 
   if (!normalized) return false;
-  if (normalized === 'localhost' || normalized === '::1') return true;
-  if (normalized.startsWith('127.')) return true;
+  if (isLoopbackHostname(normalized)) return true;
   if (normalized.startsWith('10.')) return true;
   if (normalized.startsWith('192.168.')) return true;
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)) return true;
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
   return false;
+}
+
+export function isLoopbackHostname(hostname) {
+  const normalized = normalizeHostname(hostname);
+
+  if (!normalized) return false;
+  if (normalized === 'localhost' || normalized === '::1') return true;
+  return normalized.startsWith('127.');
+}
+
+export function isLoopbackGatewayUrl(input) {
+  const normalized = normalizeGatewayUrl(input, { allowPrivateHosts: true });
+  if (!normalized) return false;
+
+  try {
+    return isLoopbackHostname(new URL(normalized).hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+export function shouldAutoFallbackGateway(gatewayUrl, probeState = {}) {
+  if (!isLoopbackGatewayUrl(gatewayUrl)) {
+    return false;
+  }
+
+  return autoFallbackGatewayStates.has(String(probeState?.state || ''));
 }
 
 export function isDisabledGatewayInput(input, options = {}) {

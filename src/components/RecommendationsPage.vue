@@ -1,10 +1,13 @@
 <script setup>
 import VideoGrid from './VideoGrid.vue';
+import { useI18n } from '../i18n';
+
+const { t } = useI18n();
 </script>
 
 <template>
   <section class="recommendations-page" data-testid="recommendations-page">
-    <h2 class="recommendations-title" data-testid="recommendations-title">Recommended Next</h2>
+    <h2 class="recommendations-title" data-testid="recommendations-title">{{ t('recommendations.title') }}</h2>
     <VideoGrid />
   </section>
 </template>

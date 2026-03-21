@@ -34,7 +34,7 @@
 - 內建公開 gateway：`dweb.link`、`ipfs.io`
 - 自訂 gateway：只接受公開 `HTTPS` `/ipfs/` base URL
 - `Local Node` 設定只在開發模式 (`import.meta.env.DEV`) 顯示
-- 右上角 action buttons 目前採用統一系列設計，包含 `Gateway` 與 `Account`
+- 右上角 action buttons 目前採用統一系列設計，包含 `Language`、`Gateway` 與 `Account`
 - Gateway 按鈕會顯示目前 gateway 名稱與 probe 狀態 ring
 - Dialog 內會顯示背景 probe 排名、`Recommended` 標記與 `Recheck Now`
 

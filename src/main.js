@@ -1,5 +1,6 @@
 import { createApp } from 'vue';
 import App from './App.vue';
+import { createI18n } from './i18n';
 
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
@@ -9,4 +10,10 @@ window.videojs = videojs;
 
 import 'videojs-hls-quality-selector';
 
-createApp(App).mount('#app');
+const app = createApp(App);
+const i18n = createI18n({
+  window,
+});
+
+app.use(i18n);
+app.mount('#app');

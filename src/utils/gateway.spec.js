@@ -7,6 +7,8 @@ import {
   gatewayProbeSegmentSampleCount,
   gatewayStorageKey,
   isDisabledGatewayInput,
+  isLoopbackGatewayUrl,
+  isLoopbackHostname,
   isPrivateHostname,
   normalizeGatewayUrl,
   persistCustomGateway,
@@ -14,6 +16,7 @@ import {
   probeGatewayAvailability,
   readStoredCustomGateway,
   readStoredGateway,
+  shouldAutoFallbackGateway,
 } from './gateway';
 
 function createStorage() {
@@ -129,6 +132,33 @@ describe('isPrivateHostname', () => {
   it('does not treat public hosts as private', () => {
     expect(isPrivateHostname('gateway.pinata.cloud')).toBe(false);
     expect(isPrivateHostname('8.8.8.8')).toBe(false);
+  });
+});
+
+describe('isLoopbackHostname', () => {
+  it('detects localhost and 127.x loopback hosts only', () => {
+    expect(isLoopbackHostname('localhost')).toBe(true);
+    expect(isLoopbackHostname('127.0.0.1')).toBe(true);
+    expect(isLoopbackHostname('192.168.1.7')).toBe(false);
+    expect(isLoopbackHostname('10.0.0.8')).toBe(false);
+  });
+});
+
+describe('isLoopbackGatewayUrl', () => {
+  it('matches loopback gateways but not LAN or public gateways', () => {
+    expect(isLoopbackGatewayUrl('http://127.0.0.1:8080/ipfs/')).toBe(true);
+    expect(isLoopbackGatewayUrl('http://localhost:8080/ipfs/')).toBe(true);
+    expect(isLoopbackGatewayUrl('http://192.168.1.5:8080/ipfs/')).toBe(false);
+    expect(isLoopbackGatewayUrl('https://dweb.link/ipfs/')).toBe(false);
+  });
+});
+
+describe('shouldAutoFallbackGateway', () => {
+  it('only auto-falls back for loopback gateways in terminal probe states', () => {
+    expect(shouldAutoFallbackGateway('http://127.0.0.1:8080/ipfs/', { state: 'failed' })).toBe(true);
+    expect(shouldAutoFallbackGateway('http://127.0.0.1:8080/ipfs/', { state: 'degraded' })).toBe(true);
+    expect(shouldAutoFallbackGateway('http://127.0.0.1:8080/ipfs/', { state: 'playlist_ready' })).toBe(false);
+    expect(shouldAutoFallbackGateway('https://dweb.link/ipfs/', { state: 'failed' })).toBe(false);
   });
 });
 

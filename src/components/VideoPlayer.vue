@@ -92,7 +92,9 @@ import 'video.js/dist/video-js.css';
 import {
   gatewayProbePlaybackRateThreshold,
   gatewayProbeSegmentSampleCount,
+  isLoopbackGatewayUrl,
   probeGatewayAvailability,
+  shouldAutoFallbackGateway,
 } from '../utils/gateway';
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
@@ -151,7 +153,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['status-update', 'levels-loaded', 'playback-snapshot']);
+const emit = defineEmits(['status-update', 'gateway-fallback-request', 'levels-loaded', 'playback-snapshot']);
 
 const SOURCE_SWITCH_MODE_DEFAULT = 'direct';
 const SOURCE_SWITCH_MODE_GATEWAY_HANDOFF = 'gateway_handoff';
@@ -249,6 +251,7 @@ let startupGateMeasuredPlaybackRate = null;
 let startupInitialRenditionCount = null;
 let pendingSourceStartTime = 0;
 let pendingSourceShouldAutoplay = false;
+let lastGatewayFallbackKey = '';
 const showStartupGate = ref(false);
 const startupGateTitle = ref('');
 const startupGateDetail = ref('');
@@ -610,6 +613,90 @@ async function resumePlaybackIfNeeded() {
   }
 }
 
+function resolvePlaybackErrorDetail(error) {
+  const message = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (message) {
+    return message;
+  }
+
+  const code = Number(error?.code);
+  if (Number.isFinite(code)) {
+    return `播放器錯誤 (CODE:${code})`;
+  }
+
+  return '播放器無法載入來源';
+}
+
+function requestGatewayFallback(reason = null, options = {}) {
+  const {
+    sourceGuard = null,
+    dedupeKey = '',
+    gateway = props.gateway,
+    startTime = props.startTime,
+    shouldAutoplay = props.shouldAutoplay,
+  } = options;
+
+  if (
+    !player ||
+    (sourceGuard !== null && sourceGuard !== sourceSeq) ||
+    (dedupeKey && lastGatewayFallbackKey === dedupeKey) ||
+    !props.cid ||
+    !isLoopbackGatewayUrl(gateway)
+  ) {
+    return false;
+  }
+
+  if (dedupeKey) {
+    lastGatewayFallbackKey = dedupeKey;
+  }
+  isSwitchingSource = false;
+
+  const snapshot = getPlayerPlaybackSnapshot(player);
+  const fallbackDetail =
+    typeof reason?.detail === 'string' && reason.detail.trim() ? reason.detail.trim() : 'Local Node 無法讀取這個 CID';
+
+  updateStartupGate('Local Node 無法讀取這個 CID', `${fallbackDetail}，改用公開 gateway 重試中`);
+  emit('status-update', 'Local Node 無法讀取這個 CID，改用公開 gateway 重試中...');
+  emit('gateway-fallback-request', {
+    cid: props.cid,
+    gateway,
+    startTime: snapshot.time > 0 ? snapshot.time : startTime,
+    shouldAutoplay: shouldAutoplay || snapshot.isPlaying,
+    reason,
+  });
+  return true;
+}
+
+function handleSourceError(seq = sourceSeq) {
+  if (!player || seq !== sourceSeq) return;
+
+  isSwitchingSource = false;
+  const error = typeof player.error === 'function' ? player.error() : null;
+  const detail = resolvePlaybackErrorDetail(error);
+
+  if (
+    requestGatewayFallback(
+      {
+        state: 'failed',
+        detail,
+        code: Number(error?.code),
+      },
+      {
+        sourceGuard: seq,
+        dedupeKey: `source:${seq}`,
+      }
+    )
+  ) {
+    return;
+  }
+
+  if (showStartupGate.value) {
+    updateStartupGate('影片載入失敗', detail);
+  }
+
+  emit('status-update', `影片載入失敗：${detail}`);
+}
+
 function beginSourceSwitch() {
   if (!player) return 0;
 
@@ -731,6 +818,17 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
     });
 
     if (!player || setupRequestId !== sourceSetupRequestSeq) return;
+
+    if (
+      shouldAutoFallbackGateway(props.gateway, warmupResult) &&
+      requestGatewayFallback(warmupResult, {
+        dedupeKey: `warmup:${setupRequestId}`,
+        startTime: probeStartTime,
+        shouldAutoplay: handoffSnapshot?.shouldAutoplay ?? props.shouldAutoplay,
+      })
+    ) {
+      return;
+    }
   }
 
   const cutoverSnapshot =
@@ -758,6 +856,9 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
   });
   bindQualityLevelListeners();
   configureStartupRenditionStrategy(warmupResult, { runStartupWarmup });
+  player.one('error', () => {
+    handleSourceError(seq);
+  });
   applySubtitleTracks(subtitles, seq);
 
   player.one('loadedmetadata', () => {

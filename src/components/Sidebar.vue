@@ -1,40 +1,42 @@
 <script setup>
 import { computed } from 'vue';
+import { useI18n } from '../i18n';
 
 const props = defineProps({
   activeView: {
     type: String,
     default: 'home',
   },
-  collapsed: {
+  open: {
     type: Boolean,
     default: false,
   },
 });
 
 const emit = defineEmits(['view-select']);
+const { t } = useI18n();
 
 const isDevMode = import.meta.env.DEV;
 const appVersion = __APP_VERSION__;
 const branchName = __APP_BRANCH__;
 const worktreeName = __APP_WORKTREE__;
 
-const menuItems = [
-  { id: 'home', label: 'Home', targetView: 'home', icon: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' },
-  { id: 'explore', label: 'Explore', targetView: '', icon: 'M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1c.61 0 1.1-.49 1.1-1.1s-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z' },
-  { id: 'library', label: 'Library', targetView: '', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z' },
-  { id: 'history', label: 'History', targetView: 'history', icon: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z' },
-];
+const menuItems = computed(() => [
+  { id: 'home', label: t('sidebar.menu.home'), targetView: 'home', icon: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' },
+  { id: 'explore', label: t('sidebar.menu.explore'), targetView: '', icon: 'M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1c.61 0 1.1-.49 1.1-1.1s-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z' },
+  { id: 'library', label: t('sidebar.menu.library'), targetView: '', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z' },
+  { id: 'history', label: t('sidebar.menu.history'), targetView: 'history', icon: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z' },
+]);
 
 const homeBuildItems = computed(() => {
   const items = [
-    { label: 'Version', value: `v${appVersion || 'unavailable'}` },
+    { label: t('sidebar.build.version'), value: `v${appVersion || t('common.unavailable')}` },
   ];
 
   if (isDevMode) {
     items.push(
-      { label: 'Worktree', value: worktreeName || 'unavailable' },
-      { label: 'Branch', value: branchName || 'unavailable' }
+      { label: t('sidebar.build.worktree'), value: worktreeName || t('common.unavailable') },
+      { label: t('sidebar.build.branch'), value: branchName || t('common.unavailable') }
     );
   }
 
@@ -52,7 +54,7 @@ function handleMenuItemClick(item) {
 </script>
 
 <template>
-  <nav class="sidebar glass-panel" :class="{ 'is-collapsed': collapsed }" data-testid="app-sidebar">
+  <nav id="app-sidebar" class="sidebar glass-panel" :class="{ 'is-open': open }" data-testid="app-sidebar">
     <div class="menu" data-testid="sidebar-menu">
       <button
         v-for="item in menuItems" 
@@ -61,7 +63,6 @@ function handleMenuItemClick(item) {
         :class="{ active: isMenuItemActive(item), 'is-disabled': !item.targetView }"
         :data-testid="`sidebar-item-${item.id}`"
         type="button"
-        :title="collapsed ? item.label : undefined"
         :disabled="!item.targetView"
         @click="handleMenuItemClick(item)"
       >
@@ -90,18 +91,34 @@ function handleMenuItemClick(item) {
 <style scoped>
 .sidebar {
   width: clamp(212px, 20vw, var(--sidebar-width));
-  height: 100%;
-  border-radius: 0;
+  height: calc(100vh - var(--header-height));
+  position: fixed;
+  top: var(--header-height);
+  left: 0;
+  border-radius: 0 20px 20px 0;
   border-top: none;
   border-left: none;
   border-bottom: none;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 16px 12px;
-  z-index: 90;
+  padding: 18px 12px 16px;
+  z-index: 110;
   overflow: hidden;
-  transition: width 0.24s ease, padding 0.24s ease;
+  transform: translateX(calc(-100% - 18px));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.28s ease,
+    opacity 0.2s ease,
+    box-shadow 0.24s ease;
+}
+
+.sidebar.is-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 28px 56px rgba(0, 0, 0, 0.34);
 }
 
 .menu {
@@ -152,7 +169,6 @@ function handleMenuItemClick(item) {
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: gap 0.24s ease, justify-content 0.24s ease;
 }
 
 .icon-container {
@@ -175,9 +191,6 @@ function handleMenuItemClick(item) {
 .label {
   display: block;
   font-size: 1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.18s ease, width 0.24s ease;
 }
 
 .sidebar-build-info {
@@ -186,13 +199,6 @@ function handleMenuItemClick(item) {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: grid;
   gap: 10px;
-  max-height: 200px;
-  overflow: hidden;
-  transition:
-    opacity 0.18s ease,
-    max-height 0.24s ease,
-    padding 0.24s ease,
-    border-color 0.24s ease;
 }
 
 .sidebar-build-info.is-dev {
@@ -220,47 +226,26 @@ function handleMenuItemClick(item) {
   word-break: break-word;
 }
 
-.sidebar.is-collapsed {
-  width: var(--sidebar-collapsed-width);
-  padding: 16px 10px;
-}
-
-.sidebar.is-collapsed .menu-item {
-  padding: 12px;
-}
-
-.sidebar.is-collapsed .menu-item-main {
-  justify-content: center;
-  gap: 0;
-}
-
-.sidebar.is-collapsed .label {
-  opacity: 0;
-  width: 0;
-}
-
-.sidebar.is-collapsed .sidebar-build-info {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  border-top-color: transparent;
-  pointer-events: none;
-}
-
 @media (max-width: 768px) {
   .sidebar {
     position: fixed;
+    top: auto;
     bottom: 0;
     left: 0;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
     width: 100%;
     height: 60px;
     flex-direction: row;
     padding: 0;
+    border-radius: 0;
     border-right: none;
     border-top: 1px solid var(--panel-border);
     justify-content: center;
     background: rgba(13, 15, 26, 0.9);
     backdrop-filter: blur(20px);
+    box-shadow: none;
   }
 
   .menu {
@@ -284,25 +269,6 @@ function handleMenuItemClick(item) {
   
   .label {
     font-size: 0.65rem;
-  }
-
-  .sidebar.is-collapsed {
-    width: 100%;
-    padding: 0;
-  }
-
-  .sidebar.is-collapsed .menu-item {
-    padding: 4px;
-  }
-
-  .sidebar.is-collapsed .menu-item-main {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .sidebar.is-collapsed .label {
-    opacity: 1;
-    width: auto;
   }
 
   .sidebar-build-info {
