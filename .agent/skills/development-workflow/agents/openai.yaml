@@ -1,0 +1,4 @@
+interface:
+  display_name: "開發流程總覽"
+  short_description: "Legacy 全流程總覽；實作時請改用分階段 skills。"
+  default_prompt: "Use $development-workflow only when you want the legacy all-in-one overview of the team's development loop instead of the newer staged skill architecture."

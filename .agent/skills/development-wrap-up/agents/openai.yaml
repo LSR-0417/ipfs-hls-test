@@ -1,0 +1,4 @@
+interface:
+  display_name: "開發收尾清理"
+  short_description: "檢查並清理開發對話留下的分支、worktree、服務與暫存物。"
+  default_prompt: "Use $development-wrap-up to inspect and clean leftover worktrees, branches, test servers, and temporary artifacts after development is finished."

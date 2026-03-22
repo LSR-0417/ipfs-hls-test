@@ -1,0 +1,4 @@
+interface:
+  display_name: "開發起手式"
+  short_description: "收斂主題、同步主線並建立 worktree、branch、Issue。"
+  default_prompt: "Use $development-kickoff to converge this topic, sync the integration branch, and set up the worktree, branch, and tracking issue before coding."
