@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atomic Commit 訊息"
+  short_description: "拆分 atomic commits 並產生含 body 的完整訊息。"
+  default_prompt: "Use $git-atomic-committer to split the current changes into atomic commits and draft full Traditional Chinese commit messages with subject and body."
