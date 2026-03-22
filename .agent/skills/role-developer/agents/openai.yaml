@@ -1,0 +1,4 @@
+interface:
+  display_name: "軟體工程師角色"
+  short_description: "以軟體工程師的基本素養與要求，支撐團隊協作或獨自運作。"
+  default_prompt: "Use $role-developer as the baseline software engineer role for this conversation, then hand off each concrete step to the appropriate SOP skill."

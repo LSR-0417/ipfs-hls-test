@@ -1,0 +1,4 @@
+interface:
+  display_name: "收尾 SOP"
+  short_description: "發 PR 後檢查未追蹤檔案、清理 worktree 與服務，並判斷是否可安全封存。"
+  default_prompt: "Use $sop-wrap-up to perform post-PR cleanup, inspect untracked files, stop temporary servers, remove safe worktrees, report every action, and decide whether the thread is safe to archive."

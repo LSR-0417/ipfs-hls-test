@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commit SOP"
+  short_description: "拆分 atomic commits 並產生含 body 的完整訊息。"
+  default_prompt: "Use $sop-commit to split the current changes into atomic commits and draft complete commit messages with subject, body, and footer trailers that match the repo convention."

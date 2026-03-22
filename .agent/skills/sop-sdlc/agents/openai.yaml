@@ -1,0 +1,4 @@
+interface:
+  display_name: "SDLC SOP"
+  short_description: "整理需求、設計、開發與測試的專案級協作流程。"
+  default_prompt: "Use $sop-sdlc as the project-level SDLC collaboration reference for requirements, design, implementation, testing, and document synchronization."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "工作區 SOP"
+  short_description: "同步主線並建立具規格命名的 worktree 與 branch。"
+  default_prompt: "Use $sop-workspace to confirm the User Story baseline, sync the integration branch, and create a dedicated worktree and branch with the standard naming style before coding."

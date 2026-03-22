@@ -1,0 +1,4 @@
+interface:
+  display_name: "開案 SOP"
+  short_description: "確認 User Story 與 Spec. Test 是否足以開始開發。"
+  default_prompt: "Use $sop-kickoff to review the current topic, validate the User Story and Spec. Test baseline, and decide whether it is ready for workspace setup."
