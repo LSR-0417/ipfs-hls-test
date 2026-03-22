@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill 撰寫角色"
+  short_description: "套用這個 repo 的 skill 命名、分層、語言與文件結構偏好。"
+  default_prompt: "Use $role-skill-writer when creating or refactoring local skills so they follow this repo's preferred naming, language split, role/SOP architecture, and documentation structure."
