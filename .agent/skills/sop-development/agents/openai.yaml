@@ -1,0 +1,4 @@
+interface:
+  display_name: "開發 SOP"
+  short_description: "控管開發中的複用、測試基準、驗證節奏與變更衛生。"
+  default_prompt: "Use $sop-development to keep the active implementation phase focused, reusable, aligned with TE test baselines, validated, and clean before handing off to $sop-commit."
