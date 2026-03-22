@@ -5,12 +5,12 @@
 ## 1. 目的
 
 - 從最新整合基線切出乾淨的 worktree 與 branch。
-- 讓 worktree、branch、Issue 與主題之間保持可追蹤關係。
+- 讓 worktree、branch、`Issue`、`User Story` 與主題之間保持可追蹤關係。
 - 透過規格化 naming style，降低混亂、誤用與收尾成本。
 
 ## 2. 應作流程
 
-- 先確認主題已收斂，且已有對應 `User Story`。
+- 先確認主題已收斂，且已有對應 `Issue` 與 `User Story`。
 - 檢查主要工作樹狀態，確認 `main` 或 `develop` 沒有未整理修改。
 - 同步主要整合分支，再從最新基線切出新的 branch 與 worktree。
 - 依規格化 naming style 產生 topic slug，並用它命名 branch 與 worktree。

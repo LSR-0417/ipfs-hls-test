@@ -48,7 +48,7 @@
 預期產出物：
 
 - `SDD`（高階系統設計）：由架構師主導，定義系統整體架構與模組劃分，以 Markdown 格式存於 Git Repo 的特定目錄中。
-- 細部設計與版本權威（Single Source of Truth）：全面取代傳統分離式的 `SDDD`。API 規格（如 `Swagger / OpenAPI`）、資料庫綱要與核心業務邏輯說明，皆須以 Markdown 或註解形式，與程式碼一同存放在 Git Repository 中。
+- 細部設計與版本權威（Single Source of Truth）：API 規格（如 `Swagger / OpenAPI`）、資料庫綱要與核心業務邏輯說明，皆須以 Markdown 或註解形式，與程式碼一同存放在 Git Repository 中。
 - 單元測試（`Unit Test`）與程式碼即文件：`Developer` 必須針對核心商業邏輯與演算法撰寫 `Unit Test`。透過 Clean Code 原則與測試案例來解釋邏輯，讓程式碼自己說話。`Unit Test` 的覆蓋率將作為 Code Review 的重要指標。
 - 同步更新的程式碼與文檔：任何程式碼的變動，`Developer` 必須在發起 `PR (Pull Request)` 時同步更新對應的文檔。Reviewer 須一併審查「文檔與程式碼是否同步」。
 - 自動化對外文件：針對需提供給外部部門（如 PM、客戶）的說明文檔，團隊將透過 `CI/CD` 流水線，自動將 Git Repo 中的 Markdown / API Spec 轉換為 `PDF` 或靜態網頁（如 `Docusaurus` / `GitBook`）並發布。
