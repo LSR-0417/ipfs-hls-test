@@ -97,6 +97,14 @@ echo "改名中..."
 
 # 修復檔名：將 playlist 與 segment 重新命名為要求的格式
 
+replace_in_file() {
+    local expression=$1
+    local file_path=$2
+    local temp_file="${file_path}.tmp"
+
+    sed -E "$expression" "$file_path" > "$temp_file" && mv "$temp_file" "$file_path"
+}
+
 # 遍歷剛產出的資料夾
 for dir in "${BASENAME}"/*/; do
     dir=${dir%/} # 去掉結尾斜線
@@ -120,12 +128,12 @@ for dir in "${BASENAME}"/*/; do
 
     # 同步更新 variant playlist 內的 segment 路徑引用。
     if [ -f "$variant_playlist" ]; then
-        sed -E -i '' "s|segment_([0-9]+)\.ts|segment_${folder_name}_\\1.ts|g" "$variant_playlist"
+        replace_in_file "s|segment_([0-9]+)\.ts|segment_${folder_name}_\\1.ts|g" "$variant_playlist"
     fi
 done
 
 # 同步修正 index.m3u8 (Master Playlist) 裡面的路徑引用
 # 只替換同一路徑下的 temp.m3u8，避免所有畫質都被改成相同檔名。
-sed -E -i '' 's|([^/]+)/temp\.m3u8|\1/streaminglist-\1.m3u8|g' "${BASENAME}/index.m3u8"
+replace_in_file 's|([^/]+)/temp\.m3u8|\1/streaminglist-\1.m3u8|g' "${BASENAME}/index.m3u8"
 
 echo "🎉 轉檔與資料夾建置完成！"
