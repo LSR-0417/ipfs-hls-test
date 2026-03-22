@@ -1,4 +1,0 @@
-interface:
-  display_name: "開發者守則"
-  short_description: "整段開發對話共用的輕量 SOP 與做事守則。"
-  default_prompt: "Use $developer-sop as the shared guardrails for this development conversation, then hand off each phase to the appropriate skill."
