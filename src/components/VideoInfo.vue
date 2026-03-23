@@ -19,6 +19,7 @@ const defaultTags = ['IPFS', 'Web3', 'Decentralized'];
 
 const props = defineProps({
   cid: { type: String, default: '' },
+  avatarUrl: { type: String, default: '' },
   ipfsBaseUrl: { type: String, default: '' },
   subtitles: {
     type: Array,
@@ -112,7 +113,7 @@ const avatarUrl = computed(() => {
     return fallbackAvatarUrl.value;
   }
 
-  return buildSidecarAssetUrl(props.ipfsBaseUrl, 'avatar.jpg') || fallbackAvatarUrl.value;
+  return props.avatarUrl || fallbackAvatarUrl.value;
 });
 const displayUploadDateTooltip = computed(() => formatUploadDateTooltip(props.videoInfo.uploadDate));
 const displayRelativeUploadTime = computed(() => {
@@ -171,7 +172,7 @@ const collapsedDescriptionSegments = computed(() => linkifyDescription(collapsed
 let descriptionMeasureSeq = 0;
 
 watch(
-  () => [props.cid, props.ipfsBaseUrl],
+  () => [props.cid, props.ipfsBaseUrl, props.avatarUrl],
   () => {
     avatarLoadFailed.value = false;
     isDescriptionExpanded.value = false;

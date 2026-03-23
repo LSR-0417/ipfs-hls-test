@@ -87,7 +87,7 @@ describe('Sidebar toggle contract', () => {
     expect(appTemplate).toContain('<Sidebar :active-view="activeView" :open="isSidebarOpen" @view-select="onViewSelect" />');
 
     expect(headerScript).toContain("sidebarOpen: { type: Boolean, default: false },");
-    expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);");
+    expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);");
     expect(headerScript).toContain('function toggleSidebar() {');
     expect(headerTemplate).toContain('aria-controls="app-sidebar"');
     expect(headerTemplate).toContain('data-testid="header-sidebar-toggle"');
