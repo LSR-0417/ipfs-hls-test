@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { createImportedSubtitleTrack } from '../utils/subtitles';
+import { createImportedSubtitleTrack, downloadSubtitleTrack } from '../utils/subtitles';
 
 const props = defineProps({
   open: {
@@ -38,10 +38,13 @@ const emit = defineEmits(['close', 'subtitle-import', 'subtitle-remove', 'subtit
 const subtitleDialogRef = ref(null);
 const subtitleFileInputRef = ref(null);
 const isImportingSubtitle = ref(false);
+const downloadingTrackKey = ref('');
 const subtitleStatusText = ref('');
 const subtitleStatusTone = ref('neutral');
+const activeLibraryTab = ref('download');
 
 const hasImportedSubtitles = computed(() => props.importedSubtitles.length > 0);
+const downloadableTracks = computed(() => props.subtitles);
 const currentPrimaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.primaryLang));
 const currentSecondaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.secondaryLang));
 const hasPrimarySubtitle = computed(() => Boolean(currentPrimaryTrack.value));
@@ -64,27 +67,16 @@ const selectionEmptyStateText = computed(() => {
 
   return '這支影片目前沒有可用字幕。';
 });
-const toolbarStatusLabel = computed(() => {
+const importSessionSummary = computed(() => {
   if (isImportingSubtitle.value) {
-    return 'Importing';
-  }
-
-  return hasImportedSubtitles.value ? 'Session active' : 'Ready';
-});
-const toolbarStatusValue = computed(() => {
-  const count = props.importedSubtitles.length;
-  return count === 1 ? '1 imported subtitle' : `${count} imported subtitles`;
-});
-const sessionStatusNote = computed(() => {
-  if (isImportingSubtitle.value) {
-    return 'Preparing the subtitle file and converting it for instant preview.';
+    return '正在整理字幕格式';
   }
 
   if (hasImportedSubtitles.value) {
-    return 'These local tracks stay in this browser session and override matching CID subtitles.';
+    return `本次暫存 ${props.importedSubtitles.length} 條本機字幕`;
   }
 
-  return 'Import a .vtt or .srt file to preview your own subtitle track without changing the CID.';
+  return '尚未匯入本機字幕';
 });
 
 watch(
@@ -98,6 +90,21 @@ watch(
     await nextTick();
     subtitleDialogRef.value?.focus();
   }
+);
+
+watch(
+  () => [hasImportedSubtitles.value, hasAvailableTracks.value],
+  ([nextHasImported, nextHasAvailable]) => {
+    if (activeLibraryTab.value === 'imported' && !nextHasImported && nextHasAvailable) {
+      activeLibraryTab.value = 'download';
+      return;
+    }
+
+    if (activeLibraryTab.value === 'download' && !nextHasAvailable && nextHasImported) {
+      activeLibraryTab.value = 'imported';
+    }
+  },
+  { immediate: true }
 );
 
 function clearStatus() {
@@ -120,6 +127,10 @@ function triggerSubtitlePicker() {
   }
 
   subtitleFileInputRef.value?.click();
+}
+
+function setLibraryTab(nextTab) {
+  activeLibraryTab.value = nextTab === 'imported' ? 'imported' : 'download';
 }
 
 function normalizeLocale(value) {
@@ -146,6 +157,18 @@ function isOverridingCidTrack(track) {
   }
 
   return props.remoteSubtitles.some((remoteTrack) => normalizeLocale(remoteTrack?.lang) === targetLocale);
+}
+
+function getTrackActionKey(track) {
+  return `${track?.source || 'remote'}:${normalizeLocale(track?.lang) || 'und'}:${track?.fileName || track?.label || 'subtitle'}`;
+}
+
+function isTrackPrimary(track) {
+  return normalizeLocale(track?.lang) === normalizeLocale(props.subtitleSelection.primaryLang);
+}
+
+function isTrackSecondary(track) {
+  return normalizeLocale(track?.lang) === normalizeLocale(props.subtitleSelection.secondaryLang);
 }
 
 function resolveImportedSubtitleOrder(nextTrack) {
@@ -221,6 +244,23 @@ function handleRemoveImportedSubtitle(track) {
   emit('subtitle-remove', track.id);
   setStatus(`已移除 ${track.label}`, 'success');
 }
+
+async function handleDownloadSubtitle(track) {
+  const trackKey = getTrackActionKey(track);
+  downloadingTrackKey.value = trackKey;
+  clearStatus();
+
+  try {
+    await downloadSubtitleTrack(track);
+    setStatus(`已開始下載 ${track?.label || track?.lang || '字幕'}`, 'success');
+  } catch (error) {
+    setStatus(error?.message || '字幕下載失敗。', 'error');
+  } finally {
+    if (downloadingTrackKey.value === trackKey) {
+      downloadingTrackKey.value = '';
+    }
+  }
+}
 </script>
 
 <template>
@@ -242,75 +282,58 @@ function handleRemoveImportedSubtitle(track) {
     >
       <div class="subtitle-dialog-header">
         <div class="subtitle-dialog-copy">
-          <h3 id="subtitleDialogTitle">Subtitles</h3>
+          <h3 id="subtitleDialogTitle">字幕控制台</h3>
           <p id="subtitleDialogSubtitle" class="subtitle-dialog-subtitle">
-            Import the subtitle track you already trust and preview it instantly on this video.
+            主字幕請用播放器控制列切換。這裡專心處理匯入字幕、次字幕和字幕檔管理。
           </p>
         </div>
-        <button
-          type="button"
-          class="subtitle-dialog-close"
-          aria-label="Close subtitle dialog"
-          data-testid="subtitle-dialog-close"
-          @click="closeDialog"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"
+
+        <div class="subtitle-dialog-toolbar">
+          <div class="subtitle-toolbar-meta">
+            <span class="subtitle-toolbar-pill">{{ importSessionSummary }}</span>
+            <span class="subtitle-toolbar-pill">支援 .vtt / .srt</span>
+          </div>
+
+          <div class="subtitle-toolbar-actions">
+            <input
+              ref="subtitleFileInputRef"
+              class="subtitle-file-input"
+              type="file"
+              accept=".vtt,.srt,text/vtt,application/x-subrip"
+              data-testid="subtitle-dialog-file-input"
+              @change="handleSubtitleFileChange"
             />
-          </svg>
-        </button>
+            <button
+              type="button"
+              class="glass-btn subtitle-import-btn"
+              :disabled="isImportingSubtitle"
+              data-testid="subtitle-dialog-import-button"
+              @click="triggerSubtitlePicker"
+            >
+              <svg class="subtitle-btn-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 6.83V16h2V6.83l3.09 3.08 1.41-1.41L12 2z"/>
+              </svg>
+              <span>{{ isImportingSubtitle ? '匯入中…' : '匯入字幕' }}</span>
+            </button>
+            <button
+              type="button"
+              class="subtitle-dialog-close"
+              aria-label="關閉字幕控制台"
+              data-testid="subtitle-dialog-close"
+              @click="closeDialog"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="subtitle-dialog-body">
-        <div class="subtitle-hero">
-          <section class="subtitle-panel subtitle-import-panel">
-            <div class="subtitle-panel-copy">
-              <span class="subtitle-panel-eyebrow">Local Import</span>
-              <h4>Bring your own subtitles</h4>
-              <p>Use the subtitle file you already trust. We will convert it when needed and preview it instantly.</p>
-            </div>
-            <div class="subtitle-format-list" aria-label="Supported subtitle formats">
-              <span class="subtitle-format-pill">.vtt</span>
-              <span class="subtitle-format-pill">.srt</span>
-            </div>
-            <div class="subtitle-toolbar-actions">
-              <input
-                ref="subtitleFileInputRef"
-                class="subtitle-file-input"
-                type="file"
-                accept=".vtt,.srt,text/vtt,application/x-subrip"
-                data-testid="subtitle-dialog-file-input"
-                @change="handleSubtitleFileChange"
-              />
-              <button
-                type="button"
-                class="glass-btn subtitle-import-btn"
-                :disabled="isImportingSubtitle"
-                data-testid="subtitle-dialog-import-button"
-                @click="triggerSubtitlePicker"
-              >
-                <svg class="subtitle-btn-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                  <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 6.83V16h2V6.83l3.09 3.08 1.41-1.41L12 2z"/>
-                </svg>
-                <span>{{ isImportingSubtitle ? 'Importing…' : 'Import subtitle' }}</span>
-              </button>
-            </div>
-            <p class="subtitle-toolbar-hint">Imported subtitles disappear after refresh or when you switch to another CID.</p>
-          </section>
-
-          <section class="subtitle-panel subtitle-session-panel" data-testid="subtitle-dialog-session-status">
-            <span class="subtitle-panel-eyebrow">Session Status</span>
-            <div class="subtitle-session-metric">{{ importedSubtitles.length }}</div>
-            <div class="subtitle-toolbar-status">
-              <span class="subtitle-toolbar-status-label">{{ toolbarStatusLabel }}</span>
-              <span class="subtitle-toolbar-status-value">{{ toolbarStatusValue }}</span>
-            </div>
-            <p class="subtitle-session-note">{{ sessionStatusNote }}</p>
-          </section>
-        </div>
-
         <p
           v-if="subtitleStatusText"
           class="subtitle-status"
@@ -329,8 +352,8 @@ function handleRemoveImportedSubtitle(track) {
         <div class="subtitle-section">
           <div class="subtitle-section-header">
             <div class="subtitle-section-copy">
-              <h4>Secondary subtitle</h4>
-              <p class="subtitle-section-caption">主字幕請用播放器上的字幕按鈕切換。這裡只控制較小字體顯示的次要字幕。</p>
+              <h4>次字幕</h4>
+              <p class="subtitle-section-caption">選擇第二條較小字體的字幕。主字幕仍由播放器控制列決定。</p>
             </div>
             <button
               type="button"
@@ -339,7 +362,7 @@ function handleRemoveImportedSubtitle(track) {
               data-testid="subtitle-dialog-clear-secondary"
               @click="clearSecondarySubtitle"
             >
-              Clear secondary
+              清除次字幕
             </button>
           </div>
 
@@ -349,7 +372,7 @@ function handleRemoveImportedSubtitle(track) {
             data-testid="subtitle-dialog-selection-grid"
           >
             <label class="subtitle-select-field">
-              <span class="subtitle-select-label">Secondary subtitle</span>
+              <span class="subtitle-select-label">選擇次字幕</span>
               <select
                 class="subtitle-select-input"
                 data-testid="subtitle-dialog-secondary-select"
@@ -357,7 +380,7 @@ function handleRemoveImportedSubtitle(track) {
                 :disabled="!hasPrimarySubtitle"
                 @change="handleSecondarySubtitleChange"
               >
-                <option value="">None</option>
+                <option value="">不顯示</option>
                 <option
                   v-for="track in secondarySubtitleOptions"
                   :key="`secondary-${track.lang}`"
@@ -370,12 +393,14 @@ function handleRemoveImportedSubtitle(track) {
           </div>
 
           <div v-if="hasAvailableTracks" class="subtitle-role-summary">
-            <span class="subtitle-role-pill subtitle-role-pill-primary">
-              Primary: {{ currentPrimaryTrack?.label || 'Off' }}
-            </span>
-            <span class="subtitle-role-pill subtitle-role-pill-secondary">
-              Secondary: {{ currentSecondaryTrack?.label || 'None' }}
-            </span>
+            <div class="subtitle-role-card subtitle-role-card-primary">
+              <span class="subtitle-role-label">主字幕</span>
+              <strong class="subtitle-role-value">{{ currentPrimaryTrack?.label || '已關閉' }}</strong>
+            </div>
+            <div class="subtitle-role-card subtitle-role-card-secondary">
+              <span class="subtitle-role-label">次字幕</span>
+              <strong class="subtitle-role-value">{{ currentSecondaryTrack?.label || '未設定' }}</strong>
+            </div>
           </div>
 
           <p
@@ -398,12 +423,47 @@ function handleRemoveImportedSubtitle(track) {
         <div class="subtitle-section">
           <div class="subtitle-section-header">
             <div class="subtitle-section-copy">
-              <h4>Imported in this browser</h4>
-              <p class="subtitle-section-caption">Local subtitles temporarily override same-language CID tracks.</p>
+              <h4>字幕清單</h4>
+              <p class="subtitle-section-caption">管理你剛匯入的字幕，或下載目前播放器可用的字幕檔。</p>
+            </div>
+            <div class="subtitle-library-tabs" role="tablist" aria-label="字幕清單分類" data-testid="subtitle-dialog-library-tabs">
+              <button
+                type="button"
+                class="subtitle-library-tab"
+                :class="{ 'subtitle-library-tab--active': activeLibraryTab === 'imported' }"
+                role="tab"
+                :aria-selected="activeLibraryTab === 'imported' ? 'true' : 'false'"
+                data-testid="subtitle-dialog-tab-imported"
+                @click="setLibraryTab('imported')"
+              >
+                已匯入
+              </button>
+              <button
+                type="button"
+                class="subtitle-library-tab"
+                :class="{ 'subtitle-library-tab--active': activeLibraryTab === 'download' }"
+                role="tab"
+                :aria-selected="activeLibraryTab === 'download' ? 'true' : 'false'"
+                data-testid="subtitle-dialog-tab-download"
+                @click="setLibraryTab('download')"
+              >
+                可下載
+              </button>
             </div>
           </div>
 
-          <ul v-if="hasImportedSubtitles" class="subtitle-track-list" data-testid="subtitle-dialog-imported-list">
+          <p v-if="activeLibraryTab === 'imported'" class="subtitle-library-note">
+            本機字幕只保留在這次瀏覽器工作階段；如果和影片內建同語系，會先以本機版本覆蓋顯示。
+          </p>
+          <p v-else class="subtitle-library-note">
+            這裡列出目前播放器可見的字幕來源，包含影片內建字幕和本機匯入字幕。
+          </p>
+
+          <ul
+            v-if="activeLibraryTab === 'imported' && hasImportedSubtitles"
+            class="subtitle-track-list"
+            data-testid="subtitle-dialog-imported-list"
+          >
             <li v-for="track in importedSubtitles" :key="track.id" class="subtitle-track-row">
               <div class="subtitle-track-leading">
                 <div class="subtitle-track-glyph" aria-hidden="true">
@@ -414,10 +474,10 @@ function handleRemoveImportedSubtitle(track) {
                 <div class="subtitle-track-copy">
                   <div class="subtitle-track-headline">
                     <div class="subtitle-track-title">{{ track.label }}</div>
-                    <span class="subtitle-track-state">{{ isOverridingCidTrack(track) ? 'Overriding CID' : 'Local only' }}</span>
+                    <span class="subtitle-track-state">{{ isOverridingCidTrack(track) ? '覆蓋影片字幕' : '僅本機使用' }}</span>
                   </div>
                   <div class="subtitle-track-meta">
-                    <span class="subtitle-badge subtitle-badge-local">Local</span>
+                    <span class="subtitle-badge subtitle-badge-local">本機</span>
                     <span>{{ track.fileName }}</span>
                   </div>
                 </div>
@@ -431,13 +491,67 @@ function handleRemoveImportedSubtitle(track) {
                 <svg class="subtitle-row-btn-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                   <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Z"/>
                 </svg>
-                <span>Remove</span>
+                <span>移除</span>
               </button>
             </li>
           </ul>
 
-          <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-imported-empty">
-            Import your first subtitle to create a temporary local override for this video.
+          <p
+            v-else-if="activeLibraryTab === 'imported'"
+            class="subtitle-empty-state"
+            data-testid="subtitle-dialog-imported-empty"
+          >
+            先匯入第一條本機字幕，這裡就會開始顯示暫存中的字幕清單。
+          </p>
+
+          <ul
+            v-else-if="hasAvailableTracks"
+            class="subtitle-track-list"
+            data-testid="subtitle-dialog-download-list"
+          >
+            <li
+              v-for="track in downloadableTracks"
+              :key="`download-${getTrackActionKey(track)}`"
+              class="subtitle-track-row"
+            >
+              <div class="subtitle-track-leading">
+                <div class="subtitle-track-glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M12 3v9.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V3h1ZM5 19h14v2H5v-2Z"/>
+                  </svg>
+                </div>
+                <div class="subtitle-track-copy">
+                  <div class="subtitle-track-headline">
+                    <div class="subtitle-track-title">{{ track.label }}</div>
+                    <span class="subtitle-track-state">{{ track.source === 'local' ? '本機字幕' : '影片字幕' }}</span>
+                  </div>
+                  <div class="subtitle-track-meta">
+                    <span v-if="track.source === 'local'" class="subtitle-badge subtitle-badge-local">本機</span>
+                    <span v-if="isTrackPrimary(track)" class="subtitle-badge subtitle-badge-role">主字幕</span>
+                    <span v-if="isTrackSecondary(track)" class="subtitle-badge subtitle-badge-role">次字幕</span>
+                    <span>{{ track.fileName || `${track.lang}.vtt` }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="subtitle-track-actions">
+                <button
+                  type="button"
+                  class="glass-btn subtitle-row-btn"
+                  :disabled="downloadingTrackKey === getTrackActionKey(track)"
+                  :data-testid="`subtitle-dialog-download-${track.lang}`"
+                  @click="handleDownloadSubtitle(track)"
+                >
+                  <svg class="subtitle-row-btn-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path fill="currentColor" d="M12 3v9.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V3h1ZM5 19h14v2H5v-2Z"/>
+                  </svg>
+                  <span>{{ downloadingTrackKey === getTrackActionKey(track) ? '下載中…' : '下載' }}</span>
+                </button>
+              </div>
+            </li>
+          </ul>
+
+          <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-download-empty">
+            目前沒有可下載的字幕。
           </p>
         </div>
       </div>
@@ -454,21 +568,35 @@ function handleRemoveImportedSubtitle(track) {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(6, 11, 18, 0.7);
-  backdrop-filter: blur(18px);
+  background:
+    radial-gradient(circle at top, rgba(76, 176, 255, 0.16), transparent 32%),
+    linear-gradient(180deg, rgba(4, 8, 14, 0.72), rgba(4, 8, 14, 0.88));
+  backdrop-filter: blur(20px);
 }
 
 .subtitle-dialog {
-  width: min(700px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 48px));
+  position: relative;
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 0;
-  border-radius: 24px;
-  background: rgba(16, 18, 32, 0.94);
-  border: 1px solid var(--panel-border);
-  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(19, 25, 40, 0.94), rgba(9, 13, 22, 0.98)),
+    radial-gradient(circle at top right, rgba(92, 169, 255, 0.12), transparent 34%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.48);
+}
+
+.subtitle-dialog::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(138, 227, 255, 0.78), transparent);
+  pointer-events: none;
 }
 
 .subtitle-dialog:focus {
@@ -477,22 +605,25 @@ function handleRemoveImportedSubtitle(track) {
 
 .subtitle-dialog-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 24px 24px 16px;
-  border-bottom: 1px solid var(--panel-border);
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 28px 28px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .subtitle-dialog-copy {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 300px;
 }
 
 .subtitle-dialog-copy h3 {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: clamp(1.5rem, 2vw, 1.85rem);
+  letter-spacing: -0.04em;
   color: var(--text-primary);
 }
 
@@ -500,6 +631,37 @@ function handleRemoveImportedSubtitle(track) {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.55;
+  max-width: 36rem;
+}
+
+.subtitle-dialog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+}
+
+.subtitle-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.subtitle-toolbar-pill {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
 }
 
 .subtitle-dialog-close {
@@ -510,170 +672,38 @@ function handleRemoveImportedSubtitle(track) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--text-secondary);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: transform 0.18s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .subtitle-dialog-close:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(138, 223, 255, 0.28);
+  transform: translateY(-1px);
 }
 
 .subtitle-dialog-body {
   display: grid;
   gap: 16px;
-  padding: 20px 24px 24px;
+  padding: 22px 28px 28px;
   overflow-y: auto;
 }
 
-.subtitle-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.95fr);
-  gap: 16px;
-}
-
-.subtitle-panel {
-  position: relative;
-  overflow: hidden;
-  min-height: 218px;
-  padding: 20px;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.subtitle-panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at top right, rgba(0, 210, 255, 0.16), transparent 38%);
-  pointer-events: none;
-}
-
-.subtitle-import-panel {
-  justify-content: space-between;
-}
-
-.subtitle-session-panel {
-  background:
-    radial-gradient(circle at top left, rgba(162, 82, 255, 0.2), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
-}
-
-.subtitle-panel-copy {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.subtitle-panel-copy h4 {
-  margin: 0;
-  font-size: 1.18rem;
-  line-height: 1.2;
-  color: var(--text-primary);
-}
-
-.subtitle-panel-copy p {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.55;
-}
-
-.subtitle-panel-eyebrow {
-  color: var(--accent-cyan);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.subtitle-format-list {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.subtitle-format-pill {
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
 .subtitle-toolbar-actions {
-  position: relative;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.subtitle-toolbar-hint {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-  line-height: 1.55;
-}
-
-.subtitle-toolbar-status {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.subtitle-toolbar-status-label {
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 0.76rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.subtitle-toolbar-status-value {
-  color: var(--text-primary);
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.subtitle-session-metric {
-  position: relative;
-  z-index: 1;
-  font-size: clamp(2.4rem, 4vw, 3.25rem);
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  color: var(--text-primary);
-}
-
-.subtitle-session-note {
-  position: relative;
-  z-index: 1;
-  margin: auto 0 0;
-  color: var(--text-secondary);
-  font-size: 0.93rem;
-  line-height: 1.55;
+  flex-wrap: wrap;
 }
 
 .subtitle-selection-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -684,22 +714,23 @@ function handleRemoveImportedSubtitle(track) {
 }
 
 .subtitle-select-label {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.74rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .subtitle-select-input {
   width: 100%;
-  min-height: 46px;
-  border-radius: 14px;
+  min-height: 52px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(8, 12, 20, 0.76);
+  background: rgba(8, 12, 20, 0.9);
   color: var(--text-primary);
   padding: 0 14px;
   font: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .subtitle-select-input:disabled {
@@ -708,30 +739,46 @@ function handleRemoveImportedSubtitle(track) {
 }
 
 .subtitle-role-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.subtitle-role-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 86px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.015);
 }
 
-.subtitle-role-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+.subtitle-role-card-primary {
+  border-color: rgba(72, 196, 255, 0.24);
+}
+
+.subtitle-role-card-secondary {
+  border-color: rgba(255, 183, 76, 0.22);
+}
+
+.subtitle-role-label {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.subtitle-role-value {
   color: var(--text-primary);
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.subtitle-role-pill-primary {
-  border-color: rgba(0, 210, 255, 0.28);
-}
-
-.subtitle-role-pill-secondary {
-  border-color: rgba(255, 255, 255, 0.16);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
 }
 
 .subtitle-file-input {
@@ -747,20 +794,20 @@ function handleRemoveImportedSubtitle(track) {
 
 .subtitle-import-btn {
   min-width: 184px;
-  height: 48px;
+  height: 50px;
   padding: 0 18px;
   border-radius: 999px;
   justify-content: center;
   gap: 10px;
-  background: linear-gradient(135deg, rgba(0, 210, 255, 0.96), rgba(92, 117, 255, 0.92));
+  background: linear-gradient(135deg, rgba(116, 228, 255, 0.98), rgba(70, 179, 255, 0.94));
   color: #06111b;
   font-weight: 700;
-  box-shadow: 0 14px 28px rgba(0, 210, 255, 0.2);
+  box-shadow: 0 14px 28px rgba(72, 196, 255, 0.2);
 }
 
 .subtitle-import-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 18px 30px rgba(0, 210, 255, 0.26);
+  box-shadow: 0 18px 30px rgba(72, 196, 255, 0.26);
 }
 
 .subtitle-btn-icon {
@@ -798,15 +845,31 @@ function handleRemoveImportedSubtitle(track) {
 }
 
 .subtitle-section {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 2px 2px 0;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
+    rgba(11, 16, 26, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.subtitle-section::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(138, 223, 255, 0.32), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 
 .subtitle-section-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
@@ -814,13 +877,14 @@ function handleRemoveImportedSubtitle(track) {
 .subtitle-section-copy {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .subtitle-section-copy h4 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
 }
 
 .subtitle-section-caption {
@@ -828,6 +892,41 @@ function handleRemoveImportedSubtitle(track) {
   color: var(--text-secondary);
   font-size: 0.92rem;
   line-height: 1.45;
+}
+
+.subtitle-library-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.subtitle-library-tab {
+  min-height: 34px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.subtitle-library-tab--active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.subtitle-library-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.55;
 }
 
 .subtitle-track-list {
@@ -840,16 +939,34 @@ function handleRemoveImportedSubtitle(track) {
 }
 
 .subtitle-track-row {
+  position: relative;
+  overflow: hidden;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding: 16px 18px;
-  border-radius: 20px;
+  padding: 18px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03)),
-    rgba(17, 21, 36, 0.68);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
+    rgba(10, 14, 22, 0.84);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.subtitle-track-row::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, rgba(116, 228, 255, 0.92), rgba(255, 183, 76, 0.56));
+  opacity: 0.72;
+}
+
+.subtitle-track-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(138, 223, 255, 0.2);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.18);
 }
 
 .subtitle-track-leading {
@@ -859,16 +976,22 @@ function handleRemoveImportedSubtitle(track) {
   gap: 14px;
 }
 
+.subtitle-track-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .subtitle-track-glyph {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  border-radius: 14px;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border-radius: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(0, 210, 255, 0.16), rgba(162, 82, 255, 0.16));
-  color: var(--accent-cyan);
+  background: linear-gradient(135deg, rgba(116, 228, 255, 0.16), rgba(255, 183, 76, 0.14));
+  color: #8fe1ff;
 }
 
 .subtitle-track-copy {
@@ -887,15 +1010,16 @@ function handleRemoveImportedSubtitle(track) {
 
 .subtitle-track-title {
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .subtitle-track-state {
-  padding: 4px 9px;
+  padding: 5px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-secondary);
-  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
   font-weight: 600;
 }
 
@@ -912,14 +1036,20 @@ function handleRemoveImportedSubtitle(track) {
 .subtitle-badge {
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 0.76rem;
-  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  font-weight: 700;
 }
 
 .subtitle-badge-local {
-  background: rgba(93, 234, 196, 0.14);
-  color: #a9ffe8;
+  background: rgba(116, 228, 255, 0.12);
+  color: #bceeff;
+}
+
+.subtitle-badge-role {
+  background: rgba(255, 183, 76, 0.14);
+  color: #ffe0ac;
 }
 
 .subtitle-row-btn {
@@ -930,12 +1060,15 @@ function handleRemoveImportedSubtitle(track) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
 }
 
 .subtitle-row-btn:hover {
   transform: translateY(-1px);
+  border-color: rgba(138, 223, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .subtitle-row-btn-icon {
@@ -957,8 +1090,8 @@ function handleRemoveImportedSubtitle(track) {
   margin: 0;
   padding: 18px 20px;
   border-radius: 20px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.025);
   color: var(--text-secondary);
   line-height: 1.55;
 }
@@ -976,27 +1109,26 @@ function handleRemoveImportedSubtitle(track) {
   }
 
   .subtitle-dialog-header {
-    padding: 20px 18px 14px;
+    padding: 22px 18px 16px;
   }
 
   .subtitle-dialog-body {
     padding: 18px;
   }
 
-  .subtitle-hero {
-    grid-template-columns: 1fr;
-  }
-
   .subtitle-toolbar-actions {
-    flex-direction: column;
-    align-items: stretch;
+    justify-content: flex-end;
   }
 
   .subtitle-import-btn {
-    width: 100%;
+    min-width: 0;
   }
 
   .subtitle-selection-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subtitle-role-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1007,6 +1139,19 @@ function handleRemoveImportedSubtitle(track) {
 
   .subtitle-track-leading {
     width: 100%;
+  }
+
+  .subtitle-track-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .subtitle-library-tabs {
+    width: 100%;
+  }
+
+  .subtitle-library-tab {
+    flex: 1 1 0;
   }
 }
 </style>

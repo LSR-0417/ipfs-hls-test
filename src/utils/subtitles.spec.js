@@ -12,6 +12,7 @@ import {
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
+  resolveDualSubtitleSwapControlState,
   resolvePlayerControlledSubtitlePreference,
   resolveToggledSubtitlePreference,
   revokeImportedSubtitleTracks,
@@ -87,9 +88,9 @@ function createDownloadDocument() {
 }
 
 describe('createDefaultSubtitlePreference', () => {
-  it('defaults to off without a selected language', () => {
+  it('defaults to auto-show without a selected language', () => {
     expect(createDefaultSubtitlePreference()).toEqual({
-      mode: 'off',
+      mode: 'showing',
       primaryLang: '',
       secondaryLang: '',
     });
@@ -442,10 +443,19 @@ describe('choosePreferredSubtitleLanguage', () => {
     expect(choosePreferredSubtitleLanguage(subtitles, { languages: ['en-US', 'zh-TW'] })).toBe('en');
     expect(choosePreferredSubtitleLanguage(subtitles, { languages: ['zh-HK'] })).toBe('zh-TW');
   });
+
+  it('falls back to English before choosing the first available track', () => {
+    expect(
+      choosePreferredSubtitleLanguage(
+        [{ lang: 'ja' }, { lang: 'en' }, { lang: 'zh-TW' }],
+        { languages: ['fr-FR'] }
+      )
+    ).toBe('en');
+  });
 });
 
 describe('reconcileSubtitlePreference', () => {
-  it('keeps the default mode off while choosing a preferred language for first run', () => {
+  it('auto-enables subtitles while choosing a preferred language for first run', () => {
     expect(
       reconcileSubtitlePreference(
         createDefaultSubtitlePreference(),
@@ -453,7 +463,7 @@ describe('reconcileSubtitlePreference', () => {
         { languages: ['zh-TW', 'en-US'] }
       )
     ).toEqual({
-      mode: 'off',
+      mode: 'showing',
       primaryLang: 'zh-TW',
       secondaryLang: '',
     });
@@ -547,6 +557,36 @@ describe('resolvePlayerControlledSubtitlePreference', () => {
       mode: 'showing',
       primaryLang: 'zh-TW',
       secondaryLang: '',
+    });
+  });
+});
+
+describe('resolveDualSubtitleSwapControlState', () => {
+  it('keeps the swap button visible but disabled when dual subtitles are configured and subtitles are off', () => {
+    expect(
+      resolveDualSubtitleSwapControlState(
+        { mode: 'off', primaryLang: 'en', secondaryLang: 'zh-TW' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }, { lang: 'ja' }],
+        { languages: ['ja'] }
+      )
+    ).toEqual({
+      visible: true,
+      enabled: false,
+      tooltip: '字幕目前關閉，先開啟字幕',
+    });
+  });
+
+  it('hides the swap button until both primary and secondary subtitles are configured', () => {
+    expect(
+      resolveDualSubtitleSwapControlState(
+        { mode: 'showing', primaryLang: 'en', secondaryLang: '' },
+        [{ lang: 'en' }, { lang: 'zh-TW' }],
+        { languages: ['zh-TW'] }
+      )
+    ).toEqual({
+      visible: false,
+      enabled: false,
+      tooltip: '需要同時設定主字幕和副字幕',
     });
   });
 });

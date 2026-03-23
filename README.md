@@ -6,7 +6,7 @@
 
 - ✨ **IPFS 多網關支持** - 支援多個公開 IPFS 網關，自動容錯
 - 🎬 **HLS 適應性碼率** - 動態切換視頻質量
-- 📝 **多語言字幕** - 從 `subtitles.json` 載入字幕列表，預設關閉並記住使用者偏好
+- 📝 **多語言字幕** - 從 `subtitles.json` 載入字幕列表，首次依瀏覽器語系自動開啟，無匹配時 fallback 英文，並記住使用者偏好
 - 🔗 **分享功能** - 生成包含播放時間的分享連結
 - 🕘 **觀看歷史** - 在本機記住最近看過的影片與播放進度，方便續播
 - 🎨 **現代化播放器 UI** - 基於 Video.js 播放器
@@ -226,7 +226,7 @@ QmXxxx.../
 
 - `lang` 會對應字幕語系代碼，例如 `zh-TW`、`zh-CN`、`en`
 - `path` 是字幕檔相對路徑
-- 前端會依 `navigator.languages` / `navigator.language` 挑出最接近的語系，但首次載入仍維持字幕關閉
+- 前端會依 `navigator.languages` / `navigator.language` 挑出最接近的語系；首次載入時若有可用字幕會自動開啟，沒有匹配時 fallback 到英文，再 fallback 到第一條可用字幕
 - 使用者之後在播放器內切換字幕開關或語系，偏好會寫入瀏覽器 `localStorage`
 
 ### 產生字幕 manifest

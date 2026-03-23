@@ -13,7 +13,7 @@ const remoteSubtitleSource = 'remote';
 const defaultImportedSubtitleLanguage = 'und';
 
 const defaultSubtitlePreference = Object.freeze({
-  mode: 'off',
+  mode: 'showing',
   primaryLang: '',
   secondaryLang: '',
 });
@@ -370,6 +370,33 @@ export function resolvePlayerControlledSubtitlePreference(
   };
 }
 
+export function resolveDualSubtitleSwapControlState(preference, subtitles = [], navigatorLike = null) {
+  const reconciledPreference = reconcileSubtitlePreference(preference, subtitles, navigatorLike);
+  const hasConfiguredDualSubtitles = Boolean(reconciledPreference.primaryLang) && Boolean(reconciledPreference.secondaryLang);
+
+  if (!hasConfiguredDualSubtitles) {
+    return {
+      visible: false,
+      enabled: false,
+      tooltip: '需要同時設定主字幕和副字幕',
+    };
+  }
+
+  if (reconciledPreference.mode !== 'showing') {
+    return {
+      visible: true,
+      enabled: false,
+      tooltip: '字幕目前關閉，先開啟字幕',
+    };
+  }
+
+  return {
+    visible: true,
+    enabled: true,
+    tooltip: '切換主 / 副字幕',
+  };
+}
+
 export function choosePreferredSubtitleLanguage(subtitles = [], navigatorLike = null) {
   if (!Array.isArray(subtitles) || subtitles.length === 0) return '';
 
@@ -380,6 +407,11 @@ export function choosePreferredSubtitleLanguage(subtitles = [], navigatorLike = 
     if (matched) {
       return matched;
     }
+  }
+
+  const englishFallback = matchAvailableSubtitleLanguage(subtitles, 'en');
+  if (englishFallback) {
+    return englishFallback;
   }
 
   return normalizeString(subtitles[0]?.lang);
