@@ -191,9 +191,17 @@ test.describe('Responsive Video Actions', () => {
     await openApp(page, './?cid=bafysharetest123');
 
     await page.evaluate(() => {
+      const player = window.videojs?.getAllPlayers?.()?.[0] || null;
+      if (player) {
+        player.currentTime = () => 93;
+        player.duration = () => 300;
+        player.paused = () => false;
+        player.ended = () => false;
+        return;
+      }
+
       const existingVideo = document.querySelector('video');
       const video = existingVideo || document.body.appendChild(document.createElement('video'));
-
       Object.defineProperty(video, 'currentTime', {
         configurable: true,
         get: () => 93,
@@ -257,8 +265,8 @@ test.describe('Responsive Video Actions', () => {
 
     const dialog = page.getByTestId('subtitle-dialog');
     await expect(dialog).toBeVisible();
-    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('Ready');
-    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('0 imported subtitles');
+    await page.getByTestId('subtitle-dialog-tab-imported').click();
+    await expect(page.getByTestId('subtitle-dialog-imported-empty')).toContainText('先匯入第一條本機字幕');
 
     await page.getByTestId('subtitle-dialog-file-input').setInputFiles({
       name: 'episode.en.srt',
@@ -267,8 +275,7 @@ test.describe('Responsive Video Actions', () => {
     });
 
     await expect(page.getByTestId('subtitle-dialog-status')).toContainText('已匯入 English (Local)');
-    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('Session active');
-    await expect(page.getByTestId('subtitle-dialog-session-status')).toContainText('1 imported subtitle');
+    await page.getByTestId('subtitle-dialog-tab-imported').click();
     await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('English (Local)');
     await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.en.vtt');
   });
