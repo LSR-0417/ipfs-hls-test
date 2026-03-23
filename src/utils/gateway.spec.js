@@ -3,6 +3,7 @@ import {
   buildGatewayAssetUrl,
   buildGatewayIndexUrl,
   customGatewayStorageKey,
+  fetchGatewayVariantPlaylists,
   gatewayRateLimitBackoffMs,
   gatewayProbeSegmentSampleCount,
   gatewayStorageKey,
@@ -637,5 +638,62 @@ describe('probeGatewayAvailability', () => {
       sampleSegmentCount: 0,
       completedSampleCount: 0,
     });
+  });
+});
+
+describe('fetchGatewayVariantPlaylists', () => {
+  it('returns sorted variant playlists with parsed resolution metadata', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: [
+            '#EXTM3U',
+            '#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720',
+            '720p/streaminglist-720p.m3u8',
+            '#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=854x480',
+            '480p/streaminglist-480p.m3u8',
+          ].join('\n'),
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await expect(
+      fetchGatewayVariantPlaylists('https://example.com/ipfs/', 'bafy123', {
+        fetchImpl,
+      })
+    ).resolves.toEqual([
+      {
+        url: 'https://example.com/ipfs/bafy123/480p/streaminglist-480p.m3u8',
+        bandwidth: 1500000,
+        width: 854,
+        height: 480,
+      },
+      {
+        url: 'https://example.com/ipfs/bafy123/720p/streaminglist-720p.m3u8',
+        bandwidth: 3000000,
+        width: 1280,
+        height: 720,
+      },
+    ]);
+  });
+
+  it('returns an empty list for media playlists without variant entries', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === 'https://example.com/ipfs/bafy123/index.m3u8') {
+        return createResponse({
+          text: '#EXTM3U\n#EXTINF:5.0,\nsegment_000.ts\n',
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await expect(
+      fetchGatewayVariantPlaylists('https://example.com/ipfs/', 'bafy123', {
+        fetchImpl,
+      })
+    ).resolves.toEqual([]);
   });
 });
