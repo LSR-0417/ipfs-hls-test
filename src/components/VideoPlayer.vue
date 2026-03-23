@@ -178,12 +178,23 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import {
+  fetchGatewayVariantPlaylists,
   gatewayProbePlaybackRateThreshold,
   gatewayProbeSegmentSampleCount,
   isLoopbackGatewayUrl,
   probeGatewayAvailability,
   shouldAutoFallbackGateway,
 } from '../utils/gateway';
+import {
+  applyQualityLevelHeightLock,
+  buildMediaHandoffQualitySnapshot,
+  isSuccessfulMediaHandoffSegmentResponse,
+  mediaHandoffQualityModeAuto,
+  mediaHandoffQualityModeManual,
+  resumeMediaHandoffPlayback,
+  rewriteMediaHandoffRequestUri,
+  selectMediaHandoffLockedHeight,
+} from '../utils/mediaHandoff';
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
@@ -682,6 +693,10 @@ let startupInitialRenditionCount = null;
 let pendingSourceStartTime = 0;
 let pendingSourceShouldAutoplay = false;
 let lastGatewayFallbackKey = '';
+let mediaRequestGateway = '';
+let mediaRequestCid = '';
+let activeVhsXhr = null;
+let activeGatewayHandoff = null;
 const showStartupGate = ref(false);
 const startupGateTitle = ref('');
 const startupGateDetail = ref('');
@@ -1490,6 +1505,77 @@ function syncQualitySelectorButtonLabel() {
   labelEl.textContent = formatQualitySelectorLabel(player.qualityLevels());
 }
 
+function syncMediaRequestRouting(cid = props.cid, gateway = props.gateway) {
+  mediaRequestCid = typeof cid === 'string' ? cid.trim() : '';
+  mediaRequestGateway = typeof gateway === 'string' ? gateway.trim() : '';
+}
+
+function clearGatewayHandoffState() {
+  activeGatewayHandoff = null;
+}
+
+function applyHandoffQualityLock(targetHeight) {
+  if (!player || typeof player.qualityLevels !== 'function' || !Number.isFinite(targetHeight)) {
+    return false;
+  }
+
+  const didLock = applyQualityLevelHeightLock(player.qualityLevels(), targetHeight);
+  if (didLock) {
+    emitQualityLevels();
+    syncQualitySelectorButtonLabel();
+  }
+  return didLock;
+}
+
+function handleVhsRequest(options) {
+  const nextOptions = options ? { ...options } : {};
+  const rewrittenUri = rewriteMediaHandoffRequestUri(nextOptions.uri, {
+    cid: mediaRequestCid,
+    gateway: mediaRequestGateway,
+  });
+
+  if (rewrittenUri) {
+    nextOptions.uri = rewrittenUri;
+  }
+
+  return nextOptions;
+}
+
+function handleVhsResponse(request, error, response) {
+  if (
+    !activeGatewayHandoff ||
+    !isSuccessfulMediaHandoffSegmentResponse(request, error, response, {
+      cid: activeGatewayHandoff.cid,
+      gateway: activeGatewayHandoff.targetGateway,
+    })
+  ) {
+    return;
+  }
+
+  emit('status-update', '新 gateway 已接手後續片段');
+  clearGatewayHandoffState();
+}
+
+function bindVhsXhrHooks() {
+  if (!player) return;
+
+  const xhr = player.tech()?.vhs?.xhr;
+  if (!xhr || activeVhsXhr === xhr) {
+    return;
+  }
+
+  if (activeVhsXhr?.offRequest) {
+    activeVhsXhr.offRequest(handleVhsRequest);
+  }
+  if (activeVhsXhr?.offResponse) {
+    activeVhsXhr.offResponse(handleVhsResponse);
+  }
+
+  xhr.onRequest?.(handleVhsRequest);
+  xhr.onResponse?.(handleVhsResponse);
+  activeVhsXhr = xhr;
+}
+
 function createStartupInitialPlaylistSelector(maxInitialRenditions) {
   return function selectStartupInitialPlaylist() {
     return pickStartupInitialPlaylist(this?.playlists?.main?.playlists, maxInitialRenditions);
@@ -1968,6 +2054,8 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
     switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF ? cutoverSnapshot?.shouldAutoplay ?? false : props.shouldAutoplay;
 
   const seq = beginSourceSwitch();
+  clearGatewayHandoffState();
+  syncMediaRequestRouting(props.cid, props.gateway);
 
   if (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF) {
     updateStartupGate(
@@ -2031,6 +2119,110 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
     emit('status-update', '正在累積可播緩衝...');
     updateStartupGateFromBuffer();
   });
+}
+
+async function performGatewayMediaHandoff(m3u8Url, options = {}) {
+  if (!player) return;
+
+  const {
+    requestedStartTime = props.startTime,
+  } = options;
+
+  if (!player.currentSrc?.()) {
+    await setupSourceAndTracks(m3u8Url, props.subtitles, {
+      switchMode: SOURCE_SWITCH_MODE_DEFAULT,
+      requestedStartTime,
+    });
+    return;
+  }
+
+  const setupRequestId = ++sourceSetupRequestSeq;
+  const handoffSnapshot = getCurrentSourceSwitchSnapshot();
+  const probeStartTime = handoffSnapshot?.time ?? 0;
+  const qualitySnapshot =
+    typeof player.qualityLevels === 'function'
+      ? buildMediaHandoffQualitySnapshot(player.qualityLevels())
+      : null;
+  const variantPlaylistsPromise = fetchGatewayVariantPlaylists(props.gateway, props.cid, {
+    cacheMode: 'default',
+  });
+  const warmupPromise = probeGatewayAvailability(props.gateway, props.cid, {
+    cacheMode: 'default',
+    segmentSampleCount: gatewayProbeSegmentSampleCount,
+    playbackRateThreshold: gatewayProbePlaybackRateThreshold,
+    startTimeSeconds: probeStartTime,
+    onProgress(progressState) {
+      if (!player || setupRequestId !== sourceSetupRequestSeq || progressState.state !== 'probing') return;
+
+      const progressLabel =
+        progressState.sampleSegmentCount > 0
+          ? `已完成 ${progressState.completedSampleCount}/${progressState.sampleSegmentCount} 個片段`
+          : '正在測速';
+      const speedLabel = Number.isFinite(progressState.playbackRate)
+        ? `，目前約 ${formatPlaybackRateLabel(progressState.playbackRate)}`
+        : '';
+      emit('status-update', `新 gateway 預載中：${progressLabel}${speedLabel}`);
+    },
+  });
+
+  emit('status-update', '正在為新 gateway 預載目前播放位置...');
+
+  const variantPlaylists = await variantPlaylistsPromise;
+  if (!player || setupRequestId !== sourceSetupRequestSeq) return;
+
+  const availableHeights = variantPlaylists
+    .map((playlist) => (Number.isFinite(playlist?.height) ? playlist.height : null))
+    .filter((height) => Number.isFinite(height) && height > 0);
+  const lockedHeight = selectMediaHandoffLockedHeight(qualitySnapshot, availableHeights);
+  applyHandoffQualityLock(lockedHeight);
+
+  activeGatewayHandoff = {
+    cid: props.cid,
+    targetGateway: props.gateway,
+  };
+  syncMediaRequestRouting(props.cid, props.gateway);
+  const recoveryResult = resumeMediaHandoffPlayback(player, {
+    shouldAutoplay: handoffSnapshot?.shouldAutoplay ?? false,
+  });
+
+  if (qualitySnapshot?.mode === mediaHandoffQualityModeManual && Number.isFinite(lockedHeight)) {
+    emit('status-update', `已切換到新 gateway，沿用 ${lockedHeight}p 接手後續片段`);
+  } else if (
+    qualitySnapshot?.mode === mediaHandoffQualityModeAuto &&
+    Number.isFinite(qualitySnapshot?.activeHeight) &&
+    Number.isFinite(lockedHeight) &&
+    lockedHeight !== qualitySnapshot.activeHeight
+  ) {
+    emit('status-update', `已切換到新 gateway，handoff 期間暫時改用 ${lockedHeight}p`);
+  } else {
+    emit('status-update', handoffSnapshot?.shouldAutoplay ? '已切換到新 gateway，等待後續片段接手' : '新 gateway 已就緒，等待繼續播放');
+  }
+
+  if (recoveryResult.didClearError || recoveryResult.reincludedPlaylistCount > 0) {
+    emit('status-update', '已清除前一次失敗的下載狀態，重新向目前 gateway 請求片段');
+  }
+
+  const warmupResult = await warmupPromise;
+  if (!player || setupRequestId !== sourceSetupRequestSeq) return;
+
+  if (
+    shouldAutoFallbackGateway(props.gateway, warmupResult) &&
+    requestGatewayFallback(warmupResult, {
+      dedupeKey: `warmup:${setupRequestId}`,
+      startTime: probeStartTime,
+      shouldAutoplay: handoffSnapshot?.shouldAutoplay ?? props.shouldAutoplay,
+    })
+  ) {
+    return;
+  }
+
+  if (
+    activeGatewayHandoff &&
+    activeGatewayHandoff.targetGateway === props.gateway &&
+    (warmupResult?.state === 'failed' || warmupResult?.state === 'degraded')
+  ) {
+    emit('status-update', '新 gateway 尚未通過預載檢查，將先沿用既有緩衝並等待下一次請求');
+  }
 }
 
 function clearTracks() {
@@ -2263,6 +2455,7 @@ function initPlayer() {
       bindPlaybackSnapshotListeners();
       bindStartupGateListeners();
       bindQualityLevelListeners();
+      player.on('xhr-hooks-ready', bindVhsXhrHooks);
       observeSubtitleCueDisplay();
       player.on('texttrackchange', scheduleSubtitleCueRoleClassSync);
       player.on('playerresize', () => {
@@ -2284,6 +2477,7 @@ function initPlayer() {
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
+        syncMediaRequestRouting(props.cid, props.gateway);
         void setupSourceAndTracks(props.m3u8Url, props.subtitles, {
           switchMode: SOURCE_SWITCH_MODE_DEFAULT,
           requestedStartTime: props.startTime,
@@ -2304,6 +2498,8 @@ watch(
     if (!player) return;
 
     if (!newUrl) {
+      clearGatewayHandoffState();
+      syncMediaRequestRouting('', '');
       pendingSourceStartTime = 0;
       pendingSourceShouldAutoplay = false;
       beginSourceSwitch();
@@ -2312,12 +2508,21 @@ watch(
     }
 
     if (newUrl !== oldUrl) {
+      const switchMode = resolveSourceSwitchMode(newUrl, {
+        oldUrl,
+        oldCid,
+        oldGateway,
+      });
+
+      if (switchMode === SOURCE_SWITCH_MODE_GATEWAY_HANDOFF) {
+        void performGatewayMediaHandoff(newUrl, {
+          requestedStartTime: newStartTime,
+        });
+        return;
+      }
+
       void setupSourceAndTracks(newUrl, props.subtitles, {
-        switchMode: resolveSourceSwitchMode(newUrl, {
-          oldUrl,
-          oldCid,
-          oldGateway,
-        }),
+        switchMode,
         requestedStartTime: newStartTime,
       });
       return;
@@ -2412,6 +2617,14 @@ onBeforeUnmount(() => {
     qualityLevelList.off('removequalitylevel', handleQualityLevelsChanged);
     qualityLevelList = null;
   }
+  if (activeVhsXhr?.offRequest) {
+    activeVhsXhr.offRequest(handleVhsRequest);
+  }
+  if (activeVhsXhr?.offResponse) {
+    activeVhsXhr.offResponse(handleVhsResponse);
+  }
+  activeVhsXhr = null;
+  clearGatewayHandoffState();
   if (player) {
     player.dualSubtitleSwapAction_ = null;
     player.dualSubtitleSwapState_ = null;
@@ -2419,6 +2632,7 @@ onBeforeUnmount(() => {
     player.subtitleVisibilityToggleState_ = null;
     player.primarySubtitleMenuToggle_ = null;
     player.primarySubtitleControlState_ = null;
+    player.off?.('xhr-hooks-ready', bindVhsXhrHooks);
     emitPlaybackSnapshot('before-unmount', { force: true });
     player.dispose();
   }

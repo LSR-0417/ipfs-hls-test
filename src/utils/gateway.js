@@ -211,6 +211,44 @@ export function buildGatewayIndexUrl(gatewayUrl, cid) {
   return buildGatewayAssetUrl(gatewayUrl, cid, 'index.m3u8');
 }
 
+export async function fetchGatewayVariantPlaylists(gatewayUrl, cid, options = {}) {
+  const {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = gatewayProbeTimeoutMs,
+    cacheMode = 'no-store',
+  } = options;
+  const playlistUrl = buildGatewayIndexUrl(gatewayUrl, cid);
+
+  if (!playlistUrl || typeof fetchImpl !== 'function') {
+    return [];
+  }
+
+  const controller = new AbortController();
+  const timeoutId =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          controller.abort();
+        }, timeoutMs)
+      : null;
+
+  try {
+    const playlistResponse = await fetchGatewayTextResource(playlistUrl, fetchImpl, controller.signal, cacheMode);
+    if (!playlistResponse?.ok) {
+      return [];
+    }
+
+    const playlistText = await readTextResponse(playlistResponse);
+    const parsedPlaylist = parseHlsPlaylist(playlistText, playlistUrl);
+    return orderVariantPlaylistsByBandwidth(parsedPlaylist.variantPlaylists);
+  } catch (_) {
+    return [];
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export async function probeGatewayAvailability(gatewayUrl, cid, options = {}) {
   const {
     fetchImpl = globalThis.fetch,
@@ -595,6 +633,7 @@ function parseHlsPlaylist(playlistText, baseUrl) {
   const lines = String(playlistText || '').split(/\r?\n/);
   let expectsVariantUri = false;
   let pendingVariantBandwidth = null;
+  let pendingVariantResolution = null;
   let pendingSegmentDuration = null;
 
   lines.forEach((rawLine) => {
@@ -615,6 +654,7 @@ function parseHlsPlaylist(playlistText, baseUrl) {
     if (line.startsWith('#EXT-X-STREAM-INF')) {
       expectsVariantUri = true;
       pendingVariantBandwidth = parseBandwidth(line);
+      pendingVariantResolution = parseResolution(line);
       return;
     }
 
@@ -637,9 +677,12 @@ function parseHlsPlaylist(playlistText, baseUrl) {
       variantPlaylists.push({
         url: resolvedUrl,
         bandwidth: pendingVariantBandwidth,
+        width: Number.isFinite(pendingVariantResolution?.width) ? pendingVariantResolution.width : null,
+        height: Number.isFinite(pendingVariantResolution?.height) ? pendingVariantResolution.height : null,
       });
       expectsVariantUri = false;
       pendingVariantBandwidth = null;
+      pendingVariantResolution = null;
       return;
     }
 
@@ -692,8 +735,20 @@ function parsePlaylistTagUri(line, tagPrefix) {
 }
 
 function parseBandwidth(line) {
-  const match = line.match(/(?:^|,)BANDWIDTH=(\d+)/i);
+  const match = line.match(/(?:^|:|,)BANDWIDTH=(\d+)/i);
   return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function parseResolution(line) {
+  const match = line.match(/(?:^|:|,)RESOLUTION=(\d+)x(\d+)/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    width: Number.parseInt(match[1], 10),
+    height: Number.parseInt(match[2], 10),
+  };
 }
 
 function parseExtinfDuration(line) {
