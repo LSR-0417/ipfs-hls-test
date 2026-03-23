@@ -131,8 +131,7 @@ const overflowMenuItems = computed(() => {
     )
     .map((actionId) => ({
       id: actionId,
-      label:
-        actionId === shareActionId ? 'Share' : actionId === subtitleActionId ? 'Subtitles' : 'Download',
+      label: actionId === shareActionId ? '分享' : actionId === subtitleActionId ? '字幕' : '下載',
       disabled: actionId === downloadActionId && !downloadUrl.value,
     }));
 });

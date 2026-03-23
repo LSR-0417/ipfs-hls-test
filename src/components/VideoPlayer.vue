@@ -48,16 +48,13 @@
         data-testid="primary-subtitle-menu"
         @click.stop
       >
-        <div class="primary-subtitle-menu-header">
-          <p class="primary-subtitle-menu-title">{{ primarySubtitleMenuTitle }}</p>
-          <p class="primary-subtitle-menu-hint">{{ primarySubtitleMenuHint }}</p>
-        </div>
-
         <div v-if="primarySubtitleMenuStatusMessage" class="primary-subtitle-menu-status" data-testid="primary-subtitle-menu-status">
           {{ primarySubtitleMenuStatusMessage }}
         </div>
 
-        <div v-else class="primary-subtitle-menu-body">
+        <div v-else class="primary-subtitle-menu-body" role="none">
+          <div class="primary-subtitle-menu-title" aria-hidden="true">{{ primarySubtitleMenuTitle }}</div>
+
           <button
             type="button"
             class="primary-subtitle-menu-item"
@@ -65,7 +62,16 @@
             data-testid="primary-subtitle-menu-off"
             @click="selectPrimarySubtitle('')"
           >
-            <span class="primary-subtitle-menu-item-label">關閉主字幕</span>
+            <span class="primary-subtitle-menu-item-main">
+              <span class="primary-subtitle-menu-item-label">關閉</span>
+              <span
+                v-if="resolvedSubtitleSelection.mode !== 'showing'"
+                class="primary-subtitle-menu-item-check"
+                aria-hidden="true"
+              >
+                ✓
+              </span>
+            </span>
           </button>
 
           <button
@@ -83,23 +89,31 @@
           >
             <span class="primary-subtitle-menu-item-main">
               <span class="primary-subtitle-menu-item-label">{{ track.label }}</span>
-              <span class="primary-subtitle-menu-badges">
-                <span v-if="track.isPrimary" class="primary-subtitle-menu-badge primary-subtitle-menu-badge--primary">
-                  主字幕
-                </span>
+              <span class="primary-subtitle-menu-item-trailing">
                 <span
-                  v-if="track.isSecondary"
-                  class="primary-subtitle-menu-badge primary-subtitle-menu-badge--secondary"
+                  v-if="track.isLocal || track.isPrimary || track.isSecondary"
+                  class="primary-subtitle-menu-item-meta"
+                  :aria-label="resolvePrimarySubtitleMenuTrackMetaLabel(track)"
+                  :title="resolvePrimarySubtitleMenuTrackMetaLabel(track)"
+                  role="img"
                 >
-                  次字幕
-                </span>
-                <span v-if="track.isLocal" class="primary-subtitle-menu-badge primary-subtitle-menu-badge--local">
-                  本機
+                  <span
+                    v-if="track.isPrimary"
+                    class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--primary"
+                    aria-hidden="true"
+                  ></span>
+                  <span
+                    v-if="track.isSecondary"
+                    class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--secondary"
+                    aria-hidden="true"
+                  ></span>
+                  <span
+                    v-if="track.isLocal"
+                    class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--local"
+                    aria-hidden="true"
+                  ></span>
                 </span>
               </span>
-            </span>
-            <span v-if="track.isSecondary" class="primary-subtitle-menu-item-detail">
-              次字幕請到 Subtitles 視窗設定
             </span>
           </button>
         </div>
@@ -178,7 +192,9 @@ import {
   getStartupInitialRenditionCount,
   pickStartupInitialPlaylist,
 } from '../utils/startupRenditions';
+import { resolveSecondaryCueOffset } from '../utils/subtitleCueLayout';
 import {
+  resolveDualSubtitleSwapControlState,
   reconcileSubtitlePreference,
   resolvePlayerControlledSubtitlePreference,
   resolveToggledSubtitlePreference,
@@ -234,10 +250,58 @@ patchVideoJsTextTrackDisplay();
 const primarySubtitleButtonComponentName = 'PrimarySubtitleControlButton';
 const primarySubtitleControlStateEventName = 'primarysubtitlecontrolstatechange';
 const primarySubtitleMenuTitle = '主字幕';
-const primarySubtitleMenuHint = '此處只切換主字幕，次字幕請到 Subtitles 視窗設定';
-const primarySubtitleTriggerLabel = '主';
+const subtitleVisibilityToggleButtonComponentName = 'SubtitleVisibilityToggleButton';
+const subtitleVisibilityToggleStateEventName = 'subtitlevisibilitytogglestatechange';
+const subtitleVisibilityToggleTitle = '字幕開關';
+const subtitleVisibilityToggleLabel = 'CC';
 const dualSubtitleSwapButtonComponentName = 'DualSubtitleSwapButton';
 const dualSubtitleSwapStateEventName = 'dualsubtitleswapstatechange';
+const dualSubtitleSwapTitle = '切換主 / 副字幕';
+
+function createSubtitleControlGlyph(documentLike, options = {}) {
+  const { containerClass = '', labelClass = '', labelText = '', dotClass = '', caretClass = '' } = options;
+  const glyphEl = documentLike.createElement('span');
+  glyphEl.className = containerClass;
+  glyphEl.setAttribute('aria-hidden', 'true');
+
+  const labelEl = documentLike.createElement('span');
+  labelEl.className = labelClass;
+  labelEl.textContent = labelText;
+  glyphEl.appendChild(labelEl);
+
+  if (dotClass) {
+    const dotEl = documentLike.createElement('span');
+    dotEl.className = dotClass;
+    dotEl.setAttribute('aria-hidden', 'true');
+    glyphEl.appendChild(dotEl);
+  }
+
+  if (caretClass) {
+    const caretEl = documentLike.createElement('span');
+    caretEl.className = caretClass;
+    caretEl.setAttribute('aria-hidden', 'true');
+    glyphEl.appendChild(caretEl);
+  }
+
+  return glyphEl;
+}
+
+function createPrimarySubtitleMenuGlyph(documentLike) {
+  const glyphEl = documentLike.createElement('span');
+  glyphEl.className = 'vjs-primary-subtitle-trigger';
+  glyphEl.setAttribute('aria-hidden', 'true');
+
+  const linesEl = documentLike.createElement('span');
+  linesEl.className = 'vjs-primary-subtitle-trigger-lines';
+  glyphEl.appendChild(linesEl);
+
+  const caretEl = documentLike.createElement('span');
+  caretEl.className = 'vjs-primary-subtitle-trigger-caret';
+  caretEl.setAttribute('aria-hidden', 'true');
+  glyphEl.appendChild(caretEl);
+
+  return glyphEl;
+}
 
 function registerPrimarySubtitleControlButton() {
   if (typeof videojs.getComponent !== 'function' || videojs.getComponent(primarySubtitleButtonComponentName)) {
@@ -258,7 +322,7 @@ function registerPrimarySubtitleControlButton() {
     }
 
     buildCSSClass() {
-      return `vjs-primary-subtitle-button ${super.buildCSSClass()}`;
+      return `vjs-primary-subtitle-button vjs-subtitle-cluster-button vjs-subtitle-cluster-button--middle ${super.buildCSSClass()}`;
     }
 
     createEl() {
@@ -269,13 +333,10 @@ function registerPrimarySubtitleControlButton() {
         iconPlaceholder.textContent = '';
       }
 
-      const labelEl = el.ownerDocument.createElement('span');
-      labelEl.className = 'vjs-primary-subtitle-trigger-label';
-      labelEl.setAttribute('aria-hidden', 'true');
-      labelEl.textContent = primarySubtitleTriggerLabel;
+      const glyphEl = createPrimarySubtitleMenuGlyph(el.ownerDocument);
 
       const controlTextEl = el.querySelector('.vjs-control-text');
-      el.insertBefore(labelEl, controlTextEl || null);
+      el.insertBefore(glyphEl, controlTextEl || null);
       return el;
     }
 
@@ -312,6 +373,80 @@ function registerPrimarySubtitleControlButton() {
   videojs.registerComponent(primarySubtitleButtonComponentName, PrimarySubtitleControlButton);
 }
 
+function registerSubtitleVisibilityToggleButton() {
+  if (typeof videojs.getComponent !== 'function' || videojs.getComponent(subtitleVisibilityToggleButtonComponentName)) {
+    return;
+  }
+
+  const Button = videojs.getComponent('Button');
+  if (!Button) {
+    return;
+  }
+
+  class SubtitleVisibilityToggleButton extends Button {
+    constructor(player, options = {}) {
+      super(player, options);
+      this.controlText(subtitleVisibilityToggleTitle);
+      this.on(player, subtitleVisibilityToggleStateEventName, () => this.updateState());
+      this.updateState();
+    }
+
+    buildCSSClass() {
+      return `vjs-subtitle-visibility-toggle-button vjs-subtitle-cluster-button vjs-subtitle-cluster-button--first ${super.buildCSSClass()}`;
+    }
+
+    createEl() {
+      const el = super.createEl();
+      const iconPlaceholder = el.querySelector('.vjs-icon-placeholder');
+      if (iconPlaceholder) {
+        iconPlaceholder.setAttribute('aria-hidden', 'true');
+        iconPlaceholder.textContent = '';
+      }
+
+      const glyphEl = createSubtitleControlGlyph(el.ownerDocument, {
+        containerClass: 'vjs-subtitle-visibility-toggle-indicator',
+        labelClass: 'vjs-subtitle-visibility-toggle-label',
+        labelText: subtitleVisibilityToggleLabel,
+        dotClass: 'vjs-subtitle-visibility-toggle-dot',
+      });
+
+      const controlTextEl = el.querySelector('.vjs-control-text');
+      el.insertBefore(glyphEl, controlTextEl || null);
+      return el;
+    }
+
+    handleClick() {
+      this.player_.subtitleVisibilityToggleAction_?.();
+    }
+
+    updateState() {
+      const state = this.player_.subtitleVisibilityToggleState_ || {};
+      const buttonEl = this.el();
+
+      this.show();
+      if (buttonEl) {
+        buttonEl.setAttribute('title', state.tooltip || subtitleVisibilityToggleTitle);
+        buttonEl.setAttribute('aria-label', state.tooltip || subtitleVisibilityToggleTitle);
+        buttonEl.setAttribute('aria-pressed', state.active ? 'true' : 'false');
+      }
+
+      if (state.enabled === false) {
+        this.disable();
+      } else {
+        this.enable();
+      }
+
+      if (state.active) {
+        this.addClass('vjs-subtitle-visibility-toggle-button--active');
+      } else {
+        this.removeClass('vjs-subtitle-visibility-toggle-button--active');
+      }
+    }
+  }
+
+  videojs.registerComponent(subtitleVisibilityToggleButtonComponentName, SubtitleVisibilityToggleButton);
+}
+
 function registerDualSubtitleSwapButton() {
   if (typeof videojs.getComponent !== 'function' || videojs.getComponent(dualSubtitleSwapButtonComponentName)) {
     return;
@@ -325,13 +460,13 @@ function registerDualSubtitleSwapButton() {
   class DualSubtitleSwapButton extends Button {
     constructor(player, options = {}) {
       super(player, options);
-      this.controlText('Swap primary and secondary subtitles');
+      this.controlText(dualSubtitleSwapTitle);
       this.on(player, dualSubtitleSwapStateEventName, () => this.updateState());
       this.updateState();
     }
 
     buildCSSClass() {
-      return `vjs-dual-subtitle-swap-button ${super.buildCSSClass()}`;
+      return `vjs-dual-subtitle-swap-button vjs-subtitle-cluster-button vjs-subtitle-cluster-button--last ${super.buildCSSClass()}`;
     }
 
     createEl() {
@@ -342,10 +477,11 @@ function registerDualSubtitleSwapButton() {
         iconPlaceholder.textContent = '';
       }
 
-      const iconEl = el.ownerDocument.createElement('span');
-      iconEl.className = 'vjs-dual-subtitle-swap-icon';
-      iconEl.setAttribute('aria-hidden', 'true');
-      iconEl.textContent = 'A/B';
+      const iconEl = createSubtitleControlGlyph(el.ownerDocument, {
+        containerClass: 'vjs-dual-subtitle-swap-indicator',
+        labelClass: 'vjs-dual-subtitle-swap-icon',
+        labelText: 'A/B',
+      });
 
       const controlTextEl = el.querySelector('.vjs-control-text');
       el.insertBefore(iconEl, controlTextEl || null);
@@ -358,11 +494,17 @@ function registerDualSubtitleSwapButton() {
 
     updateState() {
       const state = this.player_.dualSubtitleSwapState_ || {};
+      const buttonEl = this.el();
 
       if (state.visible === false) {
         this.hide();
       } else {
         this.show();
+      }
+
+      if (buttonEl) {
+        buttonEl.setAttribute('title', state.tooltip || dualSubtitleSwapTitle);
+        buttonEl.setAttribute('aria-label', state.tooltip || dualSubtitleSwapTitle);
       }
 
       if (state.enabled === false) {
@@ -529,6 +671,8 @@ let isSwitchingSource = false;
 let lastProgressSnapshotTime = -1;
 let sourceSetupRequestSeq = 0;
 let subtitleCueRoleSyncFrame = 0;
+let subtitleCueDisplayObserver = null;
+let subtitleCueDisplayElement = null;
 let startupGateSourceSeq = 0;
 let startupGateReady = false;
 let startupGateWaitingForBuffer = false;
@@ -616,6 +760,24 @@ function findSubtitleTrackByLanguage(lang) {
   return props.subtitles.find((track) => normalizeLocale(track?.lang) === targetLocale) || null;
 }
 
+function resolvePrimarySubtitleMenuTrackMetaLabel(track) {
+  const labels = [];
+
+  if (track?.isPrimary) {
+    labels.push('主字幕');
+  }
+
+  if (track?.isSecondary) {
+    labels.push('副字幕');
+  }
+
+  if (track?.isLocal) {
+    labels.push('本機字幕');
+  }
+
+  return labels.join(' / ');
+}
+
 function resolvePrimarySubtitleControlState() {
   if (hasAvailableSubtitleTracks.value) {
     return {
@@ -648,6 +810,39 @@ function resolvePrimarySubtitleControlState() {
   };
 }
 
+function resolveSubtitleVisibilityToggleState() {
+  if (hasAvailableSubtitleTracks.value) {
+    const isActive =
+      resolvedSubtitleSelection.value.mode === 'showing' && Boolean(resolvedSubtitleSelection.value.primaryLang);
+
+    return {
+      enabled: true,
+      active: isActive,
+      tooltip: isActive ? '關閉字幕' : '開啟字幕',
+    };
+  }
+
+  return {
+    enabled: false,
+    active: false,
+    tooltip:
+      props.subtitleCatalogStatus === 'loading'
+        ? '字幕載入中...'
+        : props.subtitleCatalogStatus === 'error'
+          ? '字幕載入失敗'
+          : '沒有可用字幕',
+  };
+}
+
+function updateSubtitleVisibilityToggleControl() {
+  if (!player) {
+    return;
+  }
+
+  player.subtitleVisibilityToggleState_ = resolveSubtitleVisibilityToggleState();
+  player.trigger(subtitleVisibilityToggleStateEventName);
+}
+
 function updatePrimarySubtitleControl() {
   if (!player) {
     return;
@@ -658,6 +853,7 @@ function updatePrimarySubtitleControl() {
     expanded: isPrimarySubtitleMenuOpen.value,
   };
   player.trigger(primarySubtitleControlStateEventName);
+  updateSubtitleVisibilityToggleControl();
 }
 
 function updatePrimarySubtitleMenuPosition() {
@@ -837,6 +1033,8 @@ function scheduleSubtitleCueRoleClassSync() {
     return;
   }
 
+  observeSubtitleCueDisplay();
+
   if (typeof window.requestAnimationFrame !== 'function') {
     syncSubtitleCueRoleClasses();
     return;
@@ -894,28 +1092,17 @@ function syncSecondaryCueOffsets(primaryCueElements, secondaryCueElements) {
     return;
   }
 
-  const primaryRects = primaryCueElements
-    .map((cueElement) => cueElement.getBoundingClientRect())
-    .sort((left, right) => left.top - right.top);
+  const offset = resolveSecondaryCueOffset(
+    primaryCueElements.map((cueElement) => cueElement.getBoundingClientRect()),
+    secondaryCueElements.map((cueElement) => cueElement.getBoundingClientRect())
+  );
+
+  if (offset <= 0) {
+    return;
+  }
 
   secondaryCueElements.forEach((cueElement) => {
-    const secondaryRect = cueElement.getBoundingClientRect();
-    let closestGap = Number.POSITIVE_INFINITY;
-
-    primaryRects.forEach((primaryRect) => {
-      const gap = primaryRect.top - secondaryRect.bottom;
-      if (gap < 0 || gap >= closestGap) {
-        return;
-      }
-
-      closestGap = gap;
-    });
-
-    if (!Number.isFinite(closestGap) || closestGap <= 0) {
-      return;
-    }
-
-    cueElement.style.setProperty(secondarySubtitleOffsetCssVar, `${closestGap}px`);
+    cueElement.style.setProperty(secondarySubtitleOffsetCssVar, `${offset}px`);
   });
 }
 
@@ -971,19 +1158,13 @@ function formatSubtitleSelectionStatus(selection) {
   return labels.length > 0 ? `字幕已開啟：${labels.join(' / ')}` : '字幕已關閉';
 }
 
-function canSwapSubtitleRoles(selection = props.subtitleSelection) {
-  const subtitlePreference = resolveSubtitlePreference(props.subtitles);
+function resolveDualSubtitleSwapButtonState(selection = props.subtitleSelection) {
   const target = typeof window !== 'undefined' ? window : null;
-  const targetSelection =
-    selection === props.subtitleSelection
-      ? subtitlePreference
-      : reconcileSubtitlePreference(selection, props.subtitles, target?.navigator);
+  return resolveDualSubtitleSwapControlState(selection, props.subtitles, target?.navigator);
+}
 
-  return (
-    targetSelection.mode === 'showing' &&
-    Boolean(targetSelection.primaryLang) &&
-    Boolean(targetSelection.secondaryLang)
-  );
+function canSwapSubtitleRoles(selection = props.subtitleSelection) {
+  return resolveDualSubtitleSwapButtonState(selection).enabled;
 }
 
 function updateDualSubtitleSwapControl(selection = props.subtitleSelection) {
@@ -991,13 +1172,7 @@ function updateDualSubtitleSwapControl(selection = props.subtitleSelection) {
     return;
   }
 
-  const canSwapRoles = canSwapSubtitleRoles(selection);
-  const nextState = {
-    visible: canSwapRoles,
-    enabled: canSwapRoles,
-  };
-
-  player.dualSubtitleSwapState_ = nextState;
+  player.dualSubtitleSwapState_ = resolveDualSubtitleSwapButtonState(selection);
   player.trigger(dualSubtitleSwapStateEventName);
 }
 
@@ -1077,7 +1252,52 @@ function ensureDualSubtitleSwapControl() {
     controlBar.addChild(dualSubtitleSwapButtonComponentName, {}, insertIndex);
   }
 
+  repositionSubtitleControlCluster();
   updateDualSubtitleSwapControl();
+}
+
+function ensureSubtitleVisibilityToggleControl() {
+  if (!player) {
+    return;
+  }
+
+  registerSubtitleVisibilityToggleButton();
+  player.subtitleVisibilityToggleAction_ = toggleSubtitleVisibility;
+
+  const controlBar = player.getChild('controlBar');
+  if (!controlBar) {
+    return;
+  }
+
+  if (!controlBar.getChild(subtitleVisibilityToggleButtonComponentName)) {
+    const children = typeof controlBar.children === 'function' ? controlBar.children() : [];
+    const primaryButtonIndex = children.findIndex(
+      (child) => String(child?.name?.() || '') === primarySubtitleButtonComponentName
+    );
+    const fallbackInsertIndex = children.findIndex((child) =>
+      primarySubtitleControlInsertBefore.includes(String(child?.name?.() || ''))
+    );
+    const insertIndex =
+      primaryButtonIndex >= 0
+        ? primaryButtonIndex
+        : fallbackInsertIndex >= 0
+          ? fallbackInsertIndex
+          : children.length;
+
+    if (videojs.getComponent(subtitleVisibilityToggleButtonComponentName)) {
+      controlBar.addChild(
+        subtitleVisibilityToggleButtonComponentName,
+        {
+          name: subtitleVisibilityToggleButtonComponentName,
+          title: subtitleVisibilityToggleTitle,
+        },
+        insertIndex
+      );
+    }
+  }
+
+  repositionSubtitleControlCluster();
+  updateSubtitleVisibilityToggleControl();
 }
 
 function ensurePrimarySubtitleControl() {
@@ -1124,7 +1344,46 @@ function ensurePrimarySubtitleControl() {
     }
   }
 
+  repositionSubtitleControlCluster();
   updatePrimarySubtitleControl();
+}
+
+function repositionSubtitleControlCluster() {
+  if (!player) {
+    return;
+  }
+
+  const controlBar = player.getChild('controlBar');
+  const controlBarEl = controlBar?.el?.();
+  if (!controlBar || !controlBarEl) {
+    return;
+  }
+
+  const clusterComponents = [
+    controlBar.getChild(subtitleVisibilityToggleButtonComponentName),
+    controlBar.getChild(primarySubtitleButtonComponentName),
+    controlBar.getChild(dualSubtitleSwapButtonComponentName),
+  ].filter(Boolean);
+
+  if (clusterComponents.length === 0) {
+    return;
+  }
+
+  const anchorComponent =
+    controlBar.getChild('QualityButton') ||
+    controlBar.getChild('PictureInPictureToggle') ||
+    controlBar.getChild('FullscreenToggle') ||
+    null;
+  const anchorEl = anchorComponent?.el?.() || null;
+
+  clusterComponents.forEach((component) => {
+    const componentEl = component?.el?.();
+    if (!componentEl) {
+      return;
+    }
+
+    controlBarEl.insertBefore(componentEl, anchorEl);
+  });
 }
 
 function closeHotkeyHelp() {
@@ -1218,6 +1477,8 @@ function emitQualityLevels() {
 
 function syncQualitySelectorButtonLabel() {
   if (!player) return;
+
+  repositionSubtitleControlCluster();
 
   const labelEl =
     player.el()?.querySelector?.('.vjs-quality-selector .vjs-icon-placeholder') || null;
@@ -1490,6 +1751,42 @@ function bindSubtitleTrackChangeListener() {
   textTrackList.addEventListener('change', handleSubtitleTrackChange);
 }
 
+function disconnectSubtitleCueDisplayObserver() {
+  subtitleCueDisplayObserver?.disconnect?.();
+  subtitleCueDisplayObserver = null;
+  subtitleCueDisplayElement = null;
+}
+
+function observeSubtitleCueDisplay() {
+  if (!player || typeof window === 'undefined' || typeof window.MutationObserver !== 'function') {
+    return;
+  }
+
+  const playerElement = player.el?.();
+  const nextDisplayElement = playerElement?.querySelector?.('.vjs-text-track-display') || null;
+
+  if (!nextDisplayElement) {
+    disconnectSubtitleCueDisplayObserver();
+    return;
+  }
+
+  if (subtitleCueDisplayObserver && subtitleCueDisplayElement === nextDisplayElement) {
+    return;
+  }
+
+  disconnectSubtitleCueDisplayObserver();
+  subtitleCueDisplayElement = nextDisplayElement;
+  subtitleCueDisplayObserver = new window.MutationObserver(() => {
+    scheduleSubtitleCueRoleClassSync();
+  });
+  subtitleCueDisplayObserver.observe(nextDisplayElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'style', 'lang'],
+  });
+}
+
 function orderSubtitleTracksForDisplay(subtitles, selection = props.subtitleSelection) {
   if (!Array.isArray(subtitles) || subtitles.length <= 1) {
     return Array.isArray(subtitles) ? subtitles : [];
@@ -1595,6 +1892,10 @@ function applySubtitleTracks(subtitles, seq = sourceSeq) {
   scheduleSubtitleCueRoleClassSync();
 }
 
+function resolveLatestSourceSubtitles(fallbackSubtitles = []) {
+  return Array.isArray(props.subtitles) && props.subtitles.length > 0 ? props.subtitles : fallbackSubtitles;
+}
+
 async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
   if (!player) return;
 
@@ -1688,7 +1989,8 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
   player.one('error', () => {
     handleSourceError(seq);
   });
-  applySubtitleTracks(subtitles, seq);
+  // Source setup can outlive the initial props snapshot, so always prefer the latest loaded subtitle list.
+  applySubtitleTracks(resolveLatestSourceSubtitles(subtitles), seq);
 
   player.one('loadedmetadata', () => {
     if (!player || seq !== sourceSeq || setupRequestId !== sourceSetupRequestSeq) return;
@@ -1929,6 +2231,7 @@ function initPlayer() {
   if (!videoRef.value) return;
 
   registerPrimarySubtitleControlButton();
+  registerSubtitleVisibilityToggleButton();
   registerDualSubtitleSwapButton();
   player = videojs(
     videoRef.value,
@@ -1960,6 +2263,7 @@ function initPlayer() {
       bindPlaybackSnapshotListeners();
       bindStartupGateListeners();
       bindQualityLevelListeners();
+      observeSubtitleCueDisplay();
       player.on('texttrackchange', scheduleSubtitleCueRoleClassSync);
       player.on('playerresize', () => {
         scheduleSubtitleCueRoleClassSync();
@@ -1974,6 +2278,7 @@ function initPlayer() {
         }
       });
       ensurePrimarySubtitleControl();
+      ensureSubtitleVisibilityToggleControl();
       ensureDualSubtitleSwapControl();
       updatePrimarySubtitleControl();
       syncPoster(props.posterUrl);
@@ -2096,6 +2401,7 @@ onBeforeUnmount(() => {
     window.cancelAnimationFrame(subtitleCueRoleSyncFrame);
     subtitleCueRoleSyncFrame = 0;
   }
+  disconnectSubtitleCueDisplayObserver();
   if (textTrackList) {
     textTrackList.removeEventListener('change', handleSubtitleTrackChange);
     textTrackList = null;
@@ -2109,6 +2415,8 @@ onBeforeUnmount(() => {
   if (player) {
     player.dualSubtitleSwapAction_ = null;
     player.dualSubtitleSwapState_ = null;
+    player.subtitleVisibilityToggleAction_ = null;
+    player.subtitleVisibilityToggleState_ = null;
     player.primarySubtitleMenuToggle_ = null;
     player.primarySubtitleControlState_ = null;
     emitPlaybackSnapshot('before-unmount', { force: true });
@@ -2135,22 +2443,158 @@ onBeforeUnmount(() => {
   transform-origin: center bottom;
 }
 
-.video-player-shell .vjs-primary-subtitle-button .vjs-icon-placeholder {
+.video-player-shell :deep(.vjs-control-bar) {
+  background-color: rgba(27, 33, 41, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.video-player-shell .vjs-primary-subtitle-button,
+.video-player-shell .vjs-subtitle-visibility-toggle-button,
+.video-player-shell .vjs-dual-subtitle-swap-button {
+  width: 3.6em;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.76);
+  background: rgba(0, 0, 0, 0.18);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.video-player-shell .vjs-primary-subtitle-button.vjs-disabled,
+.video-player-shell .vjs-subtitle-visibility-toggle-button.vjs-disabled,
+.video-player-shell .vjs-dual-subtitle-swap-button.vjs-disabled {
+  opacity: 0.48;
+}
+
+.video-player-shell .vjs-subtitle-visibility-toggle-button {
+  order: 72;
+}
+
+.video-player-shell .vjs-primary-subtitle-button {
+  order: 73;
+}
+
+.video-player-shell .vjs-dual-subtitle-swap-button {
+  order: 74;
+}
+
+.video-player-shell .vjs-quality-selector {
+  order: 75;
+  margin-left: 0.2em;
+}
+
+.video-player-shell .vjs-picture-in-picture-control {
+  order: 76;
+}
+
+.video-player-shell .vjs-fullscreen-control {
+  order: 77;
+}
+
+.video-player-shell .vjs-subtitle-cluster-button + .vjs-subtitle-cluster-button {
+  margin-left: -1px;
+}
+
+.video-player-shell .vjs-subtitle-cluster-button--first {
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px 0 0 999px;
+}
+
+.video-player-shell .vjs-subtitle-cluster-button--middle {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.video-player-shell .vjs-subtitle-cluster-button--last {
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0 999px 999px 0;
+}
+
+.video-player-shell .vjs-subtitle-cluster-button:hover:not(.vjs-disabled) {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-icon-placeholder,
+.video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-icon-placeholder,
+.video-player-shell .vjs-dual-subtitle-swap-button .vjs-icon-placeholder {
   display: none;
 }
 
-.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-label {
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger,
+.video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-subtitle-visibility-toggle-indicator,
+.video-player-shell .vjs-dual-subtitle-swap-button .vjs-dual-subtitle-swap-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.25em;
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  width: 100%;
+  height: 100%;
+  gap: 0.24em;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-lines {
+  position: relative;
+  display: inline-flex;
+  width: 0.92em;
+  height: 0.74em;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-lines::before,
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-lines::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 0.12em;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-lines::before {
+  top: 0.12em;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-lines::after {
+  bottom: 0.12em;
+}
+
+.video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger-caret {
+  width: 0;
+  height: 0;
+  border-left: 0.22em solid transparent;
+  border-right: 0.22em solid transparent;
+  border-top: 0.3em solid currentColor;
+  opacity: 0.72;
+  transform: translateY(0.08em);
 }
 
 .video-player-shell .vjs-primary-subtitle-button.vjs-primary-subtitle-button--active {
-  color: #b9e7ff;
+  color: #ffffff;
+  text-shadow: 0 0 0.8em rgba(138, 223, 255, 0.52);
+}
+
+.video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-subtitle-visibility-toggle-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-subtitle-visibility-toggle-dot {
+  width: 0.36em;
+  height: 0.36em;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.video-player-shell .vjs-subtitle-visibility-toggle-button.vjs-subtitle-visibility-toggle-button--active {
+  color: #ffffff;
+  text-shadow: 0 0 0.8em rgba(138, 223, 255, 0.52);
+}
+
+.video-player-shell .vjs-subtitle-visibility-toggle-button.vjs-subtitle-visibility-toggle-button--active
+  .vjs-subtitle-visibility-toggle-dot {
+  background: #8adfff;
+  box-shadow: 0 0 0.55em rgba(138, 223, 255, 0.82);
 }
 
 .primary-subtitle-menu-backdrop {
@@ -2161,67 +2605,58 @@ onBeforeUnmount(() => {
 
 .primary-subtitle-menu {
   position: absolute;
-  min-width: min(320px, calc(100% - 24px));
-  max-width: min(360px, calc(100% - 24px));
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
-  background: rgba(12, 15, 26, 0.96);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
-}
-
-.primary-subtitle-menu-header {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  width: min(12.75rem, calc(100% - 24px));
+  padding: 0.28rem 0;
+  border-radius: 0.4rem;
+  border: none;
+  background: rgba(43, 51, 63, 0.88);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+  font-size: 12px;
 }
 
 .primary-subtitle-menu-title {
-  margin: 0;
-  font-size: 0.76rem;
+  padding: 0.42rem 0.7rem 0.24rem;
+  margin: 0 0 0.15rem;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #b9e7ff;
-}
-
-.primary-subtitle-menu-hint {
-  margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.74);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
 }
 
 .primary-subtitle-menu-status {
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.05);
+  padding: 0.68rem 0.7rem;
   color: rgba(255, 255, 255, 0.78);
-  font-size: 0.88rem;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .primary-subtitle-menu-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .primary-subtitle-menu-item {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #f5f7ff;
-  padding: 11px 12px;
+  box-sizing: border-box;
+  margin: 0;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 2.4px 0;
+  border-radius: 4px;
+  background-clip: padding-box;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  padding: 0.44rem 0.7rem;
   text-align: left;
   font: inherit;
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+  transition: background 0.14s ease, color 0.14s ease, opacity 0.14s ease;
 }
 
 .primary-subtitle-menu-item:hover:not(:disabled) {
-  border-color: rgba(185, 231, 255, 0.28);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(114, 133, 159, 0.5);
 }
 
 .primary-subtitle-menu-item:disabled {
@@ -2229,8 +2664,8 @@ onBeforeUnmount(() => {
 }
 
 .primary-subtitle-menu-item--selected {
-  border-color: rgba(185, 231, 255, 0.42);
-  background: rgba(84, 165, 255, 0.12);
+  background: #ffffff;
+  color: #2b333f;
 }
 
 .primary-subtitle-menu-item--secondary {
@@ -2241,71 +2676,113 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
 .primary-subtitle-menu-item-label {
-  font-weight: 600;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.25;
 }
 
-.primary-subtitle-menu-badges {
+.primary-subtitle-menu-item-trailing {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 0.45rem;
+  min-width: 0;
 }
 
-.primary-subtitle-menu-badge {
+.primary-subtitle-menu-item-meta {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  gap: 0.28rem;
+  opacity: 0.76;
 }
 
-.primary-subtitle-menu-badge--primary {
-  background: rgba(84, 165, 255, 0.18);
-  color: #b9e7ff;
-}
-
-.primary-subtitle-menu-badge--secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.primary-subtitle-menu-badge--local {
-  background: rgba(117, 255, 204, 0.14);
-  color: #8af0cf;
-}
-
-.primary-subtitle-menu-item-detail {
-  display: block;
-  margin-top: 6px;
-  font-size: 0.78rem;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.68);
-}
-
-.video-player-shell .vjs-dual-subtitle-swap-button {
-  min-width: 42px;
-}
-
-.video-player-shell .vjs-dual-subtitle-swap-button .vjs-icon-placeholder {
-  display: none;
-}
-
-.video-player-shell .vjs-dual-subtitle-swap-icon {
+.primary-subtitle-menu-item-meta-icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  font-size: 0.66rem;
+  width: 0.86rem;
+  height: 0.68rem;
+  color: currentColor;
+  border: 1px solid currentColor;
+  border-radius: 0.18rem;
+}
+
+.primary-subtitle-menu-item-meta-icon--primary::before,
+.primary-subtitle-menu-item-meta-icon--secondary::before,
+.primary-subtitle-menu-item-meta-icon--secondary::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.primary-subtitle-menu-item-meta-icon--primary::before {
+  bottom: 0.12rem;
+  width: 0.54rem;
+  height: 0.11rem;
+}
+
+.primary-subtitle-menu-item-meta-icon--secondary::before {
+  top: 0.12rem;
+  width: 0.52rem;
+  height: 0.09rem;
+}
+
+.primary-subtitle-menu-item-meta-icon--secondary::after {
+  top: 0.31rem;
+  width: 0.36rem;
+  height: 0.08rem;
+  opacity: 0.72;
+}
+
+.primary-subtitle-menu-item-meta-icon--local::before,
+.primary-subtitle-menu-item-meta-icon--local::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: currentColor;
+}
+
+.primary-subtitle-menu-item-meta-icon--local::before {
+  top: 0.12rem;
+  width: 0.24rem;
+  height: 0.24rem;
+  border-radius: 0.08rem;
+}
+
+.primary-subtitle-menu-item-meta-icon--local::after {
+  bottom: 0.08rem;
+  width: 0.46rem;
+  height: 0.1rem;
+  border-radius: 999px;
+}
+
+.primary-subtitle-menu-item-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.95rem;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+}
+
+.video-player-shell .vjs-dual-subtitle-swap-icon {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 
 .startup-gate {
