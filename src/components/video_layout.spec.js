@@ -56,6 +56,7 @@ describe('WatchPage layout contract', () => {
     expect(template).toContain('class="player-container glass-panel"');
     expect(template).toContain('data-testid="player-container"');
     expect(template).toContain(':frame-rate="videoInfo.fps"');
+    expect(template).toContain(':avatar-url="avatarUrl"');
     expect(playerContainerIndex).toBeGreaterThan(-1);
     expect(playerTitleIndex).toBeGreaterThan(playerContainerIndex);
     expect(videoInfoIndex).toBeGreaterThan(playerTitleIndex);

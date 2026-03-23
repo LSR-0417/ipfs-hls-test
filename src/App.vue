@@ -6,7 +6,6 @@ import WatchPage from './components/WatchPage.vue';
 import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
 import {
-  buildGatewayAssetUrl,
   defaultPublicGateway,
   getDefaultGateway,
   isLoopbackGatewayUrl,
@@ -14,18 +13,28 @@ import {
   persistGateway,
   readStoredGateway,
 } from './utils/gateway';
-import { createDefaultVideoInfo, fetchVideoInfo } from './utils/videoInfo';
+import { createDefaultVideoInfo } from './utils/videoInfo';
 import {
   createDefaultSubtitlePreference,
-  fetchSubtitleCatalog,
   mergeSubtitleTracks,
   persistSubtitlePreference,
   readStoredSubtitlePreference,
   reconcileSubtitlePreference,
-  resolveSubtitleTracks,
   revokeImportedSubtitleTracks,
   subtitleCatalogStatus,
 } from './utils/subtitles';
+import {
+  avatarAssetFileName,
+  buildSidecarGatewayCandidates,
+  loadAvatarUrlWithFallback,
+  loadPosterUrlWithFallback,
+  loadSubtitleCatalogWithFallback,
+  loadVideoInfoWithFallback,
+  posterAssetFileName,
+  readCachedSidecarObjectUrl,
+  readCachedSubtitleCatalog,
+  readCachedVideoInfo,
+} from './utils/sidecarAssets';
 import { parsePlayerParams } from './utils/url';
 import { getPlaybackSnapshot } from './utils/playback';
 import {
@@ -41,6 +50,8 @@ const status = ref('準備就緒');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
+const currentHistoryPosterUrl = ref('');
+const currentAvatarUrl = ref('');
 const currentVideoInfo = ref(createDefaultVideoInfo());
 const currentRemoteSubtitleTracks = ref([]);
 const currentRemoteSubtitleStatus = ref(subtitleCatalogStatus.idle);
@@ -57,6 +68,7 @@ const currentLoadSequence = ref(0);
 const activeView = ref('home');
 const historyItems = ref([]);
 const isSidebarOpen = ref(false);
+const sidecarGatewayCandidates = ref([]);
 
 let originalPushState = null;
 let originalReplaceState = null;
@@ -68,6 +80,8 @@ function resetPlaybackState() {
   currentM3u8Url.value = '';
   currentIpfsBaseUrl.value = '';
   currentPosterUrl.value = '';
+  currentHistoryPosterUrl.value = '';
+  currentAvatarUrl.value = '';
   currentVideoInfo.value = createDefaultVideoInfo();
   clearImportedSubtitles();
   currentRemoteSubtitleTracks.value = [];
@@ -256,10 +270,29 @@ function onGatewayChange(gateway) {
   persistGateway(nextGateway, window);
 }
 
+function onGatewayCandidatesChange(payload = {}) {
+  sidecarGatewayCandidates.value = Array.isArray(payload?.candidates)
+    ? payload.candidates
+        .map((candidate) => (typeof candidate?.url === 'string' ? candidate.url.trim() : ''))
+        .filter((candidate) => candidate)
+    : [];
+}
+
+function resolveSidecarCandidates(primaryGateway) {
+  return buildSidecarGatewayCandidates(primaryGateway, sidecarGatewayCandidates.value);
+}
+
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const { updateUrl = true, shouldAutoplay = false } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   const requestSeq = ++metadataRequestSeq;
+  const nextIpfsBaseUrl = `${nextGateway}${cid}/`;
+  const nextM3u8Url = `${nextGateway}${cid}/index.m3u8`;
+  const historyPosterUrl = `${nextGateway}${cid}/${posterAssetFileName}`;
+  const cachedPosterUrl = readCachedSidecarObjectUrl(cid, posterAssetFileName);
+  const cachedAvatarUrl = readCachedSidecarObjectUrl(cid, avatarAssetFileName);
+  const cachedVideoInfo = readCachedVideoInfo(cid);
+  const cachedSubtitleCatalog = readCachedSubtitleCatalog(cid, nextGateway, sidecarGatewayCandidates.value);
 
   persistCurrentHistory();
   const shouldClearImportedSubtitles = currentCid.value && currentCid.value !== cid;
@@ -267,31 +300,29 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
   persistGateway(nextGateway, window);
-
-  const ipfsBaseUrl = buildGatewayAssetUrl(nextGateway, cid);
-  const m3u8Url = buildGatewayAssetUrl(nextGateway, cid, 'index.m3u8');
-  const posterUrl = buildGatewayAssetUrl(nextGateway, cid, 'cover.webp');
   status.value = '正在連線至網關...';
   
-  currentIpfsBaseUrl.value = ipfsBaseUrl;
-  currentM3u8Url.value = m3u8Url;
-  currentPosterUrl.value = posterUrl;
-  currentVideoInfo.value = createDefaultVideoInfo();
+  currentIpfsBaseUrl.value = nextIpfsBaseUrl;
+  currentM3u8Url.value = nextM3u8Url;
+  currentPosterUrl.value = cachedPosterUrl;
+  currentHistoryPosterUrl.value = historyPosterUrl;
+  currentAvatarUrl.value = cachedAvatarUrl;
+  currentVideoInfo.value = cachedVideoInfo || createDefaultVideoInfo();
   if (shouldClearImportedSubtitles) {
     clearImportedSubtitles();
   }
-  currentRemoteSubtitleTracks.value = [];
-  currentRemoteSubtitleStatus.value = subtitleCatalogStatus.loading;
+  currentRemoteSubtitleTracks.value = cachedSubtitleCatalog?.tracks || [];
+  currentRemoteSubtitleStatus.value = cachedSubtitleCatalog?.status || subtitleCatalogStatus.loading;
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
   persistHistoryEntry({
     cid,
-    posterUrl,
+    posterUrl: historyPosterUrl,
     gateway: nextGateway,
     progressSeconds: startTime,
     lastWatchedAt: Date.now(),
   });
-  void loadSidecarAssets(ipfsBaseUrl, requestSeq);
+  void loadSidecarAssets(cid, nextGateway, requestSeq);
 
   if (updateUrl) {
     syncPlayerUrl(cid, startTime, 'push');
@@ -361,23 +392,28 @@ function onSubtitleSelectionChange(nextSelection) {
   setSubtitleSelection(nextSelection);
 }
 
-async function loadSidecarAssets(ipfsBaseUrl, requestSeq) {
-  const [nextVideoInfo, subtitleCatalog] = await Promise.all([
-    fetchVideoInfo(ipfsBaseUrl).catch(() => createDefaultVideoInfo()),
-    fetchSubtitleCatalog(ipfsBaseUrl),
+async function loadSidecarAssets(cid, gateway, requestSeq) {
+  const sidecarCandidates = resolveSidecarCandidates(gateway);
+  const [nextPosterUrl, nextAvatarUrl, nextVideoInfo, subtitleCatalog] = await Promise.all([
+    loadPosterUrlWithFallback(cid, gateway, sidecarCandidates),
+    loadAvatarUrlWithFallback(cid, gateway, sidecarCandidates),
+    loadVideoInfoWithFallback(cid, gateway, sidecarCandidates),
+    loadSubtitleCatalogWithFallback(cid, gateway, sidecarCandidates),
   ]);
 
   if (requestSeq !== metadataRequestSeq) return;
 
+  currentPosterUrl.value = nextPosterUrl || currentPosterUrl.value;
+  currentAvatarUrl.value = nextAvatarUrl || '';
   currentVideoInfo.value = nextVideoInfo;
   currentRemoteSubtitleStatus.value = subtitleCatalog.status;
-  currentRemoteSubtitleTracks.value = resolveSubtitleTracks(ipfsBaseUrl, subtitleCatalog.tracks);
+  currentRemoteSubtitleTracks.value = subtitleCatalog.tracks;
   const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
   persistHistoryEntry({
     cid: currentCid.value,
     title: nextVideoInfo.title,
     uploader: nextVideoInfo.uploader,
-    posterUrl: currentPosterUrl.value,
+    posterUrl: currentHistoryPosterUrl.value,
     gateway: currentGateway.value,
     durationString: nextVideoInfo.durationString,
     durationSeconds: snapshot?.duration ?? 0,
@@ -436,7 +472,7 @@ function persistCurrentHistory(options = {}) {
     cid,
     title: currentVideoInfo.value.title,
     uploader: currentVideoInfo.value.uploader,
-    posterUrl: currentPosterUrl.value,
+    posterUrl: currentHistoryPosterUrl.value,
     gateway: currentGateway.value,
     durationString: currentVideoInfo.value.durationString,
     durationSeconds: currentSnapshot.duration,
@@ -547,6 +583,7 @@ watch(
     :current-load-sequence="currentLoadSequence"
     :sidebar-open="isSidebarOpen"
     @gateway-change="onGatewayChange"
+    @gateway-candidates-change="onGatewayCandidatesChange"
     @toggle-sidebar="toggleSidebar"
   />
   <div class="app-container">
@@ -575,6 +612,7 @@ watch(
           :ipfs-base-url="currentIpfsBaseUrl"
           :m3u8-url="currentM3u8Url"
           :poster-url="currentPosterUrl"
+          :avatar-url="currentAvatarUrl"
           :subtitles="currentSubtitleTracks"
           :subtitle-selection="currentSubtitleSelection"
           :remote-subtitle-status="currentRemoteSubtitleStatus"
