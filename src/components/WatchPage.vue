@@ -24,6 +24,10 @@ defineProps({
     type: String,
     default: '',
   },
+  avatarUrl: {
+    type: String,
+    default: '',
+  },
   subtitles: {
     type: Array,
     default: () => [],
@@ -125,6 +129,7 @@ function handleSubtitleSelectionChange(nextSelection) {
     <h1 v-if="videoInfo.title" class="player-title">{{ videoInfo.title }}</h1>
     <VideoInfo
       :cid="cid"
+      :avatar-url="avatarUrl"
       :ipfs-base-url="ipfsBaseUrl"
       :subtitles="subtitles"
       :subtitle-selection="subtitleSelection"

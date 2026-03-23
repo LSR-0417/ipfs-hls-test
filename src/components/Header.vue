@@ -31,7 +31,7 @@ const props = defineProps({
   currentLoadSequence: { type: Number, default: 0 },
   sidebarOpen: { type: Boolean, default: false },
 });
-const emit = defineEmits(['search', 'gateway-change', 'toggle-sidebar']);
+const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);
 const { availableLocales, locale, setLocale, t } = useI18n();
 
 const searchQuery = ref('');
@@ -79,6 +79,45 @@ const orderedBuiltInGateways = computed(() =>
     return (builtInGatewayOrder[left.id] ?? 0) - (builtInGatewayOrder[right.id] ?? 0);
   })
 );
+const orderedGatewayCandidates = computed(() => {
+  const candidates = builtInGateways.map((gateway) => ({
+    id: gateway.id,
+    url: gatewayUrl(gateway),
+    order: builtInGatewayOrder[gateway.id] ?? 0,
+    probeState: probeStateFor(gateway.id),
+  }));
+
+  if (customGatewayPreview.value) {
+    candidates.push({
+      id: CUSTOM_GATEWAY_ID,
+      url: customGatewayPreview.value,
+      order: Number.MAX_SAFE_INTEGER,
+      probeState: probeStateFor(CUSTOM_GATEWAY_ID),
+    });
+  }
+
+  return candidates.sort((left, right) => {
+    const rankDiff = probeSortRank(left.probeState) - probeSortRank(right.probeState);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+
+    const performanceDiff = compareProbePerformance(left.probeState, right.probeState);
+    if (performanceDiff !== 0) {
+      return performanceDiff;
+    }
+
+    return left.order - right.order;
+  });
+});
+const gatewayCandidatesPayload = computed(() => ({
+  cid: currentCidValue.value,
+  candidates: orderedGatewayCandidates.value.map((candidate) => ({
+    id: candidate.id,
+    url: candidate.url,
+    state: candidate.probeState.state,
+  })),
+}));
 const recommendedGatewayId = computed(() => {
   const candidates = [
     ...builtInGateways.map((gateway) => ({
@@ -274,6 +313,14 @@ watch(settingsOpen, async (isOpen) => {
     nextFocusTarget.focus();
   }
 });
+
+watch(
+  gatewayCandidatesPayload,
+  (payload) => {
+    emit('gateway-candidates-change', payload);
+  },
+  { immediate: true, deep: true }
+);
 
 watch(
   () => [currentCidValue.value, props.currentLoadSequence],
