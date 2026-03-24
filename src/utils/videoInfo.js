@@ -14,6 +14,16 @@ const defaultVideoInfo = Object.freeze({
 
 const descriptionUrlPattern = /\b(?:https?:\/\/|www\.)[^\s<]+/gi;
 const descriptionHashtagPattern = /(^|[\s([{<"'`「『（【])#([\p{L}\p{N}_][\p{L}\p{N}\p{M}_-]*)/gu;
+const draftFormFieldNames = Object.freeze([
+  'id',
+  'title',
+  'uploader',
+  'channelId',
+  'uploadDate',
+  'description',
+  'tags',
+  'categories',
+]);
 
 export function createDefaultVideoInfo() {
   return {
@@ -37,6 +47,43 @@ export function normalizeVideoInfo(payload = {}) {
     resolution: normalizeString(payload.resolution),
     fps: normalizeFps(payload.fps),
   };
+}
+
+export function createVideoInfoDraftFormState(videoInfo = createDefaultVideoInfo()) {
+  const source = videoInfo && typeof videoInfo === 'object' ? videoInfo : createDefaultVideoInfo();
+
+  return {
+    id: source.id || '',
+    title: source.title || '',
+    uploader: source.uploader || '',
+    channelId: source.channelId || '',
+    uploadDate: formatUploadDate(source.uploadDate || ''),
+    description: source.description || '',
+    tags: Array.isArray(source.tags) ? source.tags.join(', ') : '',
+    categories: Array.isArray(source.categories) ? source.categories.join(', ') : '',
+  };
+}
+
+export function createVideoInfoDraftFormSnapshot(formState = {}) {
+  return {
+    id: normalizeString(formState.id),
+    title: normalizeString(formState.title),
+    uploader: normalizeString(formState.uploader),
+    channelId: normalizeString(formState.channelId),
+    uploadDate: normalizeString(formState.uploadDate),
+    description: normalizeString(formState.description),
+    tags: normalizeString(formState.tags),
+    categories: normalizeString(formState.categories),
+  };
+}
+
+export function isVideoInfoDraftFormPristine(formState = {}, lastSyncedSnapshot = null) {
+  if (!lastSyncedSnapshot || typeof lastSyncedSnapshot !== 'object') {
+    return false;
+  }
+
+  const currentSnapshot = createVideoInfoDraftFormSnapshot(formState);
+  return draftFormFieldNames.every((fieldName) => currentSnapshot[fieldName] === lastSyncedSnapshot[fieldName]);
 }
 
 export function buildInfoJsonPayload(payload = {}) {
