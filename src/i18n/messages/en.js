@@ -32,6 +32,11 @@ export default Object.freeze({
       },
     },
     actions: {
+      mobileMenu: {
+        label: 'Quick actions',
+        title: 'Open quick actions',
+        ariaLabel: 'Open quick actions',
+      },
       gateway: {
         label: 'Gateway',
         ariaLabel: 'Switch gateway. Current gateway: {gateway}',

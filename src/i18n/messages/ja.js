@@ -32,6 +32,11 @@ export default Object.freeze({
       },
     },
     actions: {
+      mobileMenu: {
+        label: 'その他の操作',
+        title: 'その他の操作を開く',
+        ariaLabel: 'その他の操作を開く',
+      },
       gateway: {
         label: 'ゲートウェイ',
         ariaLabel: 'ゲートウェイを切り替え。現在: {gateway}',
