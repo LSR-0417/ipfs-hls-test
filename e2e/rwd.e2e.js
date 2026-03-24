@@ -256,7 +256,7 @@ test.describe('Responsive Video Actions', () => {
     expect(dialogBox.y + dialogBox.height).toBeGreaterThanOrEqual(810);
   });
 
-  test('opens the subtitle dialog from the overflow menu and imports a local SRT file', async ({ page }) => {
+  test('opens the subtitle dialog from the overflow menu and configures primary and secondary subtitles from the subtitle list after multi-file import', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await openApp(page, './?cid=bafysubtitleimport123');
 
@@ -265,19 +265,48 @@ test.describe('Responsive Video Actions', () => {
 
     const dialog = page.getByTestId('subtitle-dialog');
     await expect(dialog).toBeVisible();
+    await expect(page.getByTestId('subtitle-dialog-import-button')).toBeVisible();
+    await expect(page.getByTestId('subtitle-dialog-download-empty')).toContainText('你仍可匯入本機字幕');
     await page.getByTestId('subtitle-dialog-tab-imported').click();
     await expect(page.getByTestId('subtitle-dialog-imported-empty')).toContainText('先匯入第一條本機字幕');
 
-    await page.getByTestId('subtitle-dialog-file-input').setInputFiles({
-      name: 'episode.en.srt',
-      mimeType: 'application/x-subrip',
-      buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,500\nHello from SRT\n'),
-    });
+    await page.getByTestId('subtitle-dialog-file-input').setInputFiles([
+      {
+        name: 'episode.en.srt',
+        mimeType: 'application/x-subrip',
+        buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,500\nHello from SRT\n'),
+      },
+      {
+        name: 'episode.ja.vtt',
+        mimeType: 'text/vtt',
+        buffer: Buffer.from('WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nこんにちは\n'),
+      },
+    ]);
 
-    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('已匯入 English (Local)');
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('已匯入 2 條字幕');
     await page.getByTestId('subtitle-dialog-tab-imported').click();
     await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('English (Local)');
+    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('日本語 (Local)');
     await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.en.vtt');
+    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.ja.vtt');
+
+    const englishTrack = page.getByTestId('subtitle-dialog-track-local-en');
+    const japaneseTrack = page.getByTestId('subtitle-dialog-track-local-ja');
+
+    await expect(englishTrack).toHaveClass(/subtitle-track-row--primary/);
+    await expect(japaneseTrack).not.toHaveClass(/subtitle-track-row--secondary/);
+
+    await page.getByTestId('subtitle-dialog-secondary-action-local-ja').click();
+
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('次字幕已切換為 日本語 (Local)');
+    await expect(japaneseTrack).toHaveClass(/subtitle-track-row--secondary/);
+
+    await page.getByTestId('subtitle-dialog-primary-action-local-ja').click();
+
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('主字幕已切換為 日本語 (Local)');
+    await expect(japaneseTrack).toHaveClass(/subtitle-track-row--primary/);
+    await expect(japaneseTrack).not.toHaveClass(/subtitle-track-row--secondary/);
+    await expect(englishTrack).not.toHaveClass(/subtitle-track-row--primary/);
   });
 });
 
