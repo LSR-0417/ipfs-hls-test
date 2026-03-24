@@ -198,14 +198,6 @@ import {
 import { formatTime } from '../utils/time';
 import { applyPlaybackHotkey, getPlayerPlaybackSnapshot } from '../utils/playback';
 import {
-  buildVideoScreenshotFilename,
-  captureVideoScreenshot,
-  downloadScreenshotBlob,
-  isVideoScreenshotReady,
-  screenshotErrorCodeDownloadUnavailable,
-  screenshotErrorCodeFrameNotReady,
-} from '../utils/screenshot';
-import {
   buildQualityLevelPayload,
   formatQualitySelectorLabel,
   getStartupInitialRenditionCount,
@@ -276,12 +268,6 @@ const subtitleVisibilityToggleLabel = 'CC';
 const dualSubtitleSwapButtonComponentName = 'DualSubtitleSwapButton';
 const dualSubtitleSwapStateEventName = 'dualsubtitleswapstatechange';
 const dualSubtitleSwapTitle = '切換主 / 副字幕';
-const screenshotCaptureButtonComponentName = 'ScreenshotCaptureButton';
-const settingsMenuTitle = '設定';
-const settingsMenuButtonLabel = '播放器設定';
-const settingsScreenshotMenuItemComponentName = 'SettingsScreenshotMenuItem';
-const screenshotCaptureStateEventName = 'screenshotcapturestatechange';
-const screenshotCaptureTitle = '截圖存檔';
 
 function createSubtitleControlGlyph(documentLike, options = {}) {
   const { containerClass = '', labelClass = '', labelText = '', dotClass = '', caretClass = '' } = options;
@@ -325,26 +311,6 @@ function createPrimarySubtitleMenuGlyph(documentLike) {
   caretEl.setAttribute('aria-hidden', 'true');
   glyphEl.appendChild(caretEl);
 
-  return glyphEl;
-}
-
-function createScreenshotGlyph(documentLike) {
-  const glyphEl = documentLike.createElement('span');
-  glyphEl.className = 'vjs-screenshot-capture-glyph';
-  glyphEl.setAttribute('aria-hidden', 'true');
-
-  const bodyEl = documentLike.createElement('span');
-  bodyEl.className = 'vjs-screenshot-capture-glyph-body';
-
-  const lensEl = documentLike.createElement('span');
-  lensEl.className = 'vjs-screenshot-capture-glyph-lens';
-  bodyEl.appendChild(lensEl);
-
-  const flashEl = documentLike.createElement('span');
-  flashEl.className = 'vjs-screenshot-capture-glyph-flash';
-
-  glyphEl.appendChild(bodyEl);
-  glyphEl.appendChild(flashEl);
   return glyphEl;
 }
 
@@ -563,137 +529,6 @@ function registerDualSubtitleSwapButton() {
   videojs.registerComponent(dualSubtitleSwapButtonComponentName, DualSubtitleSwapButton);
 }
 
-function registerScreenshotCaptureButton() {
-  if (typeof videojs.getComponent !== 'function' || videojs.getComponent(screenshotCaptureButtonComponentName)) {
-    return;
-  }
-
-  const Button = videojs.getComponent('Button');
-  if (!Button) {
-    return;
-  }
-
-  class ScreenshotCaptureButton extends Button {
-    constructor(player, options = {}) {
-      super(player, options);
-      this.controlText(screenshotCaptureTitle);
-      this.on(player, screenshotCaptureStateEventName, () => this.updateState());
-      this.updateState();
-    }
-
-    buildCSSClass() {
-      return `vjs-screenshot-capture-button ${super.buildCSSClass()}`;
-    }
-
-    createEl() {
-      const el = super.createEl();
-      const iconPlaceholder = el.querySelector('.vjs-icon-placeholder');
-      if (iconPlaceholder) {
-        iconPlaceholder.setAttribute('aria-hidden', 'true');
-        iconPlaceholder.textContent = '';
-      }
-
-      const glyphEl = createScreenshotGlyph(el.ownerDocument);
-      const controlTextEl = el.querySelector('.vjs-control-text');
-      el.insertBefore(glyphEl, controlTextEl || null);
-      return el;
-    }
-
-    handleClick() {
-      this.player_.screenshotCaptureAction_?.();
-    }
-
-    updateState() {
-      const state = this.player_.screenshotCaptureState_ || {};
-      const buttonEl = this.el();
-      const tooltip = state.tooltip || screenshotCaptureTitle;
-
-      if (state.visible === false) {
-        this.hide();
-      } else {
-        this.show();
-      }
-
-      if (buttonEl) {
-        buttonEl.setAttribute('title', tooltip);
-        buttonEl.setAttribute('aria-label', tooltip);
-      }
-
-      if (state.enabled === false) {
-        this.disable();
-      } else {
-        this.enable();
-      }
-    }
-  }
-
-  videojs.registerComponent(screenshotCaptureButtonComponentName, ScreenshotCaptureButton);
-}
-
-function registerSettingsScreenshotMenuItem() {
-  if (typeof videojs.getComponent !== 'function' || videojs.getComponent(settingsScreenshotMenuItemComponentName)) {
-    return;
-  }
-
-  const MenuItem = videojs.getComponent('MenuItem');
-  if (!MenuItem) {
-    return;
-  }
-
-  class SettingsScreenshotMenuItem extends MenuItem {
-    constructor(player, options = {}) {
-      super(player, {
-        label: options.label || screenshotCaptureTitle,
-        selectable: false,
-      });
-      this.resolveState_ = typeof options.resolveState === 'function' ? options.resolveState : () => ({});
-      this.on(player, screenshotCaptureStateEventName, () => this.updateState());
-      this.updateState();
-    }
-
-    createEl() {
-      const el = super.createEl();
-      el.classList.add('vjs-settings-screenshot-menu-item');
-      return el;
-    }
-
-    handleClick() {
-      super.handleClick();
-      this.player_.settingsScreenshotCaptureAction_?.();
-    }
-
-    updateState() {
-      const state = this.resolveState_() || {};
-      const buttonEl = this.el();
-      const labelEl = buttonEl?.querySelector?.('.vjs-menu-item-text') || null;
-      const label = state.label || screenshotCaptureTitle;
-
-      if (labelEl) {
-        labelEl.textContent = label;
-      }
-
-      if (buttonEl) {
-        buttonEl.setAttribute('title', state.tooltip || label);
-        buttonEl.setAttribute('aria-label', state.tooltip || label);
-      }
-
-      if (state.visible === false) {
-        this.hide();
-      } else {
-        this.show();
-      }
-
-      if (state.enabled === false) {
-        this.disable();
-      } else {
-        this.enable();
-      }
-    }
-  }
-
-  videojs.registerComponent(settingsScreenshotMenuItemComponentName, SettingsScreenshotMenuItem);
-}
-
 const props = defineProps({
   cid: {
     type: String,
@@ -823,12 +658,6 @@ const hotkeyHelpSections = Object.freeze([
         label: '快捷鍵說明',
         detail: '顯示 / 關閉',
       },
-      {
-        id: 'screenshot',
-        keys: ['S'],
-        label: '截圖存檔',
-        detail: '暫停時下載 PNG',
-      },
     ],
   },
 ]);
@@ -868,7 +697,6 @@ let mediaRequestGateway = '';
 let mediaRequestCid = '';
 let activeVhsXhr = null;
 let activeGatewayHandoff = null;
-let isCapturingScreenshot = false;
 const showStartupGate = ref(false);
 const startupGateTitle = ref('');
 const startupGateDetail = ref('');
@@ -1363,224 +1191,6 @@ function updateDualSubtitleSwapControl(selection = props.subtitleSelection) {
   player.trigger(dualSubtitleSwapStateEventName);
 }
 
-function getQualityButton() {
-  return player?.getChild?.('controlBar')?.getChild?.('QualityButton') || null;
-}
-
-function updateSettingsMenuButton(qualityButton = getQualityButton()) {
-  if (!qualityButton) {
-    return;
-  }
-
-  const buttonEl = qualityButton.menuButton_?.el?.() || qualityButton.el?.() || null;
-  const qualityLabel = typeof player?.qualityLevels === 'function' ? formatQualitySelectorLabel(player.qualityLevels()) : '';
-  const tooltip = qualityLabel ? `${settingsMenuButtonLabel}，目前畫質 ${qualityLabel}` : settingsMenuButtonLabel;
-
-  qualityButton.controlText(settingsMenuButtonLabel, buttonEl || undefined);
-
-  if (buttonEl) {
-    buttonEl.setAttribute('title', tooltip);
-    buttonEl.setAttribute('aria-label', tooltip);
-  }
-}
-
-function resolveScreenshotCaptureControlState() {
-  if (isCapturingScreenshot) {
-    return {
-      enabled: false,
-      visible: true,
-      label: '截圖中...',
-      tooltip: '正在截圖...',
-    };
-  }
-
-  if (!player || !props.m3u8Url) {
-    return {
-      enabled: false,
-      visible: false,
-      label: screenshotCaptureTitle,
-      tooltip: '尚未載入影片',
-    };
-  }
-
-  if (!isVideoScreenshotReady(videoRef.value)) {
-    return {
-      enabled: false,
-      visible: false,
-      label: screenshotCaptureTitle,
-      tooltip: '影片尚未就緒，暫時無法截圖',
-    };
-  }
-
-  if (player.paused?.() !== true) {
-    return {
-      enabled: false,
-      visible: false,
-      label: screenshotCaptureTitle,
-      tooltip: '請先暫停影片再截圖',
-    };
-  }
-
-  return {
-    enabled: true,
-    visible: true,
-    label: screenshotCaptureTitle,
-    tooltip: '截圖並下載 PNG',
-  };
-}
-
-function updateScreenshotCaptureControl() {
-  if (!player) {
-    return;
-  }
-
-  player.screenshotCaptureState_ = resolveScreenshotCaptureControlState();
-  player.trigger(screenshotCaptureStateEventName);
-}
-
-function ensureSettingsMenuControl() {
-  if (!player) {
-    return;
-  }
-
-  registerSettingsScreenshotMenuItem();
-
-  const qualityButton = getQualityButton();
-  if (!qualityButton) {
-    return;
-  }
-
-  let shouldUpdate = false;
-  const currentCreateItems = typeof qualityButton.createItems === 'function' ? qualityButton.createItems : null;
-
-  if (currentCreateItems !== qualityButton.settingsMenuPatchedCreateItems_) {
-    qualityButton.settingsMenuBaseCreateItems_ = currentCreateItems;
-    qualityButton.settingsMenuPatchedCreateItems_ = function createItemsWithScreenshotOption() {
-      const baseItems =
-        typeof qualityButton.settingsMenuBaseCreateItems_ === 'function'
-          ? qualityButton.settingsMenuBaseCreateItems_.call(this)
-          : [];
-      const items = Array.isArray(baseItems) ? baseItems.slice() : [];
-      const SettingsScreenshotMenuItem = videojs.getComponent(settingsScreenshotMenuItemComponentName);
-
-      if (SettingsScreenshotMenuItem) {
-        items.push(
-          new SettingsScreenshotMenuItem(this.player_, {
-            resolveState: resolveScreenshotCaptureControlState,
-          })
-        );
-      }
-
-      return items;
-    };
-    qualityButton.createItems = qualityButton.settingsMenuPatchedCreateItems_;
-    shouldUpdate = true;
-  }
-
-  if (qualityButton.options_?.title !== settingsMenuTitle) {
-    qualityButton.options_.title = settingsMenuTitle;
-    shouldUpdate = true;
-  }
-
-  if (shouldUpdate) {
-    qualityButton.update?.();
-  }
-
-  player.settingsScreenshotCaptureAction_ = captureAndDownloadScreenshot;
-  updateSettingsMenuButton(qualityButton);
-}
-
-function ensureScreenshotCaptureControl() {
-  if (!player) {
-    return;
-  }
-
-  registerScreenshotCaptureButton();
-  registerSettingsScreenshotMenuItem();
-  player.screenshotCaptureAction_ = captureAndDownloadScreenshot;
-  player.settingsScreenshotCaptureAction_ = captureAndDownloadScreenshot;
-
-  const controlBar = player.getChild('controlBar');
-  if (controlBar && !controlBar.getChild(screenshotCaptureButtonComponentName)) {
-    const children = typeof controlBar.children === 'function' ? controlBar.children() : [];
-    const fallbackInsertIndex = children.findIndex((child) =>
-      ['QualityButton', 'PictureInPictureToggle', 'FullscreenToggle'].includes(String(child?.name?.() || ''))
-    );
-    const insertIndex = fallbackInsertIndex >= 0 ? fallbackInsertIndex : children.length;
-
-    if (videojs.getComponent(screenshotCaptureButtonComponentName)) {
-      controlBar.addChild(
-        screenshotCaptureButtonComponentName,
-        {
-          name: screenshotCaptureButtonComponentName,
-          title: screenshotCaptureTitle,
-        },
-        insertIndex
-      );
-    }
-  }
-
-  ensureSettingsMenuControl();
-  updateScreenshotCaptureControl();
-}
-
-function resolveScreenshotCaptureErrorMessage(error) {
-  if (error?.message === screenshotErrorCodeFrameNotReady) {
-    return '影片尚未就緒，暫時無法截圖';
-  }
-
-  if (error?.message === screenshotErrorCodeDownloadUnavailable) {
-    return '目前瀏覽器環境不支援自動下載截圖';
-  }
-
-  if (error?.name === 'SecurityError' || /tainted|cross-origin/i.test(String(error?.message || ''))) {
-    return '目前影片來源未開放跨來源存取，瀏覽器無法截圖';
-  }
-
-  return '截圖失敗，請稍後再試';
-}
-
-async function captureAndDownloadScreenshot() {
-  if (!player || isCapturingScreenshot) {
-    return false;
-  }
-
-  if (player.paused?.() !== true) {
-    emit('status-update', '請先暫停影片再截圖');
-    updateScreenshotCaptureControl();
-    return false;
-  }
-
-  const videoElement = videoRef.value;
-  if (!isVideoScreenshotReady(videoElement)) {
-    emit('status-update', '影片尚未就緒，暫時無法截圖');
-    updateScreenshotCaptureControl();
-    return false;
-  }
-
-  isCapturingScreenshot = true;
-  updateScreenshotCaptureControl();
-
-  try {
-    const currentTime = Number.isFinite(player.currentTime?.()) ? Math.max(0, player.currentTime()) : 0;
-    const blob = await captureVideoScreenshot(videoElement);
-    const filename = buildVideoScreenshotFilename({
-      cid: props.cid,
-      currentTime,
-    });
-
-    downloadScreenshotBlob(blob, filename);
-    emit('status-update', `截圖已下載：${filename}`);
-    return true;
-  } catch (error) {
-    emit('status-update', resolveScreenshotCaptureErrorMessage(error));
-    return false;
-  } finally {
-    isCapturingScreenshot = false;
-    updateScreenshotCaptureControl();
-  }
-}
-
 function swapSubtitleRoles() {
   if (!canSwapSubtitleRoles(props.subtitleSelection)) {
     return false;
@@ -1884,18 +1494,15 @@ function syncQualitySelectorButtonLabel() {
   if (!player) return;
 
   repositionSubtitleControlCluster();
-  ensureSettingsMenuControl();
 
   const labelEl =
     player.el()?.querySelector?.('.vjs-quality-selector .vjs-icon-placeholder') || null;
 
   if (!labelEl || typeof player.qualityLevels !== 'function') {
-    updateSettingsMenuButton();
     return;
   }
 
   labelEl.textContent = formatQualitySelectorLabel(player.qualityLevels());
-  updateSettingsMenuButton();
 }
 
 function syncMediaRequestRouting(cid = props.cid, gateway = props.gateway) {
@@ -2168,7 +1775,6 @@ function handleSourceError(seq = sourceSeq) {
   if (!player || seq !== sourceSeq) return;
 
   isSwitchingSource = false;
-  updateScreenshotCaptureControl();
   const error = typeof player.error === 'function' ? player.error() : null;
   const detail = resolvePlaybackErrorDetail(error);
 
@@ -2210,7 +1816,6 @@ function beginSourceSwitch() {
   player.reset();
   player.poster(props.posterUrl || '');
   isApplyingSubtitlePreference = false;
-  updateScreenshotCaptureControl();
   return seq;
 }
 
@@ -2482,7 +2087,6 @@ async function setupSourceAndTracks(m3u8Url, subtitles, options = {}) {
       player.currentTime(pendingSourceStartTime);
     }
     isSwitchingSource = false;
-    updateScreenshotCaptureControl();
     emitPlaybackSnapshot('loadedmetadata', { force: true });
     emitQualityLevels();
     syncQualitySelectorButtonLabel();
@@ -2716,7 +2320,6 @@ function handleGlobalKeydown(event) {
     frameRate: props.frameRate,
     onToggleHelp: toggleHotkeyHelp,
     onToggleSubtitles: toggleSubtitleVisibility,
-    onCaptureScreenshot: captureAndDownloadScreenshot,
   });
 }
 
@@ -2822,7 +2425,6 @@ function initPlayer() {
   registerPrimarySubtitleControlButton();
   registerSubtitleVisibilityToggleButton();
   registerDualSubtitleSwapButton();
-  registerScreenshotCaptureButton();
   player = videojs(
     videoRef.value,
     {
@@ -2856,11 +2458,6 @@ function initPlayer() {
       player.on('xhr-hooks-ready', bindVhsXhrHooks);
       observeSubtitleCueDisplay();
       player.on('texttrackchange', scheduleSubtitleCueRoleClassSync);
-      player.on('play', updateScreenshotCaptureControl);
-      player.on('pause', updateScreenshotCaptureControl);
-      player.on('loadeddata', updateScreenshotCaptureControl);
-      player.on('seeking', updateScreenshotCaptureControl);
-      player.on('seeked', updateScreenshotCaptureControl);
       player.on('playerresize', () => {
         scheduleSubtitleCueRoleClassSync();
         if (isPrimarySubtitleMenuOpen.value) {
@@ -2876,9 +2473,7 @@ function initPlayer() {
       ensurePrimarySubtitleControl();
       ensureSubtitleVisibilityToggleControl();
       ensureDualSubtitleSwapControl();
-      ensureScreenshotCaptureControl();
       updatePrimarySubtitleControl();
-      updateScreenshotCaptureControl();
       syncPoster(props.posterUrl);
       emit('status-update', '播放器已就緒');
       if (props.m3u8Url) {
@@ -3035,9 +2630,6 @@ onBeforeUnmount(() => {
     player.dualSubtitleSwapState_ = null;
     player.subtitleVisibilityToggleAction_ = null;
     player.subtitleVisibilityToggleState_ = null;
-    player.screenshotCaptureAction_ = null;
-    player.screenshotCaptureState_ = null;
-    player.settingsScreenshotCaptureAction_ = null;
     player.primarySubtitleMenuToggle_ = null;
     player.primarySubtitleControlState_ = null;
     player.off?.('xhr-hooks-ready', bindVhsXhrHooks);
@@ -3072,8 +2664,7 @@ onBeforeUnmount(() => {
 
 .video-player-shell .vjs-primary-subtitle-button,
 .video-player-shell .vjs-subtitle-visibility-toggle-button,
-.video-player-shell .vjs-dual-subtitle-swap-button,
-.video-player-shell .vjs-screenshot-capture-button {
+.video-player-shell .vjs-dual-subtitle-swap-button {
   width: 3.6em;
   padding: 0;
   color: rgba(255, 255, 255, 0.76);
@@ -3084,8 +2675,7 @@ onBeforeUnmount(() => {
 
 .video-player-shell .vjs-primary-subtitle-button.vjs-disabled,
 .video-player-shell .vjs-subtitle-visibility-toggle-button.vjs-disabled,
-.video-player-shell .vjs-dual-subtitle-swap-button.vjs-disabled,
-.video-player-shell .vjs-screenshot-capture-button.vjs-disabled {
+.video-player-shell .vjs-dual-subtitle-swap-button.vjs-disabled {
   opacity: 0.48;
 }
 
@@ -3101,26 +2691,17 @@ onBeforeUnmount(() => {
   order: 74;
 }
 
-.video-player-shell .vjs-screenshot-capture-button {
-  order: 75;
-  width: 3.2em;
-  margin-left: 0.4em;
-  border-left: 1px solid rgba(255, 255, 255, 0.12);
-  border-right: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-}
-
 .video-player-shell .vjs-quality-selector {
-  order: 76;
+  order: 75;
   margin-left: 0.2em;
 }
 
 .video-player-shell .vjs-picture-in-picture-control {
-  order: 77;
+  order: 76;
 }
 
 .video-player-shell .vjs-fullscreen-control {
-  order: 78;
+  order: 77;
 }
 
 .video-player-shell .vjs-subtitle-cluster-button + .vjs-subtitle-cluster-button {
@@ -3147,22 +2728,15 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.video-player-shell .vjs-screenshot-capture-button:hover:not(.vjs-disabled) {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
-}
-
 .video-player-shell .vjs-primary-subtitle-button .vjs-icon-placeholder,
 .video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-icon-placeholder,
-.video-player-shell .vjs-dual-subtitle-swap-button .vjs-icon-placeholder,
-.video-player-shell .vjs-screenshot-capture-button .vjs-icon-placeholder {
+.video-player-shell .vjs-dual-subtitle-swap-button .vjs-icon-placeholder {
   display: none;
 }
 
 .video-player-shell .vjs-primary-subtitle-button .vjs-primary-subtitle-trigger,
 .video-player-shell .vjs-subtitle-visibility-toggle-button .vjs-subtitle-visibility-toggle-indicator,
-.video-player-shell .vjs-dual-subtitle-swap-button .vjs-dual-subtitle-swap-indicator,
-.video-player-shell .vjs-screenshot-capture-button .vjs-screenshot-capture-glyph {
+.video-player-shell .vjs-dual-subtitle-swap-button .vjs-dual-subtitle-swap-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3423,38 +2997,6 @@ onBeforeUnmount(() => {
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.06em;
-}
-
-.video-player-shell .vjs-screenshot-capture-glyph {
-  position: relative;
-}
-
-.video-player-shell .vjs-screenshot-capture-glyph-body {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1em;
-  height: 0.72em;
-  border: 0.12em solid currentColor;
-  border-radius: 0.16em;
-}
-
-.video-player-shell .vjs-screenshot-capture-glyph-lens {
-  width: 0.36em;
-  height: 0.36em;
-  border: 0.12em solid currentColor;
-  border-radius: 999px;
-}
-
-.video-player-shell .vjs-screenshot-capture-glyph-flash {
-  position: absolute;
-  top: calc(50% - 0.48em);
-  left: calc(50% - 0.46em);
-  width: 0.26em;
-  height: 0.16em;
-  border-radius: 0.1em 0.1em 0 0;
-  background: currentColor;
 }
 
 .startup-gate {

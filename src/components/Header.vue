@@ -1,6 +1,5 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import InfoJsonDialog from './InfoJsonDialog.vue';
 import { useI18n } from '../i18n';
 import {
   isDisabledGatewayInput,
@@ -12,7 +11,6 @@ import {
   readStoredCustomGateway,
 } from '../utils/gateway';
 import { formatGatewayPlaybackText } from '../utils/gatewayStatus';
-import { createDefaultVideoInfo } from '../utils/videoInfo';
 
 const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
@@ -31,10 +29,6 @@ const props = defineProps({
   currentGateway: { type: String, default: '' },
   currentCid: { type: String, default: '' },
   currentLoadSequence: { type: Number, default: 0 },
-  currentVideoInfo: {
-    type: Object,
-    default: () => createDefaultVideoInfo(),
-  },
   sidebarOpen: { type: Boolean, default: false },
 });
 const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);
@@ -50,7 +44,6 @@ const localeMenuRef = ref(null);
 const mobileActionsRef = ref(null);
 const mobileActionsButtonRef = ref(null);
 const gatewayButtonRef = ref(null);
-const infoJsonButtonRef = ref(null);
 const gatewayDialogRef = ref(null);
 const selectedGatewayId = ref(builtInGateways[0].id);
 const localHost = ref('127.0.0.1');
@@ -61,7 +54,6 @@ const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
 const isGatewayProbeRunning = ref(false);
 const isLocaleMenuOpen = ref(false);
-const isInfoJsonDialogOpen = ref(false);
 const isMobileActionsMenuOpen = ref(false);
 const isMobileLocaleListOpen = ref(false);
 const lastFocusedGatewayTrigger = ref(null);
@@ -330,16 +322,6 @@ watch(settingsOpen, async (isOpen) => {
   }
 });
 
-watch(isInfoJsonDialogOpen, async (isOpen) => {
-  if (isOpen || typeof document === 'undefined') {
-    return;
-  }
-
-  await nextTick();
-  const nextFocusTarget = isCompactHeader.value ? mobileActionsButtonRef.value : infoJsonButtonRef.value;
-  nextFocusTarget?.focus();
-});
-
 watch(
   gatewayCandidatesPayload,
   (payload) => {
@@ -522,7 +504,6 @@ function openSettings() {
   pendingGatewayFocusTarget.value = isCompactHeader.value ? mobileActionsButtonRef.value || gatewayButtonRef.value : gatewayButtonRef.value;
   closeLocaleMenu({ restoreFocus: false });
   closeMobileActionsMenu({ restoreFocus: false });
-  closeInfoJsonDialog();
   if (isDevMode) {
     restoreLocalGateway();
     syncLocalFromGateway(props.currentGateway);
@@ -539,17 +520,6 @@ function openSettings() {
 
 function closeSettings() {
   settingsOpen.value = false;
-}
-
-function openInfoJsonDialog() {
-  closeLocaleMenu({ restoreFocus: false });
-  closeMobileActionsMenu({ restoreFocus: false });
-  closeSettings();
-  isInfoJsonDialogOpen.value = true;
-}
-
-function closeInfoJsonDialog() {
-  isInfoJsonDialogOpen.value = false;
 }
 
 function applyGateway() {
@@ -1168,25 +1138,23 @@ onBeforeUnmount(() => {
         </span>
       </button>
       <button
-        ref="infoJsonButtonRef"
         type="button"
-        class="action-btn info-json-btn"
-        :aria-label="t('header.actions.infoJson.ariaLabel')"
-        :title="t('header.actions.infoJson.title')"
-        data-testid="info-json-button"
-        @click="openInfoJsonDialog"
+        class="action-btn account-btn"
+        :aria-label="t('header.actions.account.ariaLabel')"
+        :title="t('header.actions.account.title')"
+        data-testid="account-button"
       >
-        <span class="action-btn-visual info-json-btn-visual" aria-hidden="true">
-          <svg class="info-json-btn-icon" viewBox="0 0 24 24">
+        <span class="action-btn-visual account-btn-visual" aria-hidden="true">
+          <svg class="account-btn-icon" viewBox="0 0 24 24">
             <path
               fill="currentColor"
-              d="M7 3.75A2.75 2.75 0 0 1 9.75 1h4.8c.73 0 1.43.29 1.94.8l3.71 3.7c.51.52.8 1.22.8 1.95v12.8A2.75 2.75 0 0 1 18.25 23h-8.5A2.75 2.75 0 0 1 7 20.25Zm2.75-.75a.75.75 0 0 0-.75.75v16.5c0 .41.34.75.75.75h8.5a.75.75 0 0 0 .75-.75V8.5h-3.25A2.75 2.75 0 0 1 13 5.75V3Zm5.25.69v2.06c0 .41.34.75.75.75h2.06ZM11 11a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm0 4a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm-3.5-.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM6 7.5A1.5 1.5 0 1 1 9 7.5a1.5 1.5 0 0 1-3 0Z"
+              d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v1h20v-1c0-3.33-6.67-5-10-5z"
             />
           </svg>
         </span>
         <span class="action-btn-copy">
-          <span class="action-btn-label">{{ t('header.actions.infoJson.label') }}</span>
-          <span class="action-btn-title">{{ t('header.actions.infoJson.title') }}</span>
+          <span class="action-btn-label">{{ t('header.actions.account.label') }}</span>
+          <span class="action-btn-title">{{ t('header.actions.account.title') }}</span>
         </span>
       </button>
     </div>
@@ -1269,18 +1237,6 @@ onBeforeUnmount(() => {
           <span class="mobile-actions-menu-item-copy">
             <span class="mobile-actions-menu-item-title">{{ t('header.actions.gateway.label') }}</span>
             <span class="mobile-actions-menu-item-meta">{{ currentGatewayName }}</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          class="mobile-actions-menu-item"
-          role="menuitem"
-          data-testid="header-mobile-info-json-button"
-          @click="openInfoJsonDialog"
-        >
-          <span class="mobile-actions-menu-item-copy">
-            <span class="mobile-actions-menu-item-title">{{ t('header.actions.infoJson.label') }}</span>
-            <span class="mobile-actions-menu-item-meta">{{ t('header.actions.infoJson.title') }}</span>
           </span>
         </button>
       </div>
@@ -1489,12 +1445,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-
-  <InfoJsonDialog
-    :open="isInfoJsonDialogOpen"
-    :initial-video-info="currentVideoInfo"
-    @close="closeInfoJsonDialog"
-  />
 </template>
 
 <style scoped>
@@ -1927,19 +1877,19 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.info-json-btn {
+.account-btn {
   flex: 0 1 auto;
   min-width: var(--header-account-min-width);
   max-width: var(--header-account-max-width);
 }
 
-.info-json-btn-visual {
-  color: rgba(255, 225, 163, 0.94);
-  background: linear-gradient(135deg, rgba(255, 209, 102, 0.14), rgba(0, 210, 255, 0.12));
-  border-color: rgba(255, 223, 155, 0.18);
+.account-btn-visual {
+  color: rgba(214, 238, 255, 0.92);
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.12), rgba(162, 82, 255, 0.16));
+  border-color: rgba(160, 214, 255, 0.18);
 }
 
-.info-json-btn-icon {
+.account-btn-icon {
   width: 18px;
   height: 18px;
 }
@@ -2095,25 +2045,14 @@ onBeforeUnmount(() => {
     min-width: var(--header-locale-min-width);
     max-width: var(--header-locale-max-width);
   }
-  .actions-area .icon-btn {
+  .actions-area .icon-btn,
+  .account-btn {
     display: none;
   }
   .gateway-btn {
     min-width: var(--header-gateway-min-width);
     max-width: var(--header-gateway-max-width);
     padding: 4px 6px;
-  }
-  .info-json-btn {
-    flex: 0 0 46px;
-    width: 46px;
-    min-width: 46px;
-    max-width: 46px;
-    gap: 0;
-    padding: 0;
-    justify-content: center;
-  }
-  .info-json-btn .action-btn-copy {
-    display: none;
   }
   .action-btn-title {
     font-size: 0.88rem;
@@ -2192,10 +2131,6 @@ onBeforeUnmount(() => {
     width: 16px;
     height: 16px;
   }
-  .info-json-btn-icon {
-    width: 16px;
-    height: 16px;
-  }
   .mobile-actions-btn-icon {
     width: 18px;
     height: 18px;
@@ -2222,7 +2157,6 @@ onBeforeUnmount(() => {
     height: 28px;
   }
   .gateway-btn-icon,
-  .info-json-btn-icon,
   .locale-btn-icon,
   .mobile-actions-btn-icon {
     width: 17px;

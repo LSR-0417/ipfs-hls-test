@@ -67,7 +67,6 @@ const defaultPlaybackHotkeyOptions = Object.freeze({
   frameStepFallbackFrameRate: 30,
   onToggleHelp: null,
   onToggleSubtitles: null,
-  onCaptureScreenshot: null,
 });
 
 function getHtmlVideo(win) {
@@ -366,10 +365,6 @@ export function getPlaybackHotkeyAction(event, optionsOrSeekStepSeconds = 5) {
     return { type: 'toggle-subtitles' };
   }
 
-  if (normalizedKey === 's') {
-    return { type: 'capture-screenshot' };
-  }
-
   if (isFrameStepBackwardKey(event)) {
     return { type: 'frame-step', deltaFrames: -1 };
   }
@@ -398,10 +393,6 @@ export function applyPlaybackHotkey(event, player, optionsOrSeekStepSeconds = 5)
 
   if (action.type === 'toggle-subtitles') {
     return runPlaybackHotkeyCallback(event, options.onToggleSubtitles);
-  }
-
-  if (action.type === 'capture-screenshot') {
-    return runPlaybackHotkeyCallback(event, options.onCaptureScreenshot);
   }
 
   if (!player) {

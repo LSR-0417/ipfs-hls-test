@@ -39,7 +39,6 @@ describe('Header search action button', () => {
     expect(template).toContain('data-testid="header-mobile-actions-menu"');
     expect(template).toContain('data-testid="header-mobile-language-button"');
     expect(template).toContain('data-testid="header-mobile-gateway-button"');
-    expect(template).toContain('data-testid="header-mobile-info-json-button"');
 
     expect(script).toContain("import { useI18n } from '../i18n';");
     expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
@@ -59,6 +58,7 @@ describe('Header search action button', () => {
     expect(script).toContain("searchQuery.value = '';");
     expect(script).toContain('await nextTick();');
     expect(script).toContain('focusSearchInput();');
+    expect(script).not.toContain('openInfoJsonDialog');
     expect(script).not.toContain('navigator.clipboard');
     expect(script).not.toContain('pasteSearchQueryFromClipboard');
     expect(script).not.toContain('onSearchAction');
