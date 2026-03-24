@@ -9,8 +9,10 @@ import {
 } from '../utils/subtitles';
 import {
   buildInfoJsonPayload,
+  createVideoInfoDraftFormSnapshot,
+  createVideoInfoDraftFormState,
   createDefaultVideoInfo,
-  formatUploadDate,
+  isVideoInfoDraftFormPristine,
   stringifyInfoJson,
 } from '../utils/videoInfo';
 
@@ -40,8 +42,9 @@ const activeTab = ref('metadata');
 const feedbackMessage = ref('');
 const localVideoFile = ref(null);
 const localSubtitleTracks = ref([]);
-const form = reactive(createFormState(props.initialVideoInfo));
+const form = reactive(createVideoInfoDraftFormState(props.initialVideoInfo));
 const processorForm = reactive(createProcessorFormState());
+const lastSyncedFormSnapshot = ref(createVideoInfoDraftFormSnapshot(form));
 
 let feedbackTimeout = 0;
 
@@ -156,6 +159,22 @@ watch(
 );
 
 watch(
+  () => props.initialVideoInfo,
+  (nextVideoInfo) => {
+    if (!props.open) {
+      return;
+    }
+
+    if (!isVideoInfoDraftFormPristine(form, lastSyncedFormSnapshot.value)) {
+      return;
+    }
+
+    syncForm(nextVideoInfo);
+  },
+  { deep: true }
+);
+
+watch(
   hasGeneratedInfoJson,
   (available) => {
     if (!available) {
@@ -181,21 +200,6 @@ onBeforeUnmount(() => {
   clearSubtitleTracks({ silent: true });
 });
 
-function createFormState(videoInfo = createDefaultVideoInfo()) {
-  const source = videoInfo && typeof videoInfo === 'object' ? videoInfo : createDefaultVideoInfo();
-
-  return {
-    id: source.id || '',
-    title: source.title || '',
-    uploader: source.uploader || '',
-    channelId: source.channelId || '',
-    uploadDate: formatUploadDate(source.uploadDate || ''),
-    description: source.description || '',
-    tags: Array.isArray(source.tags) ? source.tags.join(', ') : '',
-    categories: Array.isArray(source.categories) ? source.categories.join(', ') : '',
-  };
-}
-
 function createProcessorFormState() {
   return {
     selectedResolutions: [...defaultProcessorResolutionSelection],
@@ -205,7 +209,9 @@ function createProcessorFormState() {
 }
 
 function syncForm(videoInfo) {
-  Object.assign(form, createFormState(videoInfo));
+  const nextFormState = createVideoInfoDraftFormState(videoInfo);
+  Object.assign(form, nextFormState);
+  lastSyncedFormSnapshot.value = createVideoInfoDraftFormSnapshot(nextFormState);
 }
 
 function parseListInput(value) {
@@ -372,7 +378,8 @@ function closeDialog() {
 }
 
 function clearForm() {
-  syncForm(createDefaultVideoInfo());
+  Object.assign(form, createVideoInfoDraftFormState(createDefaultVideoInfo()));
+  lastSyncedFormSnapshot.value = null;
   clearFeedback();
   nextTick(() => {
     titleInputRef.value?.focus();

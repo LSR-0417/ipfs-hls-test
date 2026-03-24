@@ -25,12 +25,14 @@ describe('InfoJsonDialog tabbed draft contract', () => {
     expect(script).toContain("const activeTab = ref('metadata');");
     expect(script).toContain("const dialogTabIds = Object.freeze(['metadata', 'subtitles', 'video']);");
     expect(script).toContain("const dialogTabs = computed(() =>");
+    expect(script).toContain('const lastSyncedFormSnapshot = ref(createVideoInfoDraftFormSnapshot(form));');
     expect(script).toContain("const effectiveIncludeInfoJson = computed(");
     expect(script).toContain("const effectiveIncludeSubtitleManifest = computed(");
     expect(script).toContain("function buildLocalVideoProcessorDraft(file, options = {}) {");
     expect(script).toContain('function setActiveTab(tabId) {');
     expect(script).toContain("async function handleSubtitleSelection(event) {");
     expect(script).toContain("function handleVideoSelection(event) {");
+    expect(script).toContain('isVideoInfoDraftFormPristine(form, lastSyncedFormSnapshot.value)');
     expect(script).not.toContain("const localAvatarFile = ref(null);");
     expect(script).not.toContain("function handleAvatarSelection(event) {");
 

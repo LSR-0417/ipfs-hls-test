@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildInfoJsonPayload,
+  createVideoInfoDraftFormSnapshot,
+  createVideoInfoDraftFormState,
   createDefaultVideoInfo,
   extractDescriptionHashtags,
   fetchVideoInfo,
   formatRelativeUploadTime,
   formatUploadDate,
   formatUploadDateTooltip,
+  isVideoInfoDraftFormPristine,
   linkifyDescription,
   normalizeVideoInfo,
   stringifyInfoJson,
@@ -69,6 +72,65 @@ describe('normalizeVideoInfo', () => {
       resolution: '1920x1080',
       fps: 30,
     });
+  });
+});
+
+describe('createVideoInfoDraftFormState', () => {
+  it('maps loaded metadata into the dialog form shape', () => {
+    expect(
+      createVideoInfoDraftFormState({
+        id: 'demo-id',
+        title: 'Demo Title',
+        uploader: 'AstraStream',
+        channelId: 'channel-id',
+        uploadDate: '20260325',
+        description: 'desc',
+        tags: ['IPFS', 'Web3'],
+        categories: ['Technology'],
+      })
+    ).toEqual({
+      id: 'demo-id',
+      title: 'Demo Title',
+      uploader: 'AstraStream',
+      channelId: 'channel-id',
+      uploadDate: '2026-03-25',
+      description: 'desc',
+      tags: 'IPFS, Web3',
+      categories: 'Technology',
+    });
+  });
+});
+
+describe('isVideoInfoDraftFormPristine', () => {
+  it('returns true when the current form still matches the last synced snapshot', () => {
+    const formState = createVideoInfoDraftFormState({
+      title: 'Demo Title',
+      uploader: 'AstraStream',
+      uploadDate: '20260325',
+    });
+    const snapshot = createVideoInfoDraftFormSnapshot(formState);
+
+    expect(isVideoInfoDraftFormPristine(formState, snapshot)).toBe(true);
+  });
+
+  it('returns false after the user changes the form or when no synced snapshot exists', () => {
+    const formState = createVideoInfoDraftFormState({
+      title: 'Demo Title',
+      uploader: 'AstraStream',
+      uploadDate: '20260325',
+    });
+    const snapshot = createVideoInfoDraftFormSnapshot(formState);
+
+    expect(
+      isVideoInfoDraftFormPristine(
+        {
+          ...formState,
+          title: 'Edited Title',
+        },
+        snapshot
+      )
+    ).toBe(false);
+    expect(isVideoInfoDraftFormPristine(formState, null)).toBe(false);
   });
 });
 
