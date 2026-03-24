@@ -590,6 +590,7 @@ watch(
     :current-gateway="currentGateway"
     :current-cid="currentCid"
     :current-load-sequence="currentLoadSequence"
+    :current-video-info="currentVideoInfo"
     :sidebar-open="isSidebarOpen"
     @gateway-change="onGatewayChange"
     @gateway-candidates-change="onGatewayCandidatesChange"
