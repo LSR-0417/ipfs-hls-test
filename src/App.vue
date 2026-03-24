@@ -116,6 +116,10 @@ function replaceImportedSubtitle(nextTrack) {
   currentImportedSubtitleTracks.value = [...remainingTracks, nextTrack].sort((left, right) => left.order - right.order);
 }
 
+function normalizeImportedTracks(payload) {
+  return Array.isArray(payload) ? payload.filter(Boolean) : payload ? [payload] : [];
+}
+
 function hasSubtitleSelectionChanged(left, right) {
   return (
     left?.mode !== right?.mode ||
@@ -350,20 +354,25 @@ function onGatewayFallbackRequest(payload = {}) {
 }
 
 function onSubtitleImport(importedTrack) {
-  if (!importedTrack) {
+  const importedTracks = normalizeImportedTracks(importedTrack);
+  if (importedTracks.length === 0) {
     return;
   }
 
-  replaceImportedSubtitle(importedTrack);
+  importedTracks.forEach((track) => {
+    replaceImportedSubtitle(track);
+  });
+
   if (currentSubtitleSelection.value.mode === 'showing' && currentSubtitleSelection.value.primaryLang) {
     return;
   }
 
+  const defaultImportedTrack = importedTracks[0];
   setSubtitleSelection({
     mode: 'showing',
-    primaryLang: importedTrack.lang,
+    primaryLang: defaultImportedTrack.lang,
     secondaryLang:
-      normalizeLocale(currentSubtitleSelection.value.secondaryLang) === normalizeLocale(importedTrack.lang)
+      normalizeLocale(currentSubtitleSelection.value.secondaryLang) === normalizeLocale(defaultImportedTrack.lang)
         ? ''
         : currentSubtitleSelection.value.secondaryLang,
   });

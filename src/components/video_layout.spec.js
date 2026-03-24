@@ -466,7 +466,7 @@ describe('VideoInfo layout contract', () => {
 });
 
 describe('SubtitleDialog contract', () => {
-  it('keeps secondary subtitle controls alongside the import/session workflow', () => {
+  it('keeps primary and secondary subtitle controls alongside the import/session workflow', () => {
     const descriptor = readDescriptor(new URL('./SubtitleDialog.vue', import.meta.url));
     const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
@@ -474,32 +474,50 @@ describe('SubtitleDialog contract', () => {
 
     expect(template).not.toContain('Available in CID');
     expect(template).not.toContain('subtitle-dialog-remote-empty');
-    expect(template).toContain('次字幕');
-    expect(template).toContain('data-testid="subtitle-dialog-selection-grid"');
-    expect(template).toContain('data-testid="subtitle-dialog-secondary-select"');
+    expect(template).not.toContain('主字幕仍由播放器控制列切換');
+    expect(template).not.toContain('class="subtitle-role-chip"');
+    expect(template).toContain('匯入、下載與主 / 次字幕切換都在這裡快速完成');
+    expect(template).not.toContain('data-testid="subtitle-dialog-selection-grid"');
+    expect(template).not.toContain('data-testid="subtitle-dialog-slot-grid"');
+    expect(template).not.toContain('data-testid="subtitle-dialog-slot-primary"');
+    expect(template).not.toContain('data-testid="subtitle-dialog-slot-secondary"');
+    expect(template).toContain('multiple');
     expect(template).toContain('字幕清單');
     expect(template).toContain('data-testid="subtitle-dialog-library-tabs"');
     expect(template).toContain('data-testid="subtitle-dialog-tab-imported"');
     expect(template).toContain('data-testid="subtitle-dialog-tab-download"');
     expect(template).toContain('data-testid="subtitle-dialog-download-list"');
     expect(template).toContain('data-testid="subtitle-dialog-imported-list"');
+    expect(template).toContain(':data-testid="getPrimaryActionTestId(track)"');
+    expect(template).toContain(':data-testid="getSecondaryActionTestId(track)"');
+    expect(template).toContain('class="subtitle-track-title-row"');
     expect(script).toContain("const importSessionSummary = computed(() => {");
     expect(script).toContain("const activeLibraryTab = ref('download');");
     expect(script).toContain("function setLibraryTab(nextTab) {");
     expect(script).toContain("const downloadableTracks = computed(() => props.subtitles);");
     expect(script).toContain("const currentPrimaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.primaryLang));");
-    expect(script).toContain("function handleSecondarySubtitleChange(event) {");
+    expect(script).toContain("function handleTrackPrimaryAction(track) {");
+    expect(script).toContain("function handleTrackSecondaryAction(track) {");
+    expect(script).toContain("function getPrimaryActionTestId(track) {");
+    expect(script).toContain("function getSecondaryActionTestId(track) {");
+    expect(script).toContain("function upsertPendingImportedTrack(pendingTracks, nextTrack) {");
+    expect(script).toContain("function formatImportStatus(successfulTracks, failedImports) {");
     expect(script).toContain("async function handleDownloadSubtitle(track) {");
     expect(script).toContain("function clearSecondarySubtitle() {");
     expect(script).toContain("return `本次暫存 ${props.importedSubtitles.length} 條本機字幕`;");
     expect(style).toContain('.subtitle-dialog-toolbar');
     expect(style).toContain('.subtitle-toolbar-pill');
-    expect(style).toContain('.subtitle-selection-grid');
-    expect(style).toContain('.subtitle-select-input');
-    expect(style).toContain('.subtitle-role-card');
+    expect(style).toContain('.subtitle-toolbar-hint');
     expect(style).toContain('.subtitle-library-tabs');
     expect(style).toContain('.subtitle-library-tab');
     expect(style).toContain('.subtitle-library-note');
+    expect(style).toContain('.subtitle-track-row--primary');
+    expect(style).toContain('.subtitle-track-row--secondary');
+    expect(style).toContain('.subtitle-track-title-row');
+    expect(style).toContain('.subtitle-track-badge-row');
+    expect(style).toContain('.subtitle-track-actions');
+    expect(style).toContain('.subtitle-row-btn--icon');
+    expect(style).toContain('.subtitle-role-icon');
     expect(style).toContain('.subtitle-section-copy');
     expect(style).toContain('.subtitle-section-caption');
   });
