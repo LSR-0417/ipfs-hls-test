@@ -32,6 +32,11 @@ export default Object.freeze({
       },
     },
     actions: {
+      mobileMenu: {
+        label: '更多操作',
+        title: '開啟更多操作',
+        ariaLabel: '開啟更多操作',
+      },
       gateway: {
         label: '網關',
         ariaLabel: '切換網關，目前為 {gateway}',

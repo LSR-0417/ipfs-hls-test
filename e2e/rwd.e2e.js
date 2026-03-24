@@ -23,6 +23,23 @@ async function getBox(locator) {
   return box;
 }
 
+async function openGatewayDialog(page) {
+  const directGatewayButton = page.getByTestId('gateway-button');
+
+  if (await directGatewayButton.isVisible()) {
+    await directGatewayButton.click();
+    return;
+  }
+
+  const mobileActionsButton = page.getByTestId('header-mobile-actions-button');
+  await expect(mobileActionsButton).toBeVisible();
+  await mobileActionsButton.click();
+
+  const mobileGatewayButton = page.getByTestId('header-mobile-gateway-button');
+  await expect(mobileGatewayButton).toBeVisible();
+  await mobileGatewayButton.click();
+}
+
 test.describe('Responsive Page Shell', () => {
   for (const viewport of viewportMatrix) {
     test(`${viewport.name} keeps the main shell stable`, async ({ page }) => {
@@ -315,7 +332,7 @@ test.describe('Responsive Gateway Dialog', () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await openApp(page);
 
-    await page.getByTestId('gateway-button').click();
+    await openGatewayDialog(page);
     const dialog = page.getByTestId('gateway-dialog');
     await expect(dialog).toBeVisible();
 
@@ -334,7 +351,7 @@ test.describe('Responsive Gateway Dialog', () => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await openApp(page);
 
-    await page.getByTestId('gateway-button').click();
+    await openGatewayDialog(page);
     const dialog = page.getByTestId('gateway-dialog');
     await expect(dialog).toBeVisible();
 
@@ -351,7 +368,7 @@ test.describe('Responsive Gateway Dialog', () => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await openApp(page);
 
-    await page.getByTestId('gateway-button').click();
+    await openGatewayDialog(page);
     await expect(page.getByTestId('gateway-dialog')).toBeVisible();
 
     const localOption = page.getByTestId('gateway-option-local');
