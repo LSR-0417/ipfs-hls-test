@@ -39,6 +39,43 @@ export function normalizeVideoInfo(payload = {}) {
   };
 }
 
+export function buildInfoJsonPayload(payload = {}) {
+  const normalized = normalizeVideoInfo({
+    id: payload.id,
+    title: payload.title,
+    uploader: payload.uploader,
+    channel_id: payload.channelId ?? payload.channel_id,
+    upload_date: normalizeInfoJsonUploadDate(payload.uploadDate ?? payload.upload_date),
+    duration_string: payload.durationString ?? payload.duration_string,
+    description: payload.description,
+    tags: payload.tags,
+    categories: payload.categories,
+    resolution: payload.resolution,
+    fps: payload.fps,
+  });
+
+  const result = {};
+
+  if (normalized.id) result.id = normalized.id;
+  if (normalized.title) result.title = normalized.title;
+  if (normalized.uploader) result.uploader = normalized.uploader;
+  if (normalized.channelId) result.channel_id = normalized.channelId;
+  if (normalized.uploadDate) result.upload_date = normalized.uploadDate;
+  if (normalized.durationString) result.duration_string = normalized.durationString;
+  if (normalized.description) result.description = normalized.description;
+  if (normalized.tags.length > 0) result.tags = normalized.tags;
+  if (normalized.categories.length > 0) result.categories = normalized.categories;
+  if (normalized.resolution) result.resolution = normalized.resolution;
+  if (normalized.fps) result.fps = normalized.fps;
+
+  return result;
+}
+
+export function stringifyInfoJson(payload = {}, options = {}) {
+  const indent = Number.isInteger(options.indent) && options.indent >= 0 ? options.indent : 2;
+  return `${JSON.stringify(buildInfoJsonPayload(payload), null, indent)}\n`;
+}
+
 export function buildSidecarAssetUrl(baseUrl, assetPath) {
   const normalizedBaseUrl = normalizeString(baseUrl);
   const normalizedAssetPath = normalizeAssetPath(assetPath);
@@ -293,6 +330,25 @@ function parseUploadDate(value) {
 
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeInfoJsonUploadDate(value) {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return '';
+  }
+
+  if (/^\d{8}$/.test(normalized)) {
+    return normalized;
+  }
+
+  const match = normalized.match(/^(\d{4})[-/.](\d{2})[-/.](\d{2})$/);
+  if (match) {
+    return `${match[1]}${match[2]}${match[3]}`;
+  }
+
+  return normalized;
 }
 
 function normalizeStringArray(values) {

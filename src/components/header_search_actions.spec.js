@@ -39,7 +39,11 @@ describe('Header search action button', () => {
     expect(template).toContain('data-testid="header-mobile-actions-menu"');
     expect(template).toContain('data-testid="header-mobile-language-button"');
     expect(template).toContain('data-testid="header-mobile-gateway-button"');
+    expect(template).toContain('data-testid="info-json-button"');
+    expect(template).toContain('data-testid="header-mobile-info-json-button"');
+    expect(template).toContain('<InfoJsonDialog');
 
+    expect(script).toContain("import InfoJsonDialog from './InfoJsonDialog.vue';");
     expect(script).toContain("import { useI18n } from '../i18n';");
     expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
     expect(script).toContain('const searchInputRef = ref(null);');
@@ -47,6 +51,7 @@ describe('Header search action button', () => {
     expect(script).toContain('const shouldCompact = window.innerWidth <= 640;');
     expect(script).toContain('const isMobileActionsMenuOpen = ref(false);');
     expect(script).toContain('const isMobileLocaleListOpen = ref(false);');
+    expect(script).toContain('const isInfoJsonDialogOpen = ref(false);');
     expect(script).toContain('function focusSearchInput() {');
     expect(script).toContain('async function clearSearchQuery() {');
     expect(script).toContain('function toggleLocaleMenu() {');
@@ -55,10 +60,11 @@ describe('Header search action button', () => {
     expect(script).toContain('function toggleMobileLocaleList() {');
     expect(script).toContain('function closeLocaleMenu(options = {}) {');
     expect(script).toContain('function changeLocale(nextLocale) {');
+    expect(script).toContain('function openInfoJsonDialog() {');
+    expect(script).toContain('function closeInfoJsonDialog() {');
     expect(script).toContain("searchQuery.value = '';");
     expect(script).toContain('await nextTick();');
     expect(script).toContain('focusSearchInput();');
-    expect(script).not.toContain('openInfoJsonDialog');
     expect(script).not.toContain('navigator.clipboard');
     expect(script).not.toContain('pasteSearchQueryFromClipboard');
     expect(script).not.toContain('onSearchAction');
@@ -69,6 +75,7 @@ describe('Header search action button', () => {
     expect(style).toContain('.locale-action-shell');
     expect(style).toContain('.locale-btn');
     expect(style).toContain('.locale-menu');
+    expect(style).toContain('.info-json-btn');
     expect(style).toContain('.mobile-actions-shell');
     expect(style).toContain('.mobile-actions-menu');
     expect(style).toContain('.mobile-actions-locale-list');

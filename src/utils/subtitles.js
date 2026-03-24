@@ -110,6 +110,25 @@ export function normalizeSubtitleManifest(payload = {}) {
     .sort((left, right) => left.order - right.order);
 }
 
+export function buildSubtitleManifestPayload(subtitles = []) {
+  const tracks = Array.isArray(subtitles)
+    ? subtitles
+        .map((subtitle, index) => normalizeSubtitleManifestEntry(subtitle, index))
+        .filter((subtitle) => subtitle !== null)
+        .sort((left, right) => left.order - right.order)
+    : [];
+
+  return {
+    version: 1,
+    tracks,
+  };
+}
+
+export function stringifySubtitleManifest(subtitles = [], options = {}) {
+  const indent = Number.isInteger(options.indent) && options.indent >= 0 ? options.indent : 2;
+  return `${JSON.stringify(buildSubtitleManifestPayload(subtitles), null, indent)}\n`;
+}
+
 export function resolveSubtitleTracks(baseUrl, subtitles = []) {
   if (!Array.isArray(subtitles) || subtitles.length === 0) return [];
 
@@ -477,6 +496,22 @@ function normalizePlayerSubtitleTrack(track, index, fallbackSource = '') {
 function normalizeSubtitleTrack(track, index) {
   const lang = normalizeString(track?.lang || track?.srclang || track?.code);
   const path = normalizeAssetPath(track?.path || track?.src || track?.file);
+
+  if (!lang || !path) {
+    return null;
+  }
+
+  return {
+    lang,
+    label: normalizeString(track?.label) || defaultSubtitleLabel(lang),
+    path,
+    order: normalizeOrder(track?.order, index),
+  };
+}
+
+function normalizeSubtitleManifestEntry(track, index) {
+  const lang = normalizeString(track?.lang || track?.srclang || track?.code);
+  const path = normalizeAssetPath(track?.path || track?.fileName || track?.file || track?.name || track?.src);
 
   if (!lang || !path) {
     return null;

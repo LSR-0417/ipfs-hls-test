@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildSubtitleManifestPayload,
   choosePreferredSubtitleLanguage,
   convertSrtToVtt,
   createImportedSubtitleTrack,
@@ -15,6 +16,7 @@ import {
   resolveDualSubtitleSwapControlState,
   resolvePlayerControlledSubtitlePreference,
   resolveToggledSubtitlePreference,
+  stringifySubtitleManifest,
   revokeImportedSubtitleTracks,
   resolveSubtitleTracks,
   subtitleCatalogStatus,
@@ -112,6 +114,51 @@ describe('normalizeSubtitleManifest', () => {
       { lang: 'en', label: 'English', path: 'en.vtt', order: 0 },
       { lang: 'zh-TW', label: '中文字幕', path: 'zh-TW.vtt', order: 5 },
     ]);
+  });
+});
+
+describe('buildSubtitleManifestPayload', () => {
+  it('creates a stable subtitles.json payload from imported subtitle tracks', () => {
+    expect(
+      buildSubtitleManifestPayload([
+        {
+          lang: 'zh-TW',
+          label: '繁體中文 (Local)',
+          fileName: 'movie.zh-TW.vtt',
+          order: 2,
+        },
+        {
+          lang: 'en',
+          label: 'English (Local)',
+          path: 'movie.en.vtt',
+          order: 1,
+        },
+        {
+          lang: '',
+          fileName: 'broken.vtt',
+        },
+      ])
+    ).toEqual({
+      version: 1,
+      tracks: [
+        { lang: 'en', label: 'English (Local)', path: 'movie.en.vtt', order: 1 },
+        { lang: 'zh-TW', label: '繁體中文 (Local)', path: 'movie.zh-TW.vtt', order: 2 },
+      ],
+    });
+  });
+});
+
+describe('stringifySubtitleManifest', () => {
+  it('formats subtitles.json with indentation and a trailing newline', () => {
+    expect(
+      stringifySubtitleManifest([
+        {
+          lang: 'en',
+          label: 'English',
+          fileName: 'en.vtt',
+        },
+      ])
+    ).toBe('{\n  "version": 1,\n  "tracks": [\n    {\n      "lang": "en",\n      "label": "English",\n      "path": "en.vtt",\n      "order": 0\n    }\n  ]\n}\n');
   });
 });
 

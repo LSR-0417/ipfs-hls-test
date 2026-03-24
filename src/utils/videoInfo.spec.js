@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildInfoJsonPayload,
   createDefaultVideoInfo,
   extractDescriptionHashtags,
   fetchVideoInfo,
@@ -8,6 +9,7 @@ import {
   formatUploadDateTooltip,
   linkifyDescription,
   normalizeVideoInfo,
+  stringifyInfoJson,
 } from './videoInfo';
 
 function createHeaders(values = {}) {
@@ -67,6 +69,62 @@ describe('normalizeVideoInfo', () => {
       resolution: '1920x1080',
       fps: 30,
     });
+  });
+});
+
+describe('buildInfoJsonPayload', () => {
+  it('maps frontend metadata fields back into the packaged info.json shape', () => {
+    expect(
+      buildInfoJsonPayload({
+        id: ' UdGk5Qv0C1M ',
+        title: ' Demo Title ',
+        uploader: ' AstraStream ',
+        channelId: ' UCYgpfeq5JyEo_pPmu-4VLiA ',
+        uploadDate: '2026-03-07',
+        durationString: '10:16',
+        description: 'desc',
+        tags: [' IPFS ', '', 'Web3'],
+        categories: ['Technology'],
+        resolution: '1920x1080',
+        fps: '30',
+      })
+    ).toEqual({
+      id: 'UdGk5Qv0C1M',
+      title: 'Demo Title',
+      uploader: 'AstraStream',
+      channel_id: 'UCYgpfeq5JyEo_pPmu-4VLiA',
+      upload_date: '20260307',
+      duration_string: '10:16',
+      description: 'desc',
+      tags: ['IPFS', 'Web3'],
+      categories: ['Technology'],
+      resolution: '1920x1080',
+      fps: 30,
+    });
+  });
+
+  it('omits empty values from the generated info.json payload', () => {
+    expect(
+      buildInfoJsonPayload({
+        title: 'Only Title',
+        uploader: '',
+        tags: [],
+        fps: '',
+      })
+    ).toEqual({
+      title: 'Only Title',
+    });
+  });
+});
+
+describe('stringifyInfoJson', () => {
+  it('formats the generated info.json with indentation and a trailing newline', () => {
+    expect(
+      stringifyInfoJson({
+        title: 'Demo Title',
+        uploadDate: '20260307',
+      })
+    ).toBe('{\n  "title": "Demo Title",\n  "upload_date": "20260307"\n}\n');
   });
 });
 
