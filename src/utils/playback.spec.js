@@ -196,13 +196,14 @@ describe('getPlaybackHotkeyAction', () => {
     });
   });
 
-  it('maps playback, player, subtitle, and help toggles', () => {
+  it('maps playback, player, subtitle, screenshot, and help toggles', () => {
     expect(getPlaybackHotkeyAction({ key: ' ', target: target() })).toEqual({ type: 'toggle-playback' });
     expect(getPlaybackHotkeyAction({ code: 'Space', target: target() })).toEqual({ type: 'toggle-playback' });
     expect(getPlaybackHotkeyAction({ key: 'k', target: target() })).toEqual({ type: 'toggle-playback' });
     expect(getPlaybackHotkeyAction({ key: 'm', target: target() })).toEqual({ type: 'toggle-mute' });
     expect(getPlaybackHotkeyAction({ key: 'f', target: target() })).toEqual({ type: 'toggle-fullscreen' });
     expect(getPlaybackHotkeyAction({ key: 'c', target: target() })).toEqual({ type: 'toggle-subtitles' });
+    expect(getPlaybackHotkeyAction({ key: 's', target: target() })).toEqual({ type: 'capture-screenshot' });
     expect(getPlaybackHotkeyAction({ key: '?', target: target() })).toEqual({ type: 'toggle-help' });
   });
 
@@ -463,6 +464,21 @@ describe('applyPlaybackHotkey', () => {
       })
     ).toBe(true);
     expect(toggles).toBe(1);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
+  it('runs the screenshot callback for s', () => {
+    let captures = 0;
+    const keyboard = createKeyboardEvent({ key: 's' });
+
+    expect(
+      applyPlaybackHotkey(keyboard.event, null, {
+        onCaptureScreenshot() {
+          captures += 1;
+        },
+      })
+    ).toBe(true);
+    expect(captures).toBe(1);
     expect(keyboard.wasPrevented()).toBe(true);
   });
 });

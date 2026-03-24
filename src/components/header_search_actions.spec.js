@@ -34,14 +34,26 @@ describe('Header search action button', () => {
     expect(template).toContain('data-testid="header-locale-button"');
     expect(template).toContain('class="action-btn locale-btn"');
     expect(template).toContain('class="locale-menu glass-panel"');
+    expect(template).toContain('data-testid="header-mobile-actions-shell"');
+    expect(template).toContain('data-testid="header-mobile-actions-button"');
+    expect(template).toContain('data-testid="header-mobile-actions-menu"');
+    expect(template).toContain('data-testid="header-mobile-language-button"');
+    expect(template).toContain('data-testid="header-mobile-gateway-button"');
+    expect(template).toContain('data-testid="header-mobile-info-json-button"');
 
     expect(script).toContain("import { useI18n } from '../i18n';");
     expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
     expect(script).toContain('const searchInputRef = ref(null);');
     expect(script).toContain('const isSearchQueryEmpty = computed(() => searchQuery.value.trim().length === 0);');
+    expect(script).toContain('const shouldCompact = window.innerWidth <= 640;');
+    expect(script).toContain('const isMobileActionsMenuOpen = ref(false);');
+    expect(script).toContain('const isMobileLocaleListOpen = ref(false);');
     expect(script).toContain('function focusSearchInput() {');
     expect(script).toContain('async function clearSearchQuery() {');
     expect(script).toContain('function toggleLocaleMenu() {');
+    expect(script).toContain('function toggleMobileActionsMenu() {');
+    expect(script).toContain('function closeMobileActionsMenu(options = {}) {');
+    expect(script).toContain('function toggleMobileLocaleList() {');
     expect(script).toContain('function closeLocaleMenu(options = {}) {');
     expect(script).toContain('function changeLocale(nextLocale) {');
     expect(script).toContain("searchQuery.value = '';");
@@ -57,6 +69,13 @@ describe('Header search action button', () => {
     expect(style).toContain('.locale-action-shell');
     expect(style).toContain('.locale-btn');
     expect(style).toContain('.locale-menu');
+    expect(style).toContain('.mobile-actions-shell');
+    expect(style).toContain('.mobile-actions-menu');
+    expect(style).toContain('.mobile-actions-locale-list');
+    expect(style).toContain('max-width: 600px;\n  min-width: 0;');
+    expect(style).toContain('@media (max-width: 640px)');
+    expect(style).toContain('.actions-area {\n    display: none;');
+    expect(style).toContain('.mobile-actions-shell {\n    display: flex;');
   });
 });
 

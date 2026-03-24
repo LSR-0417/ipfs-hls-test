@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import InfoJsonDialog from './InfoJsonDialog.vue';
 import { useI18n } from '../i18n';
 import {
   isDisabledGatewayInput,
@@ -11,6 +12,7 @@ import {
   readStoredCustomGateway,
 } from '../utils/gateway';
 import { formatGatewayPlaybackText } from '../utils/gatewayStatus';
+import { createDefaultVideoInfo } from '../utils/videoInfo';
 
 const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
@@ -29,6 +31,10 @@ const props = defineProps({
   currentGateway: { type: String, default: '' },
   currentCid: { type: String, default: '' },
   currentLoadSequence: { type: Number, default: 0 },
+  currentVideoInfo: {
+    type: Object,
+    default: () => createDefaultVideoInfo(),
+  },
   sidebarOpen: { type: Boolean, default: false },
 });
 const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);
@@ -41,7 +47,10 @@ const settingsOpen = ref(false);
 const localeActionRef = ref(null);
 const localeButtonRef = ref(null);
 const localeMenuRef = ref(null);
+const mobileActionsRef = ref(null);
+const mobileActionsButtonRef = ref(null);
 const gatewayButtonRef = ref(null);
+const infoJsonButtonRef = ref(null);
 const gatewayDialogRef = ref(null);
 const selectedGatewayId = ref(builtInGateways[0].id);
 const localHost = ref('127.0.0.1');
@@ -52,7 +61,11 @@ const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
 const isGatewayProbeRunning = ref(false);
 const isLocaleMenuOpen = ref(false);
+const isInfoJsonDialogOpen = ref(false);
+const isMobileActionsMenuOpen = ref(false);
+const isMobileLocaleListOpen = ref(false);
 const lastFocusedGatewayTrigger = ref(null);
+const pendingGatewayFocusTarget = ref(null);
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
@@ -298,7 +311,9 @@ watch(settingsOpen, async (isOpen) => {
   if (typeof document === 'undefined') return;
 
   if (isOpen) {
-    lastFocusedGatewayTrigger.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    lastFocusedGatewayTrigger.value =
+      pendingGatewayFocusTarget.value || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    pendingGatewayFocusTarget.value = null;
     await nextTick();
     gatewayDialogRef.value?.focus();
     document.addEventListener('keydown', handleGatewayDialogKeydown);
@@ -308,10 +323,21 @@ watch(settingsOpen, async (isOpen) => {
   document.removeEventListener('keydown', handleGatewayDialogKeydown);
   await nextTick();
 
-  const nextFocusTarget = gatewayButtonRef.value || lastFocusedGatewayTrigger.value;
+  const nextFocusTarget =
+    (isCompactHeader.value ? mobileActionsButtonRef.value : gatewayButtonRef.value) || lastFocusedGatewayTrigger.value;
   if (nextFocusTarget && typeof nextFocusTarget.focus === 'function') {
     nextFocusTarget.focus();
   }
+});
+
+watch(isInfoJsonDialogOpen, async (isOpen) => {
+  if (isOpen || typeof document === 'undefined') {
+    return;
+  }
+
+  await nextTick();
+  const nextFocusTarget = isCompactHeader.value ? mobileActionsButtonRef.value : infoJsonButtonRef.value;
+  nextFocusTarget?.focus();
 });
 
 watch(
@@ -364,6 +390,7 @@ function toggleSidebar() {
 }
 
 function toggleLocaleMenu() {
+  closeMobileActionsMenu({ restoreFocus: false });
   isLocaleMenuOpen.value = !isLocaleMenuOpen.value;
 }
 
@@ -379,31 +406,78 @@ function closeLocaleMenu(options = {}) {
   }
 }
 
+function toggleMobileActionsMenu() {
+  if (isMobileActionsMenuOpen.value) {
+    closeMobileActionsMenu();
+    return;
+  }
+
+  closeLocaleMenu({ restoreFocus: false });
+  isMobileActionsMenuOpen.value = true;
+  isMobileLocaleListOpen.value = false;
+}
+
+function closeMobileActionsMenu(options = {}) {
+  if (!isMobileActionsMenuOpen.value && !isMobileLocaleListOpen.value) return;
+
+  isMobileActionsMenuOpen.value = false;
+  isMobileLocaleListOpen.value = false;
+
+  if (options.restoreFocus !== false) {
+    nextTick(() => {
+      mobileActionsButtonRef.value?.focus();
+    });
+  }
+}
+
+function toggleMobileLocaleList() {
+  if (!isMobileActionsMenuOpen.value) {
+    isMobileActionsMenuOpen.value = true;
+  }
+
+  isMobileLocaleListOpen.value = !isMobileLocaleListOpen.value;
+}
+
 function changeLocale(nextLocale) {
   const localeCode = typeof nextLocale === 'string' ? nextLocale : nextLocale?.target?.value;
 
   if (!localeCode) return;
   setLocale(localeCode);
   closeLocaleMenu({ restoreFocus: false });
+  closeMobileActionsMenu({ restoreFocus: false });
 }
 
 function handleDocumentPointerDown(event) {
-  if (!isLocaleMenuOpen.value) return;
-
-  if (localeActionRef.value?.contains(event.target)) {
-    return;
+  if (isLocaleMenuOpen.value && !localeActionRef.value?.contains(event.target)) {
+    closeLocaleMenu({ restoreFocus: false });
   }
 
-  closeLocaleMenu({ restoreFocus: false });
+  if (isMobileActionsMenuOpen.value && !mobileActionsRef.value?.contains(event.target)) {
+    closeMobileActionsMenu({ restoreFocus: false });
+  }
 }
 
 function handleDocumentKeydown(event) {
-  if (event.key !== 'Escape' || !isLocaleMenuOpen.value) {
+  if (event.key !== 'Escape') {
     return;
   }
 
-  event.preventDefault();
-  closeLocaleMenu();
+  if (isMobileLocaleListOpen.value) {
+    event.preventDefault();
+    isMobileLocaleListOpen.value = false;
+    return;
+  }
+
+  if (isMobileActionsMenuOpen.value) {
+    event.preventDefault();
+    closeMobileActionsMenu();
+    return;
+  }
+
+  if (isLocaleMenuOpen.value) {
+    event.preventDefault();
+    closeLocaleMenu();
+  }
 }
 
 function syncLocalFromGateway(urlStr) {
@@ -445,7 +519,10 @@ function formatGatewayEndpoint(urlStr) {
 }
 
 function openSettings() {
+  pendingGatewayFocusTarget.value = isCompactHeader.value ? mobileActionsButtonRef.value || gatewayButtonRef.value : gatewayButtonRef.value;
   closeLocaleMenu({ restoreFocus: false });
+  closeMobileActionsMenu({ restoreFocus: false });
+  closeInfoJsonDialog();
   if (isDevMode) {
     restoreLocalGateway();
     syncLocalFromGateway(props.currentGateway);
@@ -462,6 +539,17 @@ function openSettings() {
 
 function closeSettings() {
   settingsOpen.value = false;
+}
+
+function openInfoJsonDialog() {
+  closeLocaleMenu({ restoreFocus: false });
+  closeMobileActionsMenu({ restoreFocus: false });
+  closeSettings();
+  isInfoJsonDialogOpen.value = true;
+}
+
+function closeInfoJsonDialog() {
+  isInfoJsonDialogOpen.value = false;
 }
 
 function applyGateway() {
@@ -902,7 +990,17 @@ function restoreLocalGateway() {
 
 function syncCompactHeaderViewport() {
   if (typeof window === 'undefined') return;
-  isCompactHeader.value = window.innerWidth <= 480;
+  const shouldCompact = window.innerWidth <= 640;
+
+  if (shouldCompact && isLocaleMenuOpen.value) {
+    closeLocaleMenu({ restoreFocus: false });
+  }
+
+  if (!shouldCompact && isMobileActionsMenuOpen.value) {
+    closeMobileActionsMenu({ restoreFocus: false });
+  }
+
+  isCompactHeader.value = shouldCompact;
 }
 
 onMounted(() => {
@@ -1070,25 +1168,122 @@ onBeforeUnmount(() => {
         </span>
       </button>
       <button
+        ref="infoJsonButtonRef"
         type="button"
-        class="action-btn account-btn"
-        :aria-label="t('header.actions.account.ariaLabel')"
-        :title="t('header.actions.account.title')"
-        data-testid="account-button"
+        class="action-btn info-json-btn"
+        :aria-label="t('header.actions.infoJson.ariaLabel')"
+        :title="t('header.actions.infoJson.title')"
+        data-testid="info-json-button"
+        @click="openInfoJsonDialog"
       >
-        <span class="action-btn-visual account-btn-visual" aria-hidden="true">
-          <svg class="account-btn-icon" viewBox="0 0 24 24">
+        <span class="action-btn-visual info-json-btn-visual" aria-hidden="true">
+          <svg class="info-json-btn-icon" viewBox="0 0 24 24">
             <path
               fill="currentColor"
-              d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v1h20v-1c0-3.33-6.67-5-10-5z"
+              d="M7 3.75A2.75 2.75 0 0 1 9.75 1h4.8c.73 0 1.43.29 1.94.8l3.71 3.7c.51.52.8 1.22.8 1.95v12.8A2.75 2.75 0 0 1 18.25 23h-8.5A2.75 2.75 0 0 1 7 20.25Zm2.75-.75a.75.75 0 0 0-.75.75v16.5c0 .41.34.75.75.75h8.5a.75.75 0 0 0 .75-.75V8.5h-3.25A2.75 2.75 0 0 1 13 5.75V3Zm5.25.69v2.06c0 .41.34.75.75.75h2.06ZM11 11a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm0 4a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm-3.5-.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM6 7.5A1.5 1.5 0 1 1 9 7.5a1.5 1.5 0 0 1-3 0Z"
             />
           </svg>
         </span>
         <span class="action-btn-copy">
-          <span class="action-btn-label">{{ t('header.actions.account.label') }}</span>
-          <span class="action-btn-title">{{ t('header.actions.account.title') }}</span>
+          <span class="action-btn-label">{{ t('header.actions.infoJson.label') }}</span>
+          <span class="action-btn-title">{{ t('header.actions.infoJson.title') }}</span>
         </span>
       </button>
+    </div>
+    <div
+      ref="mobileActionsRef"
+      class="mobile-actions-shell"
+      data-testid="header-mobile-actions-shell"
+    >
+      <button
+        ref="mobileActionsButtonRef"
+        type="button"
+        class="action-btn mobile-actions-btn"
+        :aria-label="t('header.actions.mobileMenu.ariaLabel')"
+        :title="t('header.actions.mobileMenu.title')"
+        aria-haspopup="menu"
+        :aria-expanded="isMobileActionsMenuOpen ? 'true' : 'false'"
+        data-testid="header-mobile-actions-button"
+        @click="toggleMobileActionsMenu"
+      >
+        <span class="action-btn-visual mobile-actions-btn-visual" aria-hidden="true">
+          <svg class="mobile-actions-btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.5c-1.92 0-3.5-1.58-3.5-3.5s1.58-3.5 3.5-3.5 3.5 1.58 3.5 3.5-1.58 3.5-3.5 3.5z"
+            />
+          </svg>
+        </span>
+      </button>
+      <div
+        v-if="isMobileActionsMenuOpen"
+        class="mobile-actions-menu glass-panel"
+        role="menu"
+        :aria-label="t('header.actions.mobileMenu.label')"
+        data-testid="header-mobile-actions-menu"
+      >
+        <button
+          type="button"
+          class="mobile-actions-menu-item"
+          role="menuitem"
+          :aria-expanded="isMobileLocaleListOpen ? 'true' : 'false'"
+          data-testid="header-mobile-language-button"
+          @click="toggleMobileLocaleList"
+        >
+          <span class="mobile-actions-menu-item-copy">
+            <span class="mobile-actions-menu-item-title">{{ t('common.language') }}</span>
+            <span class="mobile-actions-menu-item-meta">{{ currentLocaleDefinition?.nativeLabel || locale }}</span>
+          </span>
+          <span class="mobile-actions-menu-item-caret" aria-hidden="true">{{ isMobileLocaleListOpen ? '▴' : '▾' }}</span>
+        </button>
+        <div
+          v-if="isMobileLocaleListOpen"
+          class="mobile-actions-locale-list"
+          data-testid="header-mobile-locale-list"
+        >
+          <button
+            v-for="option in availableLocales"
+            :key="`mobile-${option.code}`"
+            type="button"
+            class="mobile-actions-locale-item"
+            :class="{ 'is-active': locale === option.code }"
+            role="menuitemradio"
+            :aria-checked="locale === option.code ? 'true' : 'false'"
+            :data-testid="`header-mobile-locale-option-${option.code}`"
+            @click="changeLocale(option.code)"
+          >
+            <span class="mobile-actions-menu-item-copy">
+              <span class="mobile-actions-menu-item-title">{{ option.nativeLabel }}</span>
+              <span class="mobile-actions-menu-item-meta">{{ option.code }}</span>
+            </span>
+            <span v-if="locale === option.code" class="locale-menu-item-check" aria-hidden="true">✓</span>
+          </button>
+        </div>
+        <button
+          type="button"
+          class="mobile-actions-menu-item"
+          role="menuitem"
+          data-testid="header-mobile-gateway-button"
+          @click="openSettings"
+        >
+          <span class="mobile-actions-menu-item-copy">
+            <span class="mobile-actions-menu-item-title">{{ t('header.actions.gateway.label') }}</span>
+            <span class="mobile-actions-menu-item-meta">{{ currentGatewayName }}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="mobile-actions-menu-item"
+          role="menuitem"
+          data-testid="header-mobile-info-json-button"
+          @click="openInfoJsonDialog"
+        >
+          <span class="mobile-actions-menu-item-copy">
+            <span class="mobile-actions-menu-item-title">{{ t('header.actions.infoJson.label') }}</span>
+            <span class="mobile-actions-menu-item-meta">{{ t('header.actions.infoJson.title') }}</span>
+          </span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -1294,6 +1489,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+
+  <InfoJsonDialog
+    :open="isInfoJsonDialogOpen"
+    :initial-video-info="currentVideoInfo"
+    @close="closeInfoJsonDialog"
+  />
 </template>
 
 <style scoped>
@@ -1363,12 +1564,14 @@ onBeforeUnmount(() => {
 .search-area {
   flex: 1;
   max-width: 600px;
+  min-width: 0;
   display: flex;
   justify-content: center;
 }
 
 .search-bar {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   background: rgba(0, 0, 0, 0.3);
@@ -1392,6 +1595,7 @@ onBeforeUnmount(() => {
   font-size: 1rem;
   outline: none;
   width: 100%;
+  min-width: 0;
 }
 
 .search-bar input::placeholder {
@@ -1430,6 +1634,12 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   min-width: 0;
   justify-content: flex-end;
+}
+
+.mobile-actions-shell {
+  position: relative;
+  display: none;
+  flex: 0 0 auto;
 }
 
 .locale-action-shell {
@@ -1717,21 +1927,126 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.account-btn {
+.info-json-btn {
   flex: 0 1 auto;
   min-width: var(--header-account-min-width);
   max-width: var(--header-account-max-width);
 }
 
-.account-btn-visual {
-  color: rgba(214, 238, 255, 0.92);
-  background: linear-gradient(135deg, rgba(0, 210, 255, 0.12), rgba(162, 82, 255, 0.16));
-  border-color: rgba(160, 214, 255, 0.18);
+.info-json-btn-visual {
+  color: rgba(255, 225, 163, 0.94);
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.14), rgba(0, 210, 255, 0.12));
+  border-color: rgba(255, 223, 155, 0.18);
 }
 
-.account-btn-icon {
+.info-json-btn-icon {
   width: 18px;
   height: 18px;
+}
+
+.mobile-actions-btn {
+  width: 46px;
+  min-width: 46px;
+  max-width: 46px;
+  gap: 0;
+  padding: 0;
+  justify-content: center;
+}
+
+.mobile-actions-btn .action-btn-copy {
+  display: none;
+}
+
+.mobile-actions-btn-visual {
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+.mobile-actions-btn-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.mobile-actions-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(196px, calc(100vw - 18px));
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 16px;
+  z-index: 140;
+}
+
+.mobile-actions-menu-item,
+.mobile-actions-locale-item {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.mobile-actions-menu-item:hover,
+.mobile-actions-menu-item:focus-visible,
+.mobile-actions-locale-item:hover,
+.mobile-actions-locale-item:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+  outline: none;
+}
+
+.mobile-actions-locale-item.is-active {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mobile-actions-menu-item-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobile-actions-menu-item-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.15;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.mobile-actions-menu-item-meta {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.48);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-actions-menu-item-caret {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.78rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.mobile-actions-locale-list {
+  display: grid;
+  gap: 4px;
+  padding-top: 0;
 }
 
 .icon-btn {
@@ -1780,8 +2095,7 @@ onBeforeUnmount(() => {
     min-width: var(--header-locale-min-width);
     max-width: var(--header-locale-max-width);
   }
-  .actions-area .icon-btn,
-  .account-btn {
+  .actions-area .icon-btn {
     display: none;
   }
   .gateway-btn {
@@ -1789,13 +2103,48 @@ onBeforeUnmount(() => {
     max-width: var(--header-gateway-max-width);
     padding: 4px 6px;
   }
+  .info-json-btn {
+    flex: 0 0 46px;
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    gap: 0;
+    padding: 0;
+    justify-content: center;
+  }
+  .info-json-btn .action-btn-copy {
+    display: none;
+  }
   .action-btn-title {
     font-size: 0.88rem;
   }
 }
+
+@media (max-width: 640px) {
+  .header {
+    padding: 0 14px;
+  }
+  .search-area {
+    margin: 0 8px;
+  }
+  .search-bar {
+    padding: 6px 10px;
+  }
+  .search-actions {
+    margin-left: 6px;
+    gap: 2px;
+  }
+  .actions-area {
+    display: none;
+  }
+  .mobile-actions-shell {
+    display: flex;
+  }
+}
+
 @media (max-width: 480px) {
   .header {
-    padding: 0 12px;
+    padding: 0 10px;
   }
   .logo-area {
     gap: 10px;
@@ -1807,10 +2156,10 @@ onBeforeUnmount(() => {
     display: none; /* Only show logo icon on tiny screens */
   }
   .search-area {
-    margin: 0 6px;
+    margin: 0 4px;
   }
   .search-bar {
-    padding: 6px 10px;
+    padding: 6px 8px;
   }
   .search-bar input {
     font-size: 0.85rem;
@@ -1818,27 +2167,20 @@ onBeforeUnmount(() => {
   .search-submit-btn {
     margin-left: 4px;
   }
-  .actions-area {
-    --header-locale-min-width: 88px;
-    --header-locale-max-width: 160px;
-    --header-gateway-min-width: 96px;
-    --header-gateway-max-width: 176px;
-  }
-  .locale-action-shell {
-    min-width: var(--header-locale-min-width);
-    max-width: var(--header-locale-max-width);
-  }
-  .locale-btn {
-    padding: 4px 6px;
-  }
   .locale-menu {
     min-width: 170px;
     right: -8px;
   }
-  .gateway-btn {
-    min-width: var(--header-gateway-min-width);
-    max-width: var(--header-gateway-max-width);
-    padding: 4px 6px;
+  .mobile-actions-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+  }
+  .mobile-actions-btn-visual {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
   }
   .action-btn-visual {
     --action-chip-radius: 10px;
@@ -1850,33 +2192,44 @@ onBeforeUnmount(() => {
     width: 16px;
     height: 16px;
   }
+  .info-json-btn-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .mobile-actions-btn-icon {
+    width: 18px;
+    height: 18px;
+  }
+  .mobile-actions-menu {
+    width: min(184px, calc(100vw - 16px));
+  }
 }
 
 @media (max-width: 375px) {
-  .locale-action-shell {
-    flex: 0 0 46px;
-    min-width: 46px;
-    max-width: 46px;
+  .mobile-actions-btn {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
   }
-  .locale-btn {
-    gap: 0;
-    padding: 0;
-    justify-content: center;
+  .mobile-actions-btn-visual {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
   }
-  .locale-btn .action-btn-copy {
-    display: none;
+  .action-btn-visual {
+    width: 28px;
+    height: 28px;
   }
-  .gateway-btn {
-    flex: 0 0 46px;
-    width: 46px;
-    min-width: 46px;
-    max-width: 46px;
-    gap: 0;
-    padding: 0;
-    justify-content: center;
+  .gateway-btn-icon,
+  .info-json-btn-icon,
+  .locale-btn-icon,
+  .mobile-actions-btn-icon {
+    width: 17px;
+    height: 17px;
   }
-  .gateway-btn .action-btn-copy {
-    display: none;
+  .mobile-actions-menu {
+    width: min(176px, calc(100vw - 14px));
   }
 }
 
