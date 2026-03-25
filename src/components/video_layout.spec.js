@@ -487,10 +487,12 @@ describe('SubtitleDialog contract', () => {
     expect(template).not.toContain('data-testid="subtitle-dialog-slot-primary"');
     expect(template).not.toContain('data-testid="subtitle-dialog-slot-secondary"');
     expect(template).toContain('multiple');
-    expect(template).toContain('字幕清單');
+    expect(template).not.toContain('字幕清單');
     expect(template).not.toContain('data-testid="subtitle-dialog-library-tabs"');
     expect(template).not.toContain('data-testid="subtitle-dialog-tab-imported"');
     expect(template).not.toContain('data-testid="subtitle-dialog-tab-download"');
+    expect(template).not.toContain('class="subtitle-section subtitle-library-panel"');
+    expect(template).not.toContain('subtitle-library-surface');
     expect(template).toContain('data-testid="subtitle-dialog-track-list"');
     expect(template).toContain('data-testid="subtitle-dialog-empty"');
     expect(template).toContain(':data-testid="getPrimaryActionTestId(track)"');
@@ -519,6 +521,9 @@ describe('SubtitleDialog contract', () => {
     expect(style).toContain('.subtitle-dialog-toolbar');
     expect(style).toContain('.subtitle-toolbar-pill');
     expect(style).toContain('.subtitle-toolbar-hint');
+    expect(style).not.toContain('.subtitle-library-surface');
+    expect(style).not.toContain('.subtitle-section');
+    expect(style).not.toContain('.subtitle-library-panel');
     expect(style).not.toContain('.subtitle-library-tabs');
     expect(style).not.toContain('.subtitle-library-tab');
     expect(style).toContain('.subtitle-track-row--primary');
@@ -528,7 +533,7 @@ describe('SubtitleDialog contract', () => {
     expect(style).toContain('.subtitle-track-actions');
     expect(style).toContain('.subtitle-row-btn--icon');
     expect(style).toContain('.subtitle-role-icon');
-    expect(style).toContain('.subtitle-section-title');
+    expect(style).not.toContain('.subtitle-section-title');
     expect(style).not.toContain('.subtitle-section-copy');
     expect(style).not.toContain('.subtitle-section-caption');
     expect(style).not.toContain('.subtitle-library-note');

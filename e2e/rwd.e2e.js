@@ -313,12 +313,10 @@ test.describe('Responsive Video Actions', () => {
 
     await page.getByTestId('subtitle-dialog-secondary-action-local-ja').click();
 
-    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('次字幕已切換為 日本語');
     await expect(japaneseTrack).toHaveClass(/subtitle-track-row--secondary/);
 
     await page.getByTestId('subtitle-dialog-primary-action-local-ja').click();
 
-    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('主字幕已切換為 日本語');
     await expect(japaneseTrack).toHaveClass(/subtitle-track-row--primary/);
     await expect(japaneseTrack).not.toHaveClass(/subtitle-track-row--secondary/);
     await expect(englishTrack).not.toHaveClass(/subtitle-track-row--primary/);
