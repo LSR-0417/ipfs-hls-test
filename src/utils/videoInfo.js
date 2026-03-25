@@ -22,7 +22,6 @@ const draftFormFieldNames = Object.freeze([
   'uploadDate',
   'description',
   'tags',
-  'categories',
 ]);
 
 export function createDefaultVideoInfo() {
@@ -60,7 +59,6 @@ export function createVideoInfoDraftFormState(videoInfo = createDefaultVideoInfo
     uploadDate: formatUploadDate(source.uploadDate || ''),
     description: source.description || '',
     tags: Array.isArray(source.tags) ? source.tags.join(', ') : '',
-    categories: Array.isArray(source.categories) ? source.categories.join(', ') : '',
   };
 }
 
@@ -73,7 +71,6 @@ export function createVideoInfoDraftFormSnapshot(formState = {}) {
     uploadDate: normalizeString(formState.uploadDate),
     description: normalizeString(formState.description),
     tags: normalizeString(formState.tags),
-    categories: normalizeString(formState.categories),
   };
 }
 
