@@ -28,6 +28,7 @@
 - CID 搜尋輸入
 - Header action buttons
 - Gateway Settings dialog
+- Sidecar Draft dialog
 
 目前 gateway configurator 的實作重點如下：
 
@@ -44,6 +45,17 @@
 - `App.vue` 立即更新並持久化 gateway
 - 若已有 CID，播放器立即開始重新載入來源
 - 沒有額外的 switch overlay、rollback 或 retry UI
+
+目前 sidecar draft dialog 的實作重點如下：
+
+- 由 Header action button 開啟
+- 分成 `影片資訊`、`字幕資訊`、`影片處理` 三個分頁
+- 若目前已有載入影片，metadata 表單會以目前 `currentVideoInfo` 作為初始值
+- metadata 分頁只保留 `下載 info.json` 按鈕，不顯示 inline JSON 預覽
+- metadata 分頁不提供 `categories` 編輯欄位
+- subtitles 分頁仍可生成與下載 `subtitles.json`，但不顯示 inline JSON 預覽
+- subtitles 分頁以單一按鈕作為字幕匯入入口，不再使用大面積 uploader 卡片
+- video 分頁仍保留本地影片摘要、解析度選擇與 sidecar 附加設定
 
 ### 2.3 VideoPlayer.vue
 

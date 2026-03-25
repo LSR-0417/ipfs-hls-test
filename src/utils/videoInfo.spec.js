@@ -76,7 +76,7 @@ describe('normalizeVideoInfo', () => {
 });
 
 describe('createVideoInfoDraftFormState', () => {
-  it('maps loaded metadata into the dialog form shape', () => {
+  it('prefills the dialog form from the currently loaded video metadata', () => {
     expect(
       createVideoInfoDraftFormState({
         id: 'demo-id',
@@ -86,7 +86,6 @@ describe('createVideoInfoDraftFormState', () => {
         uploadDate: '20260325',
         description: 'desc',
         tags: ['IPFS', 'Web3'],
-        categories: ['Technology'],
       })
     ).toEqual({
       id: 'demo-id',
@@ -96,7 +95,6 @@ describe('createVideoInfoDraftFormState', () => {
       uploadDate: '2026-03-25',
       description: 'desc',
       tags: 'IPFS, Web3',
-      categories: 'Technology',
     });
   });
 });
