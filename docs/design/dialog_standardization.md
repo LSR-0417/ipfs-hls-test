@@ -40,6 +40,9 @@ Rules:
 - Max height: `min(92dvh, 100dvh)`
 - Top corners stay rounded.
 - Footer includes safe-area bottom padding.
+- Keep a stronger frosted-glass treatment than desktop so copy remains readable over active page content.
+- Use layered dark gradients plus panel blur; do not fall back to a fully opaque solid sheet.
+- Header and footer may carry slightly stronger separation than the scroll body to keep title and actions readable.
 
 ## Header Rules
 

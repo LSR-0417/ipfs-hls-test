@@ -339,10 +339,27 @@ test.describe('Responsive Gateway Dialog', () => {
     expect(dialogBox.x).toBeLessThanOrEqual(2);
     expect(dialogBox.y + dialogBox.height).toBeGreaterThanOrEqual(810);
 
+    const dialogStyles = await dialog.evaluate((node) => {
+      const styles = window.getComputedStyle(node);
+      return {
+        backgroundColor: styles.backgroundColor,
+        boxShadow: styles.boxShadow,
+      };
+    });
+    expect(dialogStyles.backgroundColor).toContain('rgba(');
+    expect(dialogStyles.boxShadow).not.toBe('none');
+
     const footer = page.getByTestId('gateway-dialog-footer');
     await expect(footer).toBeVisible();
-    const footerFlexDirection = await footer.evaluate((node) => window.getComputedStyle(node).flexDirection);
-    expect(footerFlexDirection).toBe('row');
+    const footerStyles = await footer.evaluate((node) => {
+      const styles = window.getComputedStyle(node);
+      return {
+        flexDirection: styles.flexDirection,
+        backgroundImage: styles.backgroundImage,
+      };
+    });
+    expect(footerStyles.flexDirection).toBe('row');
+    expect(footerStyles.backgroundImage).not.toBe('none');
   });
 
   test('stays centered and capped on FHD desktop', async ({ page }) => {
