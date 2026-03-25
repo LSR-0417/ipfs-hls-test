@@ -1976,6 +1976,7 @@ onBeforeUnmount(() => {
 
 .mobile-actions-menu {
   position: absolute;
+  isolation: isolate;
   top: calc(100% + 8px);
   right: 0;
   width: min(196px, calc(100vw - 18px));
@@ -1983,11 +1984,32 @@ onBeforeUnmount(() => {
   gap: 4px;
   padding: 6px;
   border-radius: 16px;
+  overflow: hidden;
+  background: rgba(8, 11, 20, 0.82);
+  backdrop-filter: blur(28px) saturate(135%);
+  -webkit-backdrop-filter: blur(28px) saturate(135%);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 20px 42px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
   z-index: 140;
+}
+
+.mobile-actions-menu::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(8, 12, 22, 0.96), rgba(8, 12, 22, 0.84)),
+    radial-gradient(circle at top right, rgba(0, 210, 255, 0.12), transparent 34%);
 }
 
 .mobile-actions-menu-item,
 .mobile-actions-locale-item {
+  position: relative;
+  z-index: 1;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -2007,12 +2029,12 @@ onBeforeUnmount(() => {
 .mobile-actions-menu-item:focus-visible,
 .mobile-actions-locale-item:hover,
 .mobile-actions-locale-item:focus-visible {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   outline: none;
 }
 
 .mobile-actions-locale-item.is-active {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .mobile-actions-menu-item-copy {
@@ -2032,7 +2054,7 @@ onBeforeUnmount(() => {
 .mobile-actions-menu-item-meta {
   font-size: 0.66rem;
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.48);
+  color: rgba(255, 255, 255, 0.62);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2246,6 +2268,8 @@ onBeforeUnmount(() => {
 }
 
 .gateway-dialog {
+  position: relative;
+  isolation: isolate;
   width: min(640px, calc(100vw - 48px));
   max-height: min(84dvh, 960px);
   display: grid;
@@ -2258,11 +2282,27 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
+.gateway-dialog::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(180deg, rgba(8, 12, 22, 0.96), rgba(8, 12, 22, 0.84)),
+    radial-gradient(circle at top center, rgba(255, 255, 255, 0.08), transparent 36%),
+    radial-gradient(circle at 82% 16%, rgba(0, 210, 255, 0.12), transparent 30%);
+  transition: opacity 0.2s ease;
+}
+
 .gateway-dialog:focus {
   outline: none;
 }
 
 .gateway-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
@@ -2307,6 +2347,8 @@ onBeforeUnmount(() => {
 }
 
 .gateway-dialog-body {
+  position: relative;
+  z-index: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2550,6 +2592,8 @@ onBeforeUnmount(() => {
 }
 
 .gateway-footer {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
@@ -2733,6 +2777,9 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .gateway-backdrop {
+    background: rgba(2, 4, 10, 0.9);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     align-items: flex-end;
     padding: 0;
   }
@@ -2741,11 +2788,24 @@ onBeforeUnmount(() => {
     width: 100%;
     max-height: min(92dvh, 100dvh);
     border-radius: 24px 24px 0 0;
+    background: rgba(9, 12, 22, 0.8);
+    backdrop-filter: blur(28px) saturate(135%);
+    -webkit-backdrop-filter: blur(28px) saturate(135%);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow:
+      0 -22px 52px rgba(0, 0, 0, 0.44),
+      0 -1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .gateway-dialog::before {
+    opacity: 1;
   }
 
   .gateway-header {
     align-items: flex-start;
     padding: 18px 16px 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(10, 14, 24, 0.18));
+    border-bottom-color: rgba(255, 255, 255, 0.12);
   }
 
   .gateway-header h3 {
@@ -2759,12 +2819,20 @@ onBeforeUnmount(() => {
   .gateway-dialog-body {
     padding: 14px 16px 18px;
     gap: 16px;
+    background: linear-gradient(180deg, rgba(8, 11, 20, 0.34), rgba(8, 11, 20, 0.5));
   }
 
   .gateway-option {
     grid-template-columns: auto 1fr;
     gap: 10px;
     padding: 14px 12px;
+    background: rgba(8, 11, 20, 0.62);
+    border-color: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 8px 18px rgba(0, 0, 0, 0.12);
   }
 
   .gateway-option-header {
@@ -2778,14 +2846,17 @@ onBeforeUnmount(() => {
 
   .gateway-status-text {
     font-size: 0.74rem;
+    color: rgba(245, 248, 255, 0.78);
   }
 
   .gateway-desc {
     font-size: 0.8rem;
+    color: rgba(232, 237, 255, 0.76);
   }
 
   .gateway-endpoint {
     font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.64);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2794,6 +2865,9 @@ onBeforeUnmount(() => {
   .gateway-footer {
     flex-direction: row;
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(12, 16, 28, 0.76), rgba(8, 12, 22, 0.94));
+    border-top-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.18);
   }
 
   .gateway-transition-note {

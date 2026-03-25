@@ -80,9 +80,16 @@ describe('Header search action button', () => {
     expect(style).toContain('.mobile-actions-menu');
     expect(style).toContain('.mobile-actions-locale-list');
     expect(style).toContain('max-width: 600px;\n  min-width: 0;');
+    expect(style).toContain('background: rgba(8, 11, 20, 0.82);');
+    expect(style).toContain('.mobile-actions-menu::before');
+    expect(style).toContain('color: rgba(255, 255, 255, 0.62);');
+    expect(style).toContain('.gateway-dialog::before');
     expect(style).toContain('@media (max-width: 640px)');
     expect(style).toContain('.actions-area {\n    display: none;');
     expect(style).toContain('.mobile-actions-shell {\n    display: flex;');
+    expect(style).toContain('backdrop-filter: blur(28px) saturate(135%);');
+    expect(style).toContain('background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(10, 14, 24, 0.18));');
+    expect(style).toContain('background: linear-gradient(180deg, rgba(12, 16, 28, 0.76), rgba(8, 12, 22, 0.94));');
   });
 });
 
