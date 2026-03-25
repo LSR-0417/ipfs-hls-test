@@ -123,13 +123,13 @@ describe('buildSubtitleManifestPayload', () => {
       buildSubtitleManifestPayload([
         {
           lang: 'zh-TW',
-          label: '繁體中文 (Local)',
+          label: '繁體中文',
           fileName: 'movie.zh-TW.vtt',
           order: 2,
         },
         {
           lang: 'en',
-          label: 'English (Local)',
+          label: 'English',
           path: 'movie.en.vtt',
           order: 1,
         },
@@ -141,8 +141,8 @@ describe('buildSubtitleManifestPayload', () => {
     ).toEqual({
       version: 1,
       tracks: [
-        { lang: 'en', label: 'English (Local)', path: 'movie.en.vtt', order: 1 },
-        { lang: 'zh-TW', label: '繁體中文 (Local)', path: 'movie.zh-TW.vtt', order: 2 },
+        { lang: 'en', label: 'English', path: 'movie.en.vtt', order: 1 },
+        { lang: 'zh-TW', label: '繁體中文', path: 'movie.zh-TW.vtt', order: 2 },
       ],
     });
   });
@@ -296,7 +296,7 @@ describe('createImportedSubtitleTrack', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         lang: 'zh-TW',
-        label: '繁體中文 (Local)',
+        label: '繁體中文',
         src: 'blob:subtitle-local',
         order: 4,
         source: 'local',
@@ -320,6 +320,25 @@ describe('createImportedSubtitleTrack', () => {
         { createObjectURL: vi.fn(), BlobImpl: FakeBlob }
       )
     ).rejects.toThrow('目前只支援 .vtt 與 .srt 字幕檔。');
+  });
+
+  it('maps common jp filename aliases to a readable Japanese label', async () => {
+    await expect(
+      createImportedSubtitleTrack(
+        {
+          name: 'movie.jp.vtt',
+          text: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nこんにちは\n',
+        },
+        {},
+        { createObjectURL: vi.fn().mockReturnValue('blob:subtitle-jp'), BlobImpl: FakeBlob }
+      )
+    ).resolves.toEqual(
+      expect.objectContaining({
+        lang: 'jp',
+        label: '日本語',
+        fileName: 'movie.jp.vtt',
+      })
+    );
   });
 });
 
@@ -351,7 +370,7 @@ describe('mergeSubtitleTracks', () => {
           {
             id: 'local:en',
             lang: 'en',
-            label: 'English (Local)',
+            label: 'English',
             src: 'blob:en',
             order: 0,
             source: 'local',
@@ -363,7 +382,7 @@ describe('mergeSubtitleTracks', () => {
       {
         id: 'local:en',
         lang: 'en',
-        label: 'English (Local)',
+        label: 'English',
         src: 'blob:en',
         order: 0,
         source: 'local',

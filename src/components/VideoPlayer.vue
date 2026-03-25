@@ -101,17 +101,23 @@
                     v-if="track.isPrimary"
                     class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--primary"
                     aria-hidden="true"
-                  ></span>
+                  >
+                    <SubtitleRoleIcon class="primary-subtitle-menu-item-icon-svg" variant="primary" />
+                  </span>
                   <span
                     v-if="track.isSecondary"
                     class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--secondary"
                     aria-hidden="true"
-                  ></span>
+                  >
+                    <SubtitleRoleIcon class="primary-subtitle-menu-item-icon-svg" variant="secondary" />
+                  </span>
                   <span
                     v-if="track.isLocal"
                     class="primary-subtitle-menu-item-meta-icon primary-subtitle-menu-item-meta-icon--local"
                     aria-hidden="true"
-                  ></span>
+                  >
+                    <SubtitleRoleIcon class="primary-subtitle-menu-item-icon-svg" variant="local" />
+                  </span>
                 </span>
               </span>
             </span>
@@ -177,6 +183,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+import SubtitleRoleIcon from './SubtitleRoleIcon.vue';
 import {
   fetchGatewayVariantPlaylists,
   gatewayProbePlaybackRateThreshold,
@@ -2920,68 +2927,30 @@ onBeforeUnmount(() => {
 }
 
 .primary-subtitle-menu-item-meta-icon {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 0.86rem;
-  height: 0.68rem;
+  width: 0.92rem;
+  height: 0.72rem;
   color: currentColor;
-  border: 1px solid currentColor;
-  border-radius: 0.18rem;
 }
 
-.primary-subtitle-menu-item-meta-icon--primary::before,
-.primary-subtitle-menu-item-meta-icon--secondary::before,
-.primary-subtitle-menu-item-meta-icon--secondary::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  background: currentColor;
+.primary-subtitle-menu-item-icon-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.primary-subtitle-menu-item-meta-icon--primary::before {
-  bottom: 0.12rem;
-  width: 0.54rem;
-  height: 0.11rem;
+.primary-subtitle-menu-item-meta-icon--primary {
+  opacity: 0.92;
 }
 
-.primary-subtitle-menu-item-meta-icon--secondary::before {
-  top: 0.12rem;
-  width: 0.52rem;
-  height: 0.09rem;
+.primary-subtitle-menu-item-meta-icon--secondary {
+  opacity: 0.88;
 }
 
-.primary-subtitle-menu-item-meta-icon--secondary::after {
-  top: 0.31rem;
-  width: 0.36rem;
-  height: 0.08rem;
-  opacity: 0.72;
-}
-
-.primary-subtitle-menu-item-meta-icon--local::before,
-.primary-subtitle-menu-item-meta-icon--local::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  background: currentColor;
-}
-
-.primary-subtitle-menu-item-meta-icon--local::before {
-  top: 0.12rem;
-  width: 0.24rem;
-  height: 0.24rem;
-  border-radius: 0.08rem;
-}
-
-.primary-subtitle-menu-item-meta-icon--local::after {
-  bottom: 0.08rem;
-  width: 0.46rem;
-  height: 0.1rem;
-  border-radius: 999px;
+.primary-subtitle-menu-item-meta-icon--local {
+  opacity: 0.82;
 }
 
 .primary-subtitle-menu-item-check {

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
+import SubtitleRoleIcon from './SubtitleRoleIcon.vue';
 import { createImportedSubtitleTrack, downloadSubtitleTrack, revokeImportedSubtitleTracks } from '../utils/subtitles';
 
 const props = defineProps({
@@ -41,10 +42,9 @@ const isImportingSubtitle = ref(false);
 const downloadingTrackKey = ref('');
 const subtitleStatusText = ref('');
 const subtitleStatusTone = ref('neutral');
-const activeLibraryTab = ref('download');
 
 const hasImportedSubtitles = computed(() => props.importedSubtitles.length > 0);
-const downloadableTracks = computed(() => props.subtitles);
+const visibleTracks = computed(() => props.subtitles);
 const currentPrimaryTrack = computed(() => findTrackByLanguage(props.subtitleSelection.primaryLang));
 const hasPrimarySubtitle = computed(() => Boolean(currentPrimaryTrack.value));
 const hasAvailableTracks = computed(() => props.subtitles.length > 0);
@@ -88,21 +88,6 @@ watch(
   }
 );
 
-watch(
-  () => [hasImportedSubtitles.value, hasAvailableTracks.value],
-  ([nextHasImported, nextHasAvailable]) => {
-    if (activeLibraryTab.value === 'imported' && !nextHasImported && nextHasAvailable) {
-      activeLibraryTab.value = 'download';
-      return;
-    }
-
-    if (activeLibraryTab.value === 'download' && !nextHasAvailable && nextHasImported) {
-      activeLibraryTab.value = 'imported';
-    }
-  },
-  { immediate: true }
-);
-
 function clearStatus() {
   subtitleStatusText.value = '';
   subtitleStatusTone.value = 'neutral';
@@ -123,10 +108,6 @@ function triggerSubtitlePicker() {
   }
 
   subtitleFileInputRef.value?.click();
-}
-
-function setLibraryTab(nextTab) {
-  activeLibraryTab.value = nextTab === 'imported' ? 'imported' : 'download';
 }
 
 function normalizeLocale(value) {
@@ -153,6 +134,15 @@ function isOverridingCidTrack(track) {
 
 function getTrackActionKey(track) {
   return `${track?.source || 'remote'}:${normalizeLocale(track?.lang) || 'und'}:${track?.fileName || track?.label || 'subtitle'}`;
+}
+
+function resolveTrackFileName(track) {
+  return track?.fileName || `${track?.lang || 'subtitle'}.vtt`;
+}
+
+function resolveTrackDisplayName(track) {
+  const label = track?.label || track?.lang || '字幕';
+  return `${label}(${resolveTrackFileName(track)})`;
 }
 
 function isTrackPrimary(track) {
@@ -325,7 +315,6 @@ async function handleSubtitleFileChange(event) {
 
     if (successfulTracks.length > 0) {
       emit('subtitle-import', successfulTracks);
-      activeLibraryTab.value = 'imported';
     }
 
     setStatus(formatImportStatus(successfulTracks, failedImports), successfulTracks.length > 0 ? 'success' : 'error');
@@ -446,52 +435,16 @@ async function handleDownloadSubtitle(track) {
         </p>
 
         <section class="subtitle-section subtitle-library-panel">
-            <div class="subtitle-section-header subtitle-library-header">
-              <div class="subtitle-section-copy">
-                <h4>字幕清單</h4>
-                <p class="subtitle-section-caption">用按鈕切換主 / 次字幕，外框會標示目前狀態。</p>
-              </div>
-              <div class="subtitle-library-tabs" role="tablist" aria-label="字幕清單分類" data-testid="subtitle-dialog-library-tabs">
-                <button
-                  type="button"
-                  class="subtitle-library-tab"
-                  :class="{ 'subtitle-library-tab--active': activeLibraryTab === 'imported' }"
-                  role="tab"
-                  :aria-selected="activeLibraryTab === 'imported' ? 'true' : 'false'"
-                  data-testid="subtitle-dialog-tab-imported"
-                  @click="setLibraryTab('imported')"
-                >
-                  本機
-                </button>
-                <button
-                  type="button"
-                  class="subtitle-library-tab"
-                  :class="{ 'subtitle-library-tab--active': activeLibraryTab === 'download' }"
-                  role="tab"
-                  :aria-selected="activeLibraryTab === 'download' ? 'true' : 'false'"
-                  data-testid="subtitle-dialog-tab-download"
-                  @click="setLibraryTab('download')"
-                >
-                  下載
-                </button>
-              </div>
-            </div>
+          <h4 class="subtitle-section-title">字幕清單</h4>
 
-            <p v-if="activeLibraryTab === 'imported'" class="subtitle-library-note">
-              本機字幕只保留在這次工作階段；同語系時會先覆蓋影片字幕顯示。
-            </p>
-            <p v-else class="subtitle-library-note">
-              直接下載目前播放器可見的字幕來源，包含影片字幕與本機字幕。
-            </p>
-
-            <ul
-              v-if="activeLibraryTab === 'imported' && hasImportedSubtitles"
-              class="subtitle-track-list"
-              data-testid="subtitle-dialog-imported-list"
-            >
+          <ul
+            v-if="hasAvailableTracks"
+            class="subtitle-track-list"
+            data-testid="subtitle-dialog-track-list"
+          >
               <li
-                v-for="track in importedSubtitles"
-                :key="track.id"
+                v-for="track in visibleTracks"
+                :key="getTrackActionKey(track)"
                 class="subtitle-track-row"
                 :class="{
                   'subtitle-track-row--primary': isTrackPrimary(track),
@@ -501,87 +454,16 @@ async function handleDownloadSubtitle(track) {
               >
                 <div class="subtitle-track-main">
                   <div class="subtitle-track-title-row">
-                    <span class="subtitle-track-title">{{ track.label }}</span>
-                    <span class="subtitle-track-file">{{ track.fileName }}</span>
-                    <div class="subtitle-track-badge-row">
-                      <span class="subtitle-badge subtitle-badge-local">本機</span>
-                      <span v-if="isOverridingCidTrack(track)" class="subtitle-badge subtitle-badge-muted">覆蓋影片字幕</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="subtitle-track-actions">
-                  <button
-                    type="button"
-                    class="glass-btn subtitle-row-btn subtitle-row-btn--icon"
-                    :class="{ 'subtitle-row-btn--selected': isTrackPrimary(track) }"
-                    :disabled="isPrimaryActionDisabled(track)"
-                    :aria-pressed="isTrackPrimary(track) ? 'true' : 'false'"
-                    :aria-label="getPrimaryActionLabel(track)"
-                    :title="getPrimaryActionLabel(track)"
-                    :data-testid="getPrimaryActionTestId(track)"
-                    @click="handleTrackPrimaryAction(track)"
-                  >
-                    <span class="subtitle-role-icon subtitle-role-icon--primary" aria-hidden="true"></span>
-                  </button>
-                  <button
-                    type="button"
-                    class="glass-btn subtitle-row-btn subtitle-row-btn--icon"
-                    :class="{ 'subtitle-row-btn--selected subtitle-row-btn--secondary': isTrackSecondary(track) }"
-                    :disabled="isSecondaryActionDisabled(track)"
-                    :aria-pressed="isTrackSecondary(track) ? 'true' : 'false'"
-                    :aria-label="getSecondaryActionLabel(track)"
-                    :title="getSecondaryActionLabel(track)"
-                    :data-testid="getSecondaryActionTestId(track)"
-                    @click="handleTrackSecondaryAction(track)"
-                  >
-                    <span class="subtitle-role-icon subtitle-role-icon--secondary" aria-hidden="true"></span>
-                  </button>
-                  <button
-                    type="button"
-                    class="glass-btn subtitle-row-btn subtitle-row-btn--icon subtitle-row-btn-danger"
-                    aria-label="移除字幕"
-                    title="移除字幕"
-                    :data-testid="`subtitle-dialog-remove-${track.lang}`"
-                    @click="handleRemoveImportedSubtitle(track)"
-                  >
-                    <svg class="subtitle-row-btn-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                      <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Z"/>
-                    </svg>
-                  </button>
-                </div>
-              </li>
-            </ul>
-
-            <p
-              v-else-if="activeLibraryTab === 'imported'"
-              class="subtitle-empty-state"
-              data-testid="subtitle-dialog-imported-empty"
-            >
-              先匯入第一條本機字幕，這裡就會開始顯示暫存中的字幕清單。
-            </p>
-
-            <ul
-              v-else-if="hasAvailableTracks"
-              class="subtitle-track-list"
-              data-testid="subtitle-dialog-download-list"
-            >
-              <li
-                v-for="track in downloadableTracks"
-                :key="`download-${getTrackActionKey(track)}`"
-                class="subtitle-track-row"
-                :class="{
-                  'subtitle-track-row--primary': isTrackPrimary(track),
-                  'subtitle-track-row--secondary': isTrackSecondary(track),
-                }"
-                :data-testid="getTrackRowTestId(track)"
-              >
-                <div class="subtitle-track-main">
-                  <div class="subtitle-track-title-row">
-                    <span class="subtitle-track-title">{{ track.label }}</span>
-                    <span class="subtitle-track-file">{{ track.fileName || `${track.lang}.vtt` }}</span>
+                    <span class="subtitle-track-title" :title="resolveTrackDisplayName(track)">
+                      {{ track.label }}
+                      <span class="subtitle-track-file">({{ resolveTrackFileName(track) }})</span>
+                    </span>
                     <div class="subtitle-track-badge-row">
                       <span v-if="track.source === 'local'" class="subtitle-badge subtitle-badge-local">本機</span>
                       <span v-else class="subtitle-badge subtitle-badge-muted">影片</span>
+                      <span v-if="track.source === 'local' && isOverridingCidTrack(track)" class="subtitle-badge subtitle-badge-muted">
+                        覆蓋影片字幕
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -597,7 +479,7 @@ async function handleDownloadSubtitle(track) {
                     :data-testid="getPrimaryActionTestId(track)"
                     @click="handleTrackPrimaryAction(track)"
                   >
-                    <span class="subtitle-role-icon subtitle-role-icon--primary" aria-hidden="true"></span>
+                    <SubtitleRoleIcon class="subtitle-role-icon subtitle-role-icon--primary" variant="primary" />
                   </button>
                   <button
                     type="button"
@@ -610,7 +492,7 @@ async function handleDownloadSubtitle(track) {
                     :data-testid="getSecondaryActionTestId(track)"
                     @click="handleTrackSecondaryAction(track)"
                   >
-                    <span class="subtitle-role-icon subtitle-role-icon--secondary" aria-hidden="true"></span>
+                    <SubtitleRoleIcon class="subtitle-role-icon subtitle-role-icon--secondary" variant="secondary" />
                   </button>
                   <button
                     type="button"
@@ -625,13 +507,26 @@ async function handleDownloadSubtitle(track) {
                       <path fill="currentColor" d="M12 3v9.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V3h1ZM5 19h14v2H5v-2Z"/>
                     </svg>
                   </button>
+                  <button
+                    v-if="track.source === 'local'"
+                    type="button"
+                    class="glass-btn subtitle-row-btn subtitle-row-btn--icon subtitle-row-btn-danger"
+                    aria-label="移除字幕"
+                    title="移除字幕"
+                    :data-testid="`subtitle-dialog-remove-${track.lang}`"
+                    @click="handleRemoveImportedSubtitle(track)"
+                  >
+                    <svg class="subtitle-row-btn-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Z"/>
+                    </svg>
+                  </button>
                 </div>
               </li>
-            </ul>
+          </ul>
 
-            <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-download-empty">
-              {{ selectionEmptyStateText }}
-            </p>
+          <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-empty">
+            {{ selectionEmptyStateText }}
+          </p>
         </section>
       </div>
     </section>
@@ -868,66 +763,11 @@ async function handleDownloadSubtitle(track) {
   min-height: 0;
 }
 
-.subtitle-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.subtitle-section-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.subtitle-section-copy h4 {
+.subtitle-section-title {
   margin: 0;
   color: var(--text-primary);
   font-size: 1rem;
   letter-spacing: -0.02em;
-}
-
-.subtitle-section-caption {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.87rem;
-  line-height: 1.45;
-}
-
-.subtitle-library-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.subtitle-library-tab {
-  min-height: 34px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.68);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-
-.subtitle-library-tab--active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-}
-
-.subtitle-library-note {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.55;
 }
 
 .subtitle-track-list {
@@ -1015,45 +855,10 @@ async function handleDownloadSubtitle(track) {
 }
 
 .subtitle-role-icon {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.86rem;
-  height: 0.68rem;
-  color: currentColor;
-  border: 1px solid currentColor;
-  border-radius: 0.18rem;
-}
-
-.subtitle-role-icon--primary::before,
-.subtitle-role-icon--secondary::before,
-.subtitle-role-icon--secondary::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.subtitle-role-icon--primary::before {
-  bottom: 0.12rem;
-  width: 0.54rem;
-  height: 0.11rem;
-}
-
-.subtitle-role-icon--secondary::before {
-  top: 0.12rem;
-  width: 0.52rem;
-  height: 0.09rem;
-}
-
-.subtitle-role-icon--secondary::after {
-  top: 0.31rem;
-  width: 0.36rem;
-  height: 0.08rem;
-  opacity: 0.72;
+  display: block;
+  width: 0.92rem;
+  height: 0.72rem;
+  flex: 0 0 auto;
 }
 
 .subtitle-track-title-row {
@@ -1077,13 +882,22 @@ async function handleDownloadSubtitle(track) {
 }
 
 .subtitle-track-file {
-  min-width: 0;
-  flex: 0 1 180px;
   color: var(--text-secondary);
   font-size: 0.82rem;
+  font-weight: 500;
+  margin-left: 0.08em;
+}
+
+.subtitle-track-title,
+.subtitle-track-file {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.subtitle-track-title .subtitle-track-file {
+  color: var(--text-secondary);
 }
 
 .subtitle-track-badge-row {
@@ -1219,14 +1033,6 @@ async function handleDownloadSubtitle(track) {
     width: 100%;
     justify-content: flex-end;
     flex-wrap: wrap;
-  }
-
-  .subtitle-library-tabs {
-    width: 100%;
-  }
-
-  .subtitle-library-tab {
-    flex: 1 1 0;
   }
 }
 </style>
