@@ -27,6 +27,7 @@ const subtitleLabelMap = Object.freeze({
   'zh-CN': '簡體中文',
   'zh-Hans': '簡體中文',
   ja: '日本語',
+  jp: '日本語',
   ko: '한국어',
   es: 'Español',
   fr: 'Français',
@@ -531,10 +532,10 @@ function defaultSubtitleLabel(lang) {
 
 function defaultImportedSubtitleLabel(lang, fileName) {
   if (lang && lang !== defaultImportedSubtitleLanguage) {
-    return `${defaultSubtitleLabel(lang)} (Local)`;
+    return defaultSubtitleLabel(lang);
   }
 
-  return stripFileExtension(fileName) || 'Local subtitle';
+  return stripFileExtension(fileName) || 'Subtitle';
 }
 
 function normalizeActiveSubtitleLanguages(subtitles, activeLanguages) {

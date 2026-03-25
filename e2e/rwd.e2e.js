@@ -283,9 +283,7 @@ test.describe('Responsive Video Actions', () => {
     const dialog = page.getByTestId('subtitle-dialog');
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId('subtitle-dialog-import-button')).toBeVisible();
-    await expect(page.getByTestId('subtitle-dialog-download-empty')).toContainText('你仍可匯入本機字幕');
-    await page.getByTestId('subtitle-dialog-tab-imported').click();
-    await expect(page.getByTestId('subtitle-dialog-imported-empty')).toContainText('先匯入第一條本機字幕');
+    await expect(page.getByTestId('subtitle-dialog-empty')).toContainText('你仍可匯入本機字幕');
 
     await page.getByTestId('subtitle-dialog-file-input').setInputFiles([
       {
@@ -301,11 +299,11 @@ test.describe('Responsive Video Actions', () => {
     ]);
 
     await expect(page.getByTestId('subtitle-dialog-status')).toContainText('已匯入 2 條字幕');
-    await page.getByTestId('subtitle-dialog-tab-imported').click();
-    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('English (Local)');
-    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('日本語 (Local)');
-    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.en.vtt');
-    await expect(page.getByTestId('subtitle-dialog-imported-list')).toContainText('episode.ja.vtt');
+    await expect(page.getByTestId('subtitle-dialog-track-list')).toContainText('English');
+    await expect(page.getByTestId('subtitle-dialog-track-list')).toContainText('日本語');
+    await expect(page.getByTestId('subtitle-dialog-track-list')).toContainText('episode.en.vtt');
+    await expect(page.getByTestId('subtitle-dialog-track-list')).toContainText('episode.ja.vtt');
+    await expect(page.getByTestId('subtitle-dialog-track-list')).toContainText('本機');
 
     const englishTrack = page.getByTestId('subtitle-dialog-track-local-en');
     const japaneseTrack = page.getByTestId('subtitle-dialog-track-local-ja');
@@ -315,12 +313,12 @@ test.describe('Responsive Video Actions', () => {
 
     await page.getByTestId('subtitle-dialog-secondary-action-local-ja').click();
 
-    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('次字幕已切換為 日本語 (Local)');
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('次字幕已切換為 日本語');
     await expect(japaneseTrack).toHaveClass(/subtitle-track-row--secondary/);
 
     await page.getByTestId('subtitle-dialog-primary-action-local-ja').click();
 
-    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('主字幕已切換為 日本語 (Local)');
+    await expect(page.getByTestId('subtitle-dialog-status')).toContainText('主字幕已切換為 日本語');
     await expect(japaneseTrack).toHaveClass(/subtitle-track-row--primary/);
     await expect(japaneseTrack).not.toHaveClass(/subtitle-track-row--secondary/);
     await expect(englishTrack).not.toHaveClass(/subtitle-track-row--primary/);
