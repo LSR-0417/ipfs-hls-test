@@ -174,7 +174,7 @@ function clearSecondarySubtitle() {
     primaryLang: props.subtitleSelection.primaryLang,
     secondaryLang: '',
   });
-  setStatus('已清除次要字幕。', 'success');
+  clearStatus();
 }
 
 function isPrimaryActionDisabled(track) {
@@ -201,7 +201,7 @@ function handleTrackPrimaryAction(track) {
     primaryLang: track.lang,
     secondaryLang: isTrackSecondary(track) ? '' : props.subtitleSelection.secondaryLang,
   });
-  setStatus(`主字幕已切換為 ${track.label || track.lang}`, 'success');
+  clearStatus();
 }
 
 function isSecondaryActionDisabled(track) {
@@ -251,7 +251,7 @@ function handleTrackSecondaryAction(track) {
     primaryLang: props.subtitleSelection.primaryLang,
     secondaryLang: track.lang,
   });
-  setStatus(`次字幕已切換為 ${track.label || track.lang}`, 'success');
+  clearStatus();
 }
 
 function upsertPendingImportedTrack(pendingTracks, nextTrack) {
@@ -434,14 +434,11 @@ async function handleDownloadSubtitle(track) {
           <span>{{ subtitleStatusText }}</span>
         </p>
 
-        <section class="subtitle-section subtitle-library-panel">
-          <h4 class="subtitle-section-title">字幕清單</h4>
-
-          <ul
-            v-if="hasAvailableTracks"
-            class="subtitle-track-list"
-            data-testid="subtitle-dialog-track-list"
-          >
+        <ul
+          v-if="hasAvailableTracks"
+          class="subtitle-track-list"
+          data-testid="subtitle-dialog-track-list"
+        >
               <li
                 v-for="track in visibleTracks"
                 :key="getTrackActionKey(track)"
@@ -452,19 +449,17 @@ async function handleDownloadSubtitle(track) {
                 }"
                 :data-testid="getTrackRowTestId(track)"
               >
-                <div class="subtitle-track-main">
-                  <div class="subtitle-track-title-row">
-                    <span class="subtitle-track-title" :title="resolveTrackDisplayName(track)">
-                      {{ track.label }}
-                      <span class="subtitle-track-file">({{ resolveTrackFileName(track) }})</span>
+                <div class="subtitle-track-title-row">
+                  <span class="subtitle-track-title" :title="resolveTrackDisplayName(track)">
+                    {{ track.label }}
+                    <span class="subtitle-track-file">({{ resolveTrackFileName(track) }})</span>
+                  </span>
+                  <div class="subtitle-track-badge-row">
+                    <span v-if="track.source === 'local'" class="subtitle-badge subtitle-badge-local">本機</span>
+                    <span v-else class="subtitle-badge subtitle-badge-muted">影片</span>
+                    <span v-if="track.source === 'local' && isOverridingCidTrack(track)" class="subtitle-badge subtitle-badge-muted">
+                      覆蓋影片字幕
                     </span>
-                    <div class="subtitle-track-badge-row">
-                      <span v-if="track.source === 'local'" class="subtitle-badge subtitle-badge-local">本機</span>
-                      <span v-else class="subtitle-badge subtitle-badge-muted">影片</span>
-                      <span v-if="track.source === 'local' && isOverridingCidTrack(track)" class="subtitle-badge subtitle-badge-muted">
-                        覆蓋影片字幕
-                      </span>
-                    </div>
                   </div>
                 </div>
                 <div class="subtitle-track-actions">
@@ -522,12 +517,11 @@ async function handleDownloadSubtitle(track) {
                   </button>
                 </div>
               </li>
-          </ul>
+        </ul>
 
-          <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-empty">
-            {{ selectionEmptyStateText }}
-          </p>
-        </section>
+        <p v-else class="subtitle-empty-state" data-testid="subtitle-dialog-empty">
+          {{ selectionEmptyStateText }}
+        </p>
       </div>
     </section>
   </div>
@@ -724,12 +718,16 @@ async function handleDownloadSubtitle(track) {
 
 .subtitle-status {
   margin: 0;
-  padding: 11px 13px;
-  border-radius: 14px;
-  font-size: 0.92rem;
-  display: flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
+  align-self: flex-start;
+  max-width: min(100%, 34rem);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .subtitle-status-success {
@@ -746,35 +744,12 @@ async function handleDownloadSubtitle(track) {
   flex: 0 0 auto;
 }
 
-.subtitle-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(10, 14, 22, 0.74);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-.subtitle-library-panel {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.subtitle-section-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1rem;
-  letter-spacing: -0.02em;
-}
-
 .subtitle-track-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
@@ -812,12 +787,6 @@ async function handleDownloadSubtitle(track) {
   border-color: rgba(212, 170, 104, 0.24);
   background: linear-gradient(180deg, rgba(120, 88, 34, 0.08), rgba(255, 255, 255, 0.02));
   box-shadow: inset 0 0 0 1px rgba(212, 170, 104, 0.12);
-}
-
-.subtitle-track-main {
-  min-width: 0;
-  display: flex;
-  align-items: center;
 }
 
 .subtitle-track-actions {
@@ -868,6 +837,7 @@ async function handleDownloadSubtitle(track) {
   min-width: 0;
   width: 100%;
   flex-wrap: nowrap;
+  align-self: stretch;
 }
 
 .subtitle-track-title {
@@ -965,19 +935,12 @@ async function handleDownloadSubtitle(track) {
 
 .subtitle-empty-state {
   margin: 0;
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px dashed rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.025);
+  justify-content: center;
   color: var(--text-secondary);
   line-height: 1.55;
 }
 
 @media (max-width: 900px) {
-  .subtitle-library-panel {
-    overflow: visible;
-  }
-
   .subtitle-track-list {
     overflow: visible;
   }
@@ -1015,10 +978,6 @@ async function handleDownloadSubtitle(track) {
   .subtitle-track-row {
     grid-template-columns: 1fr;
     align-items: stretch;
-  }
-
-  .subtitle-track-main {
-    align-items: flex-start;
   }
 
   .subtitle-track-title-row {
