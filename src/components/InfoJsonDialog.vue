@@ -85,15 +85,6 @@ const selectedProcessorResolutions = computed(() =>
   normalizeProcessorResolutionSelection(processorForm.selectedResolutions)
 );
 const hasSelectedProcessorResolutions = computed(() => selectedProcessorResolutions.value.length > 0);
-const effectiveIncludeInfoJson = computed(
-  () => hasGeneratedInfoJson.value && processorForm.includeInfoJson === true
-);
-const effectiveIncludeSubtitleManifest = computed(
-  () => hasSubtitleManifest.value && processorForm.includeSubtitlesJson === true
-);
-const processorAttachmentCount = computed(
-  () => Number(effectiveIncludeInfoJson.value) + Number(effectiveIncludeSubtitleManifest.value)
-);
 const videoProcessorStatus = computed(() => {
   if (!localVideoFile.value) {
     return {
@@ -114,18 +105,6 @@ const videoProcessorStatus = computed(() => {
     label: t('infoJson.video.ready'),
   };
 });
-const videoProcessorDraft = computed(() =>
-  buildLocalVideoProcessorDraft(localVideoFile.value, {
-    selectedResolutions: selectedProcessorResolutions.value,
-    includeInfoJson: effectiveIncludeInfoJson.value,
-    includeSubtitlesJson: effectiveIncludeSubtitleManifest.value,
-    infoFieldCount: generatedFieldCount.value,
-    subtitleTrackCount: subtitleTrackCount.value,
-  })
-);
-const videoProcessorDraftJson = computed(() =>
-  videoProcessorDraft.value ? `${JSON.stringify(videoProcessorDraft.value, null, 2)}\n` : ''
-);
 const footerStatus = computed(() => {
   if (feedbackMessage.value) {
     return feedbackMessage.value;
@@ -234,74 +213,6 @@ function describeLocalFile(file) {
     typeLabel: normalizeString(file.type) || t('infoJson.file.unknownType'),
     updatedAtLabel: formatTimestamp(file.lastModified),
   };
-}
-
-function buildLocalVideoProcessorDraft(file, options = {}) {
-  if (!file) {
-    return null;
-  }
-
-  const selectedResolutions = normalizeProcessorResolutionSelection(options.selectedResolutions);
-  const attachments = [];
-  const warnings = [];
-
-  if (options.includeInfoJson === true) {
-    attachments.push({
-      name: 'info.json',
-      content_type: 'application/json',
-      field_count: Number.isFinite(options.infoFieldCount) ? options.infoFieldCount : 0,
-    });
-  }
-
-  if (options.includeSubtitlesJson === true) {
-    attachments.push({
-      name: 'subtitles.json',
-      content_type: 'application/json',
-      track_count: Number.isFinite(options.subtitleTrackCount) ? options.subtitleTrackCount : 0,
-    });
-  }
-
-  if (selectedResolutions.length === 0) {
-    warnings.push('select_at_least_one_resolution');
-  }
-
-  if (attachments.length === 0) {
-    warnings.push('no_sidecar_attachment');
-  }
-
-  const draft = {
-    version: 1,
-    mode: 'local-upload-draft',
-    status: 'pending-backend-integration',
-    pipeline: 'multi-resolution-hls',
-    source_video: {
-      file_name: normalizeString(file.name) || 'video',
-      mime_type: normalizeString(file.type),
-      size_bytes: Number.isFinite(file.size) ? Math.max(0, file.size) : 0,
-      last_modified:
-        Number.isFinite(file.lastModified) && file.lastModified > 0
-          ? new Date(file.lastModified).toISOString()
-          : '',
-    },
-    processing_request: {
-      target_resolutions: selectedResolutions,
-      include_sidecars: {
-        info_json: options.includeInfoJson === true,
-        subtitles_json: options.includeSubtitlesJson === true,
-      },
-    },
-    attachments,
-    validation: {
-      has_video: true,
-      has_selected_resolutions: selectedResolutions.length > 0,
-    },
-  };
-
-  if (warnings.length > 0) {
-    draft.warnings = warnings;
-  }
-
-  return draft;
 }
 
 function normalizeString(value) {
@@ -634,96 +545,89 @@ function downloadSubtitleManifestFile() {
           aria-labelledby="infoJsonTab-metadata"
           data-testid="info-json-metadata-panel"
         >
-          <div class="panel-header">
-            <div class="panel-header-copy">
-              <div>
-                <h4>{{ t('infoJson.panels.metadata.title') }}</h4>
-                <p>{{ t('infoJson.panels.metadata.caption') }}</p>
-              </div>
-            </div>
+          <div class="panel-head">
+            <p class="panel-note">{{ t('infoJson.form.caption') }}</p>
             <button type="button" class="ghost-btn ghost-btn--small" @click="clearForm">
               {{ t('infoJson.actions.clear') }}
             </button>
           </div>
 
-          <div class="panel-surface panel-surface--form">
-            <div class="field-grid">
-              <label class="field field--span-2">
-                <span>{{ t('infoJson.fields.title.label') }}</span>
-                <input
-                  ref="titleInputRef"
-                  v-model="form.title"
-                  type="text"
-                  :placeholder="t('infoJson.fields.title.placeholder')"
-                />
-              </label>
+          <div class="field-grid">
+            <label class="field field--span-2">
+              <span>{{ t('infoJson.fields.title.label') }}</span>
+              <input
+                ref="titleInputRef"
+                v-model="form.title"
+                type="text"
+                :placeholder="t('infoJson.fields.title.placeholder')"
+              />
+            </label>
 
-              <label class="field">
-                <span>{{ t('infoJson.fields.uploader.label') }}</span>
-                <input
-                  v-model="form.uploader"
-                  type="text"
-                  :placeholder="t('infoJson.fields.uploader.placeholder')"
-                />
-              </label>
+            <label class="field">
+              <span>{{ t('infoJson.fields.uploader.label') }}</span>
+              <input
+                v-model="form.uploader"
+                type="text"
+                :placeholder="t('infoJson.fields.uploader.placeholder')"
+              />
+            </label>
 
-              <label class="field">
-                <span>{{ t('infoJson.fields.id.label') }}</span>
-                <input
-                  v-model="form.id"
-                  type="text"
-                  :placeholder="t('infoJson.fields.id.placeholder')"
-                />
-              </label>
+            <label class="field">
+              <span>{{ t('infoJson.fields.id.label') }}</span>
+              <input
+                v-model="form.id"
+                type="text"
+                :placeholder="t('infoJson.fields.id.placeholder')"
+              />
+            </label>
 
-              <label class="field">
-                <span>{{ t('infoJson.fields.channelId.label') }}</span>
-                <input
-                  v-model="form.channelId"
-                  type="text"
-                  :placeholder="t('infoJson.fields.channelId.placeholder')"
-                />
-              </label>
+            <label class="field">
+              <span>{{ t('infoJson.fields.channelId.label') }}</span>
+              <input
+                v-model="form.channelId"
+                type="text"
+                :placeholder="t('infoJson.fields.channelId.placeholder')"
+              />
+            </label>
 
-              <label class="field">
-                <span>{{ t('infoJson.fields.uploadDate.label') }}</span>
-                <input
-                  v-model="form.uploadDate"
-                  type="date"
-                />
-              </label>
+            <label class="field">
+              <span>{{ t('infoJson.fields.uploadDate.label') }}</span>
+              <input
+                v-model="form.uploadDate"
+                type="date"
+              />
+            </label>
 
-              <label class="field field--span-2">
-                <span>{{ t('infoJson.fields.description.label') }}</span>
-                <textarea
-                  v-model="form.description"
-                  rows="6"
-                  :placeholder="t('infoJson.fields.description.placeholder')"
-                ></textarea>
-              </label>
+            <label class="field field--span-2">
+              <span>{{ t('infoJson.fields.description.label') }}</span>
+              <textarea
+                v-model="form.description"
+                rows="6"
+                :placeholder="t('infoJson.fields.description.placeholder')"
+              ></textarea>
+            </label>
 
-              <label class="field field--span-2">
-                <span>{{ t('infoJson.fields.tags.label') }}</span>
-                <textarea
-                  v-model="form.tags"
-                  rows="3"
-                  :placeholder="t('infoJson.fields.tags.placeholder')"
-                ></textarea>
-                <small>{{ t('infoJson.fields.tags.hint') }}</small>
-              </label>
-            </div>
+            <label class="field field--span-2">
+              <span>{{ t('infoJson.fields.tags.label') }}</span>
+              <textarea
+                v-model="form.tags"
+                rows="3"
+                :placeholder="t('infoJson.fields.tags.placeholder')"
+              ></textarea>
+              <small>{{ t('infoJson.fields.tags.hint') }}</small>
+            </label>
+          </div>
 
-            <div class="panel-actions panel-actions--end">
-              <button
-                type="button"
-                class="primary-btn"
-                data-testid="info-json-download-info-button"
-                :disabled="!hasGeneratedInfoJson"
-                @click="downloadInfoJson"
-              >
-                {{ t('infoJson.actions.download') }}
-              </button>
-            </div>
+          <div class="panel-actions panel-actions--end">
+            <button
+              type="button"
+              class="primary-btn"
+              data-testid="info-json-download-info-button"
+              :disabled="!hasGeneratedInfoJson"
+              @click="downloadInfoJson"
+            >
+              {{ t('infoJson.actions.download') }}
+            </button>
           </div>
         </section>
 
@@ -735,29 +639,13 @@ function downloadSubtitleManifestFile() {
           aria-labelledby="infoJsonTab-subtitles"
           data-testid="info-json-subtitles-panel"
         >
-          <div class="panel-header">
-            <div class="panel-header-copy">
-              <div>
-                <h4>{{ t('infoJson.panels.subtitles.title') }}</h4>
-                <p>{{ t('infoJson.panels.subtitles.caption') }}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="ghost-btn ghost-btn--small"
-              :disabled="!hasSubtitleManifest"
-              @click="clearSubtitleTracks()"
-            >
-              {{ t('infoJson.actions.clearSubtitles') }}
-            </button>
-          </div>
-
-          <div class="asset-meta-banner">{{ t('infoJson.assets.localOnly') }}</div>
-
-          <div class="panel-surface panel-surface--toolbar">
-            <div class="surface-copy">
-              <h5>{{ t('infoJson.assets.subtitles.title') }}</h5>
-              <p>{{ t('infoJson.assets.subtitles.caption') }}</p>
+          <div class="panel-head panel-head--responsive">
+            <div class="panel-inline-meta">
+              <p class="panel-note">{{ t('infoJson.assets.subtitles.caption') }}</p>
+              <span class="meta-chip">{{ t('infoJson.assets.localOnly') }}</span>
+              <span v-if="hasSubtitleManifest" class="count-pill">
+                {{ t('infoJson.assets.subtitles.count', { count: subtitleTrackCount }) }}
+              </span>
             </div>
             <div class="panel-actions panel-actions--tight">
               <input
@@ -790,15 +678,18 @@ function downloadSubtitleManifestFile() {
               >
                 {{ t('infoJson.assets.subtitles.download') }}
               </button>
+              <button
+                type="button"
+                class="ghost-btn ghost-btn--small"
+                :disabled="!hasSubtitleManifest"
+                @click="clearSubtitleTracks()"
+              >
+                {{ t('infoJson.actions.clearSubtitles') }}
+              </button>
             </div>
           </div>
 
-          <div v-if="hasSubtitleManifest" class="panel-surface panel-surface--list">
-            <div class="panel-section-heading">
-              <h5>{{ t('infoJson.assets.subtitles.listTitle') }}</h5>
-              <span class="count-pill">{{ t('infoJson.assets.subtitles.count', { count: subtitleTrackCount }) }}</span>
-            </div>
-
+          <div v-if="hasSubtitleManifest">
             <div class="subtitle-track-list">
               <article v-for="track in localSubtitleTracks" :key="track.id" class="subtitle-track-item">
                 <div class="subtitle-track-copy">
@@ -825,27 +716,10 @@ function downloadSubtitleManifestFile() {
           aria-labelledby="infoJsonTab-video"
           data-testid="info-json-video-panel"
         >
-          <div class="panel-header">
-            <div class="panel-header-copy">
-              <div>
-                <h4>{{ t('infoJson.panels.video.title') }}</h4>
-                <p>{{ t('infoJson.panels.video.caption') }}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="ghost-btn ghost-btn--small"
-              :disabled="!localVideoFile"
-              @click="clearVideoFile()"
-            >
-              {{ t('infoJson.actions.clearVideo') }}
-            </button>
-          </div>
-
-          <div class="panel-surface panel-surface--toolbar">
-            <div class="surface-copy">
-              <h5>{{ t('infoJson.assets.video.title') }}</h5>
-              <p>{{ t('infoJson.assets.video.caption') }}</p>
+          <div class="panel-head panel-head--responsive">
+            <div class="panel-inline-meta">
+              <p class="panel-note">{{ t('infoJson.assets.video.caption') }}</p>
+              <span class="meta-chip">{{ t('infoJson.assets.localOnly') }}</span>
             </div>
             <div class="panel-actions panel-actions--tight">
               <input
@@ -864,12 +738,59 @@ function downloadSubtitleManifestFile() {
               >
                 {{ localVideoFile ? t('infoJson.assets.replace') : t('infoJson.assets.upload') }}
               </label>
+              <button
+                type="button"
+                class="ghost-btn ghost-btn--small"
+                :disabled="!localVideoFile"
+                @click="clearVideoFile()"
+              >
+                {{ t('infoJson.actions.clearVideo') }}
+              </button>
             </div>
           </div>
 
-          <div class="processor-section">
-            <div class="processor-section-header">
-              <h5>{{ t('infoJson.video.resolutionsTitle') }}</h5>
+          <div class="panel-block">
+            <div class="panel-block-head">
+              <h4>{{ t('infoJson.assets.video.title') }}</h4>
+              <span
+                class="status-pill"
+                :class="{
+                  'is-ready': videoProcessorStatus.tone === 'ready',
+                  'is-idle': videoProcessorStatus.tone === 'idle',
+                  'is-warning': videoProcessorStatus.tone === 'warning',
+                }"
+              >
+                {{ videoProcessorStatus.label }}
+              </span>
+            </div>
+
+            <dl v-if="localVideoFile && videoFileInfo" class="file-meta-list">
+              <div>
+                <dt>{{ t('infoJson.file.name') }}</dt>
+                <dd>{{ videoFileInfo.name }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('infoJson.file.size') }}</dt>
+                <dd>{{ videoFileInfo.sizeLabel }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('infoJson.file.type') }}</dt>
+                <dd>{{ videoFileInfo.typeLabel }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('infoJson.file.updatedAt') }}</dt>
+                <dd>{{ videoFileInfo.updatedAtLabel }}</dd>
+              </div>
+            </dl>
+
+            <div v-else class="empty-state empty-state--compact">
+              {{ t('infoJson.assets.video.empty') }}
+            </div>
+          </div>
+
+          <div class="panel-block">
+            <div class="panel-block-head panel-block-head--stack">
+              <h4>{{ t('infoJson.video.resolutionsTitle') }}</h4>
               <p>{{ t('infoJson.video.resolutionsCaption') }}</p>
             </div>
 
@@ -902,9 +823,9 @@ function downloadSubtitleManifestFile() {
             <small class="processor-footnote">{{ t('infoJson.video.resolutionsHint') }}</small>
           </div>
 
-          <div class="processor-section">
-            <div class="processor-section-header">
-              <h5>{{ t('infoJson.video.attachmentsTitle') }}</h5>
+          <div class="panel-block">
+            <div class="panel-block-head panel-block-head--stack">
+              <h4>{{ t('infoJson.video.attachmentsTitle') }}</h4>
               <p>{{ t('infoJson.video.attachmentsCaption') }}</p>
             </div>
 
@@ -946,82 +867,6 @@ function downloadSubtitleManifestFile() {
                   </small>
                 </span>
               </label>
-            </div>
-          </div>
-
-          <div class="asset-card">
-            <div class="asset-card-header">
-              <div>
-                <h5>{{ t('infoJson.assets.video.title') }}</h5>
-                <p class="asset-card-caption">{{ t('infoJson.assets.video.caption') }}</p>
-              </div>
-              <span
-                class="status-pill"
-                :class="{
-                  'is-ready': videoProcessorStatus.tone === 'ready',
-                  'is-idle': videoProcessorStatus.tone === 'idle',
-                  'is-warning': videoProcessorStatus.tone === 'warning',
-                }"
-              >
-                {{ videoProcessorStatus.label }}
-              </span>
-            </div>
-
-            <div v-if="localVideoFile && videoFileInfo" class="asset-card-content">
-              <dl class="file-meta-list">
-                <div>
-                  <dt>{{ t('infoJson.file.name') }}</dt>
-                  <dd>{{ videoFileInfo.name }}</dd>
-                </div>
-                <div>
-                  <dt>{{ t('infoJson.file.size') }}</dt>
-                  <dd>{{ videoFileInfo.sizeLabel }}</dd>
-                </div>
-                <div>
-                  <dt>{{ t('infoJson.file.type') }}</dt>
-                  <dd>{{ videoFileInfo.typeLabel }}</dd>
-                </div>
-                <div>
-                  <dt>{{ t('infoJson.file.updatedAt') }}</dt>
-                  <dd>{{ videoFileInfo.updatedAtLabel }}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div v-else class="empty-state empty-state--compact">
-              {{ t('infoJson.assets.video.empty') }}
-            </div>
-          </div>
-
-          <div class="preview-card">
-            <div class="panel-header panel-header--stacked">
-              <div>
-                <h4>{{ t('infoJson.video.draftTitle') }}</h4>
-                <p>{{ t('infoJson.video.draftCaption') }}</p>
-              </div>
-              <span class="preview-badge">{{ t('infoJson.video.draftBadge') }}</span>
-            </div>
-
-            <div v-if="videoProcessorDraftJson" class="preview-meta">
-              <span>
-                {{
-                  hasSelectedProcessorResolutions
-                    ? t('infoJson.video.selectedResolutions', { count: selectedProcessorResolutions.length })
-                    : t('infoJson.video.noResolutionSelected')
-                }}
-              </span>
-              <span>
-                {{
-                  processorAttachmentCount > 0
-                    ? t('infoJson.video.summaryAttachments', { count: processorAttachmentCount })
-                    : t('infoJson.video.summaryNoAttachments')
-                }}
-              </span>
-            </div>
-
-            <pre v-if="videoProcessorDraftJson" class="json-preview"><code>{{ videoProcessorDraftJson }}</code></pre>
-            <div v-else class="empty-state empty-state--preview">
-              {{ t('infoJson.assets.video.empty') }}
             </div>
           </div>
         </section>
@@ -1251,33 +1096,78 @@ function downloadSubtitleManifestFile() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
-.panel-header {
+.panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
 
-.panel-header-copy {
-  min-width: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.panel-header--stacked {
+.panel-head--responsive {
   align-items: center;
 }
 
-.panel-header h4,
-.asset-card-header h5,
-.processor-section-header h5 {
+.panel-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.panel-inline-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.12);
+  border: 1px solid rgba(255, 209, 102, 0.22);
+  color: rgba(255, 230, 185, 0.95);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.panel-block {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.015);
+}
+
+.panel-block-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.panel-block-head--stack {
+  display: grid;
+  justify-content: stretch;
+}
+
+.panel-block-head h4 {
   margin: 0;
   font-size: 1rem;
 }
 
-.panel-header p,
-.asset-card-caption,
-.processor-section-header p {
+.panel-block-head p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.84rem;
@@ -1343,77 +1233,6 @@ function downloadSubtitleManifestFile() {
   line-height: 1.45;
 }
 
-.asset-meta-banner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 209, 102, 0.12);
-  border: 1px solid rgba(255, 209, 102, 0.22);
-  color: rgba(255, 230, 185, 0.95);
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.panel-surface,
-.asset-card,
-.preview-card,
-.processor-section {
-  min-width: 0;
-  display: grid;
-  gap: 16px;
-  padding: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.02)),
-    rgba(255, 255, 255, 0.02);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.015);
-}
-
-.panel-surface--form {
-  gap: 18px;
-}
-
-.panel-surface--toolbar {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.panel-surface--list {
-  gap: 14px;
-}
-
-.surface-copy {
-  min-width: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.surface-copy h5,
-.panel-section-heading h5 {
-  margin: 0;
-  font-size: 0.95rem;
-}
-
-.surface-copy p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-
-.panel-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .count-pill {
   display: inline-flex;
   align-items: center;
@@ -1426,18 +1245,6 @@ function downloadSubtitleManifestFile() {
   font-size: 0.74rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-}
-
-.asset-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.asset-card-content {
-  display: grid;
-  gap: 16px;
 }
 
 .file-meta-list {
@@ -1500,11 +1307,6 @@ function downloadSubtitleManifestFile() {
   color: rgba(255, 255, 255, 0.62);
   font-size: 0.78rem;
   overflow-wrap: anywhere;
-}
-
-.processor-section-header {
-  display: grid;
-  gap: 6px;
 }
 
 .processor-resolution-grid {
@@ -1586,45 +1388,6 @@ function downloadSubtitleManifestFile() {
   border: 1px solid rgba(255, 209, 102, 0.24);
 }
 
-.preview-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(0, 210, 255, 0.12);
-  border: 1px solid rgba(0, 210, 255, 0.26);
-  color: rgba(180, 240, 255, 0.95);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.preview-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 0.78rem;
-  line-height: 1.45;
-}
-
-.json-preview {
-  min-height: 0;
-  margin: 0;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
-    rgba(4, 6, 12, 0.8);
-  padding: 18px;
-  overflow: auto;
-  color: #d7f7ff;
-  font-size: 0.84rem;
-  line-height: 1.6;
-}
-
 .empty-state {
   padding: 18px;
   border-radius: 16px;
@@ -1636,8 +1399,7 @@ function downloadSubtitleManifestFile() {
   text-align: center;
 }
 
-.empty-state--compact,
-.empty-state--preview {
+.empty-state--compact {
   padding: 16px;
 }
 
@@ -1738,10 +1500,6 @@ function downloadSubtitleManifestFile() {
     min-width: 144px;
   }
 
-  .panel-surface--toolbar {
-    grid-template-columns: 1fr;
-  }
-
   .processor-resolution-grid {
     grid-template-columns: 1fr;
   }
@@ -1773,15 +1531,13 @@ function downloadSubtitleManifestFile() {
     grid-template-columns: 1fr;
   }
 
-  .panel-header,
+  .panel-head,
   .info-json-footer,
-  .asset-card-header,
-  .panel-section-heading {
+  .panel-block-head {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .panel-surface--toolbar,
   .file-meta-list,
   .processor-toggle-list {
     grid-template-columns: 1fr;

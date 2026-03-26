@@ -51,20 +51,6 @@ export default Object.freeze({
   infoJson: {
     title: 'Organize video assets',
     subtitle: 'Fill in the video details, import subtitles, and choose processing options in one place. When everything looks right, you can download the sidecar files or include them with the video later.',
-    panels: {
-      metadata: {
-        title: 'Video Metadata',
-        caption: 'Add the title, description, and tags, then download info.json when it is ready.',
-      },
-      subtitles: {
-        title: 'Subtitle Metadata',
-        caption: 'Import subtitle files, organize the language list, and download subtitles.json when it is ready.',
-      },
-      video: {
-        title: 'Video Processing',
-        caption: 'Choose the source video, keep the renditions you want, and decide which sidecar files should travel with it.',
-      },
-    },
     tabs: {
       ariaLabel: 'Sidecar draft sections',
       metadata: {
@@ -78,26 +64,15 @@ export default Object.freeze({
       },
     },
     form: {
-      title: 'Video Metadata',
       caption: 'If a video is already loaded, the form opens prefilled with its metadata. You can also clear it and start from scratch.',
     },
     assets: {
-      title: 'Local Assets',
-      caption: 'Organize the avatar, subtitles, and source video in the browser first. Nothing is uploaded to the backend yet.',
       localOnly: 'Local session only',
-      none: 'No local assets selected yet',
       upload: 'Choose file',
       replace: 'Replace file',
       remove: 'Remove',
-      avatar: {
-        title: 'Avatar',
-        caption: 'Accepts image files and keeps a local avatar preview.',
-        previewAlt: 'Local avatar preview',
-      },
       subtitles: {
-        title: 'Subtitles',
         caption: 'Import multiple .vtt / .srt files at once, then download subtitles.json when the list looks right.',
-        listTitle: 'Imported subtitles',
         empty: 'No subtitles imported yet',
         count: '{count} subtitle tracks',
         uploadAction: 'Upload subtitles',
@@ -108,10 +83,6 @@ export default Object.freeze({
         title: 'Source Video',
         caption: 'Select the video you want to work with so the rest of the settings can stay together.',
         empty: 'No video selected yet',
-        draftTitle: 'Processing Summary',
-        draftCaption: 'Review the video and processing choices you have prepared so far.',
-        pending: 'Choose a video first',
-        ready: 'Settings ready',
       },
     },
     file: {
@@ -127,9 +98,6 @@ export default Object.freeze({
       ready: '{info} video details, {subtitles} subtitle tracks, and {assets} local assets are currently prepared',
       infoDownloaded: 'info.json downloaded',
       subtitleManifestDownloaded: 'subtitles.json downloaded',
-      avatarSelected: 'Avatar selected: {name}',
-      avatarRejected: 'Please choose an image file for the avatar',
-      avatarCleared: 'Avatar removed',
       subtitlesImported: '{count} local subtitle tracks imported',
       subtitlesPartial: '{count} subtitle tracks imported, and some files failed:',
       subtitlesFailed: 'Subtitle import failed',
@@ -137,16 +105,12 @@ export default Object.freeze({
       videoSelected: 'Video selected: {name}',
       videoRejected: 'Please choose a video file',
       videoCleared: 'Video draft removed',
-      localAssetsCleared: 'Local assets cleared',
     },
     actions: {
       clear: 'Clear Form',
-      clearAssets: 'Clear Local Assets',
       clearSubtitles: 'Clear Subtitles',
       clearVideo: 'Clear Video',
       close: 'Close',
-      previous: 'Back',
-      next: 'Next',
       download: 'Download info.json',
     },
     fields: {
@@ -196,11 +160,6 @@ export default Object.freeze({
       includeSubtitles: 'Attach subtitles.json',
       includeSubtitlesHintReady: 'The current subtitles.json draft from the subtitles tab will be attached.',
       includeSubtitlesHintUnavailable: 'Import subtitles first before attaching subtitles.json.',
-      draftTitle: 'Current Summary',
-      draftCaption: 'This section summarizes the video, renditions, and attached files you have selected.',
-      draftBadge: 'Current setup',
-      summaryAttachments: '{count} sidecars attached',
-      summaryNoAttachments: 'No sidecars attached this time',
       resolutionOptions: {
         '4k': {
           label: '4K',

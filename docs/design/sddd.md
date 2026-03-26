@@ -50,12 +50,13 @@
 
 - 由 Header action button 開啟
 - 分成 `影片資訊`、`字幕資訊`、`影片處理` 三個分頁
+- dialog header 只說明整體目的一次，分頁內容不再重複分頁標題
 - 若目前已有載入影片，metadata 表單會以目前 `currentVideoInfo` 作為初始值
-- metadata 分頁只保留 `下載 info.json` 按鈕，不顯示 inline JSON 預覽
+- metadata 分頁只保留預填說明、編輯欄位與 `下載 info.json` 按鈕，不顯示 inline JSON 預覽
 - metadata 分頁不提供 `categories` 編輯欄位
 - subtitles 分頁仍可生成與下載 `subtitles.json`，但不顯示 inline JSON 預覽
-- subtitles 分頁以單一按鈕作為字幕匯入入口，不再使用大面積 uploader 卡片
-- video 分頁仍保留本地影片摘要、解析度選擇與 sidecar 附加設定
+- subtitles 分頁以單一工作區整合匯入、下載、清單與 local-only 提示，不再使用大面積 uploader 卡片
+- video 分頁只保留來源影片資訊、解析度選擇與 sidecar 附加設定，不再顯示 JSON 預覽或重複摘要卡
 
 ### 2.3 VideoPlayer.vue
 
