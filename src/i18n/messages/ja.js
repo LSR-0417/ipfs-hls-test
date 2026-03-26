@@ -51,20 +51,6 @@ export default Object.freeze({
   infoJson: {
     title: '動画素材を整理',
     subtitle: '動画情報の入力、字幕の取り込み、処理設定までを 1 か所で進められます。準備ができたら sidecar ファイルをダウンロードしたり、あとで動画と一緒に使えます。',
-    panels: {
-      metadata: {
-        title: '動画メタデータ',
-        caption: 'タイトルや説明、タグを入力して、整ったら info.json をダウンロードします。',
-      },
-      subtitles: {
-        title: '字幕メタデータ',
-        caption: '字幕ファイルを取り込み、言語一覧を整えてから subtitles.json をダウンロードします。',
-      },
-      video: {
-        title: '動画処理',
-        caption: '元動画、残したい画質、いっしょに使う sidecar ファイルをまとめて選びます。',
-      },
-    },
     tabs: {
       ariaLabel: 'sidecar 下書きタブ',
       metadata: {
@@ -78,26 +64,15 @@ export default Object.freeze({
       },
     },
     form: {
-      title: '動画メタデータ',
       caption: '動画が読み込まれている場合は、その metadata を初期値として使用します。必要ならフォームを空にして最初から入力できます。',
     },
     assets: {
-      title: 'ローカル素材',
-      caption: 'avatar、字幕、元動画をまずブラウザ内で整理します。まだ backend にはアップロードしません。',
       localOnly: '現在のブラウザ session のみ',
-      none: 'まだローカル素材は選択されていません',
       upload: 'ファイルを選択',
       replace: '差し替え',
       remove: '削除',
-      avatar: {
-        title: 'アバター',
-        caption: '画像ファイルを選択して、ローカル avatar プレビューとして保持します。',
-        previewAlt: 'ローカル avatar プレビュー',
-      },
       subtitles: {
-        title: '字幕',
         caption: '複数の .vtt / .srt をまとめて取り込み、整ったら subtitles.json をダウンロードできます。',
-        listTitle: '取り込み済み字幕',
         empty: 'まだ字幕は取り込まれていません',
         count: '字幕 {count} 本',
         uploadAction: '字幕を追加',
@@ -108,10 +83,6 @@ export default Object.freeze({
         title: '元動画',
         caption: '先に動画を選んでおくと、このあとの設定をまとめて確認できます。',
         empty: 'まだ動画は選択されていません',
-        draftTitle: '処理設定のまとめ',
-        draftCaption: 'ここで、いま選んでいる動画と処理内容をまとめて確認できます。',
-        pending: 'まず動画を選択してください',
-        ready: '設定の準備ができました',
       },
     },
     file: {
@@ -127,9 +98,6 @@ export default Object.freeze({
       ready: '現在 {info} 件の動画情報、{subtitles} 本の字幕、{assets} 件のローカル素材を整理しています',
       infoDownloaded: 'info.json をダウンロードしました',
       subtitleManifestDownloaded: 'subtitles.json をダウンロードしました',
-      avatarSelected: 'アバターを選択しました: {name}',
-      avatarRejected: 'アバターには画像ファイルを選択してください',
-      avatarCleared: 'アバターを削除しました',
       subtitlesImported: '{count} 本のローカル字幕を取り込みました',
       subtitlesPartial: '{count} 本の字幕を取り込みましたが、一部のファイルは失敗しました:',
       subtitlesFailed: '字幕の取り込みに失敗しました',
@@ -137,16 +105,12 @@ export default Object.freeze({
       videoSelected: '動画を選択しました: {name}',
       videoRejected: '動画ファイルを選択してください',
       videoCleared: '動画ドラフトを削除しました',
-      localAssetsCleared: 'ローカル素材をクリアしました',
     },
     actions: {
       clear: 'フォームをクリア',
-      clearAssets: 'ローカル素材をクリア',
       clearSubtitles: '字幕をクリア',
       clearVideo: '動画をクリア',
       close: '閉じる',
-      previous: '戻る',
-      next: '次へ',
       download: 'info.json をダウンロード',
     },
     fields: {
@@ -196,11 +160,6 @@ export default Object.freeze({
       includeSubtitles: 'subtitles.json を添付',
       includeSubtitlesHintReady: '字幕タブで生成した subtitles.json を一緒に送ります。',
       includeSubtitlesHintUnavailable: '先に字幕を取り込んでから subtitles.json を添付してください。',
-      draftTitle: '現在の設定',
-      draftCaption: 'ここでは、選択中の動画、解像度、添付ファイルをまとめて確認できます。',
-      draftBadge: '現在の設定',
-      summaryAttachments: '{count} 個の sidecar を添付',
-      summaryNoAttachments: '今回は sidecar を添付しません',
       resolutionOptions: {
         '4k': {
           label: '4K',
