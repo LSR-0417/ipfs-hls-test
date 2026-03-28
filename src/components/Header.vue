@@ -4,13 +4,19 @@ import InfoJsonDialog from './InfoJsonDialog.vue';
 import LocalEnvironmentPanel from './LocalEnvironmentPanel.vue';
 import { useI18n } from '../i18n';
 import {
+  defaultLocalGatewayHost,
+  defaultLocalGatewayPort,
   isDisabledGatewayInput,
   isPrivateHostname,
   normalizeGatewayUrl,
+  normalizeLocalGatewayHost,
+  normalizeLocalGatewayPort,
   persistCustomGateway,
+  persistLocalGatewayConfig,
   probeGatewayAvailability,
   publicGatewayOptions,
   readStoredCustomGateway,
+  readStoredLocalGatewayConfig,
 } from '../utils/gateway';
 import {
   createEnvironmentCheckStateFromPayload,
@@ -25,7 +31,6 @@ import { createDefaultVideoInfo } from '../utils/videoInfo';
 const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
 const isDevMode = import.meta.env.DEV;
-const localStorageKey = 'ipfs-hls-local-gateway';
 const localEnvironmentApiStorageKey = 'ipfs-hls-local-environment-api';
 const localGatewayOption = {
   id: LOCAL_GATEWAY_ID,
@@ -79,6 +84,9 @@ const isMobileLocaleListOpen = ref(false);
 const isInfoJsonDialogOpen = ref(false);
 const lastFocusedGatewayTrigger = ref(null);
 const pendingGatewayFocusTarget = ref(null);
+const storedLocalHost = ref(defaultLocalGatewayHost);
+const storedLocalPort = ref(defaultLocalGatewayPort);
+const storedCustomGateway = ref('');
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
 const normalizedLocalEnvironmentHost = computed(() => normalizeLocalHost(localHost.value) || '127.0.0.1');
@@ -270,23 +278,56 @@ const selectedGatewayName = computed(() => {
   const selectedGateway = builtInGateways.find((gateway) => gateway.id === selectedGatewayId.value);
   return selectedGateway?.label || builtInGateways[0]?.label || 'Gateway';
 });
-const hasPendingGatewayChange = computed(() => {
+const isLocalGatewayDraftDefault = computed(
+  () =>
+    normalizeLocalGatewayHost(localHost.value) === defaultLocalGatewayHost &&
+    normalizeLocalGatewayPort(localPort.value) === defaultLocalGatewayPort
+);
+const hasPendingLocalGatewayReset = computed(
+  () =>
+    isDevMode &&
+    isLocalGatewayDraftDefault.value &&
+    (storedLocalHost.value !== defaultLocalGatewayHost || storedLocalPort.value !== defaultLocalGatewayPort)
+);
+const hasPendingCustomGatewayReset = computed(() => !customGatewayPreview.value && Boolean(storedCustomGateway.value));
+const hasPendingGatewaySelectionChange = computed(() => {
   const selected = selectedGatewayValue.value;
   const current = currentGatewayValue.value;
 
-  if (selected && selected !== current) return true;
+  if (!selected) return false;
+  if (selected !== current) return true;
 
   return selectedGatewayId.value !== currentGatewayId.value;
 });
+const hasPendingGatewayChange = computed(
+  () =>
+    hasPendingGatewaySelectionChange.value || hasPendingLocalGatewayReset.value || hasPendingCustomGatewayReset.value
+);
 const gatewayChangeSummary = computed(() => {
   if (!hasPendingGatewayChange.value) return '';
 
-  if (!currentGatewayValue.value) {
-    return `Use ${selectedGatewayName.value}`;
+  const messages = [];
+
+  if (hasPendingGatewaySelectionChange.value) {
+    if (!currentGatewayValue.value) {
+      messages.push(`Use ${selectedGatewayName.value}`);
+    } else {
+      messages.push(`Switch from ${currentGatewayName.value} to ${selectedGatewayName.value}`);
+    }
   }
 
-  return `Switch from ${currentGatewayName.value} to ${selectedGatewayName.value}`;
+  if (hasPendingLocalGatewayReset.value) {
+    messages.push('Restore Local Node defaults');
+  }
+
+  if (hasPendingCustomGatewayReset.value) {
+    messages.push('Restore Custom Gateway defaults');
+  }
+
+  return messages.join(' · ');
 });
+const canRestoreCustomGatewayDefaults = computed(() => Boolean(customGateway.value.trim()));
+const canRestoreLocalGatewayDefaults = computed(() => isDevMode && !isLocalGatewayDraftDefault.value);
 const currentGatewayKind = computed(() => {
   const current = currentGatewayValue.value;
   if (!current) return 'public';
@@ -554,11 +595,11 @@ function syncLocalFromGateway(urlStr) {
 }
 
 function normalizeLocalHost(value) {
-  return value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  return normalizeLocalGatewayHost(value);
 }
 
 function normalizeLocalPort(value) {
-  return normalizePort(value, '8080');
+  return normalizeLocalGatewayPort(value);
 }
 
 function normalizeEnvironmentApiPort(value) {
@@ -571,7 +612,6 @@ function normalizePort(value, fallback = '8080') {
     .replace(/[^0-9]/g, '');
   return digits || fallback;
 }
-
 function gatewayUrl(gateway) {
   return gateway.id === LOCAL_GATEWAY_ID ? localGatewayUrl.value : gateway.url;
 }
@@ -593,21 +633,63 @@ function openSettings() {
   closeMobileActionsMenu({ restoreFocus: false });
   closeInfoJsonDialog();
   if (isDevMode) {
-    restoreLocalGateway();
+    const storedLocalConfig = readStoredLocalGatewayConfig(window);
+    localHost.value = storedLocalConfig.host;
+    localPort.value = storedLocalConfig.port;
     syncLocalFromGateway(props.currentGateway);
   }
-  customGateway.value = readStoredCustomGateway(window) || customGateway.value;
+  customGateway.value = readStoredCustomGateway(window);
   if (isDisabledGatewayInput(customGateway.value)) {
     customGateway.value = '';
     persistCustomGateway('', window);
   }
   syncSelectionFromGateway(props.currentGateway);
+  captureStoredGatewayDrafts();
   gatewayError.value = '';
   settingsOpen.value = true;
 }
 
 function closeSettings() {
   settingsOpen.value = false;
+}
+
+function syncLocalGatewayDraftProbeState() {
+  if (!isDevMode) return;
+
+  const now = Date.now();
+  const cooldownUntil = readGatewayCooldown(localGatewayUrl.value);
+  gatewayProbeStates.value = {
+    ...gatewayProbeStates.value,
+    [LOCAL_GATEWAY_ID]:
+      currentCidValue.value && cooldownUntil > now ? createRateLimitedProbeState(cooldownUntil) : createIdleProbeState(),
+  };
+}
+
+function syncCustomGatewayDraftProbeState() {
+  const now = Date.now();
+  const cooldownUntil = readGatewayCooldown(customGatewayPreview.value);
+  gatewayProbeStates.value = {
+    ...gatewayProbeStates.value,
+    [CUSTOM_GATEWAY_ID]:
+      currentCidValue.value && cooldownUntil > now
+        ? createRateLimitedProbeState(cooldownUntil)
+        : createIdleProbeState(customGatewayPreview.value ? '等待檢查播放清單與媒體片段' : '輸入 HTTPS gateway 後可檢查'),
+  };
+}
+
+function restoreCustomGatewayDefaults() {
+  customGateway.value = '';
+  gatewayError.value = '';
+  syncCustomGatewayDraftProbeState();
+}
+
+function restoreLocalGatewayDefaults() {
+  if (!isDevMode) return;
+
+  localHost.value = defaultLocalGatewayHost;
+  localPort.value = defaultLocalGatewayPort;
+  gatewayError.value = '';
+  syncLocalGatewayDraftProbeState();
 }
 
 function openInfoJsonDialog() {
@@ -623,6 +705,48 @@ function closeInfoJsonDialog() {
 
 function applyGateway() {
   gatewayError.value = '';
+  const normalizedLocalHost = normalizeLocalGatewayHost(localHost.value);
+  const normalizedLocalPort = normalizeLocalGatewayPort(localPort.value);
+  const hasCustomDraftInput = customGateway.value.trim().length > 0;
+  const shouldPersistLocalReset = hasPendingLocalGatewayReset.value;
+  const shouldPersistCustomReset = hasPendingCustomGatewayReset.value;
+  const isSelectedCustomGateway = selectedGatewayId.value === CUSTOM_GATEWAY_ID;
+
+  if (isSelectedCustomGateway && isDisabledGatewayInput(customGateway.value)) {
+    gatewayError.value = 'Pinata gateway has been removed. Please choose another gateway.';
+    return;
+  }
+
+  const normalizedCustomGateway = hasCustomDraftInput ? normalizeGatewayUrl(customGateway.value) : '';
+  if (isSelectedCustomGateway && hasCustomDraftInput && !normalizedCustomGateway) {
+    gatewayError.value = 'Enter a valid public HTTPS gateway URL that ends with /ipfs/.';
+    return;
+  }
+
+  if (isSelectedCustomGateway && !normalizedCustomGateway) {
+    gatewayError.value = 'Choose another gateway or enter a valid custom gateway before applying.';
+    return;
+  }
+
+  if (isDevMode) {
+    localHost.value = normalizedLocalHost;
+    localPort.value = normalizedLocalPort;
+  }
+  customGateway.value = normalizedCustomGateway;
+
+  if (isDevMode && (selectedGatewayId.value === LOCAL_GATEWAY_ID || shouldPersistLocalReset)) {
+    persistLocalGatewayConfig(
+      {
+        host: normalizedLocalHost,
+        port: normalizedLocalPort,
+      },
+      window
+    );
+  }
+
+  if (selectedGatewayId.value === CUSTOM_GATEWAY_ID || shouldPersistCustomReset) {
+    persistCustomGateway(normalizedCustomGateway, window);
+  }
 
   let nextGateway = '';
 
@@ -631,28 +755,16 @@ function applyGateway() {
       selectedGatewayId.value = builtInGateways[0].id;
       nextGateway = gatewayUrl(builtInGateways[0]);
     } else {
-      localHost.value = normalizeLocalHost(localHost.value);
-      localPort.value = normalizeLocalPort(localPort.value);
       nextGateway = localGatewayUrl.value;
-      persistLocalGateway();
     }
   } else if (selectedGatewayId.value === CUSTOM_GATEWAY_ID) {
-    if (isDisabledGatewayInput(customGateway.value)) {
-      gatewayError.value = 'Pinata gateway has been removed. Please choose another gateway.';
-      return;
-    }
-    nextGateway = normalizeGatewayUrl(customGateway.value);
-    if (!nextGateway) {
-      gatewayError.value = 'Enter a valid public HTTPS gateway URL that ends with /ipfs/.';
-      return;
-    }
-    customGateway.value = nextGateway;
-    persistCustomGateway(nextGateway, window);
+    nextGateway = normalizedCustomGateway;
   } else {
     const selectedGateway = builtInGateways.find((gateway) => gateway.id === selectedGatewayId.value);
     nextGateway = selectedGateway ? gatewayUrl(selectedGateway) : gatewayUrl(builtInGateways[0]);
   }
 
+  captureStoredGatewayDrafts();
   emit('gateway-change', nextGateway);
   closeSettings();
 }
@@ -1031,16 +1143,13 @@ function clearGatewayCooldown(url) {
   gatewayCooldownUntilByUrl.value = nextCooldowns;
 }
 
-function persistLocalGateway() {
-  try {
-    const payload = {
-      host: localHost.value,
-      port: localPort.value,
-    };
-    localStorage.setItem(localStorageKey, JSON.stringify(payload));
-  } catch (_) {
-    // ignore storage errors
+function captureStoredGatewayDrafts() {
+  if (isDevMode) {
+    storedLocalHost.value = normalizeLocalGatewayHost(localHost.value);
+    storedLocalPort.value = normalizeLocalGatewayPort(localPort.value);
   }
+
+  storedCustomGateway.value = customGatewayPreview.value;
 }
 
 function persistLocalEnvironmentApi() {
@@ -1050,20 +1159,6 @@ function persistLocalEnvironmentApi() {
       port: localEnvironmentApiPort.value,
     };
     localStorage.setItem(localEnvironmentApiStorageKey, JSON.stringify(payload));
-  } catch (_) {
-    // ignore storage errors
-  }
-}
-
-function restoreLocalGateway() {
-  try {
-    const raw = localStorage.getItem(localStorageKey);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.host === 'string' && typeof parsed.port === 'string') {
-      localHost.value = parsed.host;
-      localPort.value = parsed.port;
-    }
   } catch (_) {
     // ignore storage errors
   }
@@ -1150,7 +1245,9 @@ onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown);
   document.addEventListener('keydown', handleDocumentKeydown);
   if (isDevMode) {
-    restoreLocalGateway();
+    const storedLocalConfig = readStoredLocalGatewayConfig(window);
+    localHost.value = storedLocalConfig.host;
+    localPort.value = storedLocalConfig.port;
     restoreLocalEnvironmentApi();
     localEnvironmentCheckState.value = createIdleEnvironmentCheckState({
       target: {
@@ -1168,6 +1265,7 @@ onMounted(() => {
     customGateway.value = '';
     persistCustomGateway('', window);
   }
+  captureStoredGatewayDrafts();
   resetGatewayProbeStates();
 });
 
@@ -1571,6 +1669,15 @@ onBeforeUnmount(() => {
               <h4>Custom Gateway</h4>
               <p class="gateway-section-caption">Public HTTPS gateway only.</p>
             </div>
+            <button
+              type="button"
+              class="ghost-btn gateway-reset-btn"
+              data-testid="gateway-custom-reset-button"
+              :disabled="!canRestoreCustomGatewayDefaults"
+              @click="restoreCustomGatewayDefaults"
+            >
+              {{ t('header.actions.gateway.restoreDefaults') }}
+            </button>
           </div>
 
           <div class="custom-config active">
@@ -1601,6 +1708,15 @@ onBeforeUnmount(() => {
               <h4>Local Node Settings</h4>
               <p class="gateway-section-caption">Only shown when the local gateway is selected.</p>
             </div>
+            <button
+              type="button"
+              class="ghost-btn gateway-reset-btn"
+              data-testid="gateway-local-reset-button"
+              :disabled="!canRestoreLocalGatewayDefaults"
+              @click="restoreLocalGatewayDefaults"
+            >
+              {{ t('header.actions.gateway.restoreDefaults') }}
+            </button>
           </div>
 
           <div class="local-config">
@@ -1647,7 +1763,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <div v-if="gatewayError" class="gateway-error" role="status" aria-live="assertive">
+        <div v-if="gatewayError" class="gateway-error" role="status" aria-live="assertive" data-testid="gateway-error">
           {{ gatewayError }}
         </div>
       </div>
@@ -2571,6 +2687,14 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.gateway-reset-btn {
+  min-width: auto;
+  min-height: 36px;
+  padding: 8px 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .gateway-list {
