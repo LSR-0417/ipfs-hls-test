@@ -452,6 +452,7 @@ test.describe('Custom Player Controls', () => {
 
     const controls = page.getByTestId('video-player-controls');
     const playToggle = page.getByTestId('video-player-play-toggle');
+    const shell = page.locator('.video-player-shell');
     const playerBox = await getBox(page.getByTestId('player-container'));
 
     await expect(controls).toHaveAttribute('data-controls-visible', 'true');
@@ -459,6 +460,7 @@ test.describe('Custom Player Controls', () => {
 
     await mockPlayerActivity(page, { isPlaying: true, isUserActive: false });
     await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+    expect(await shell.evaluate((node) => window.getComputedStyle(node).cursor)).not.toBe('none');
 
     await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
     await expect(controls).toHaveAttribute('data-controls-visible', 'true');
@@ -632,6 +634,7 @@ test.describe('Custom Player Controls', () => {
 
     const controls = page.getByTestId('video-player-controls');
     const fullscreenToggle = page.getByTestId('video-player-fullscreen-toggle');
+    const shell = page.locator('.video-player-shell');
 
     await fullscreenToggle.click();
 
@@ -645,9 +648,27 @@ test.describe('Custom Player Controls', () => {
 
     await mockPlayerActivity(page, { isPlaying: true, isUserActive: false });
     await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+    expect(await shell.evaluate((node) => window.getComputedStyle(node).cursor)).toBe('none');
 
     await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
     await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+    expect(await shell.evaluate((node) => window.getComputedStyle(node).cursor)).not.toBe('none');
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: '?',
+          code: 'Slash',
+          shiftKey: true,
+          bubbles: true,
+        })
+      );
+    });
+    await expect(page.getByTestId('video-player-hotkey-help-dialog')).toBeVisible();
+
+    await mockPlayerActivity(page, { isPlaying: true, isUserActive: false });
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+    expect(await shell.evaluate((node) => window.getComputedStyle(node).cursor)).not.toBe('none');
   });
 });
 

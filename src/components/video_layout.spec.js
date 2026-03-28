@@ -294,7 +294,7 @@ describe('VideoPlayer custom control layer contract', () => {
     expect(style).toContain('.compact-settings-panel');
     expect(style).toContain('.quality-menu');
     expect(style).toContain('.quality-menu-item');
-    expect(style).toContain('.video-player-shell--controls-idle');
+    expect(style).toContain('.video-player-shell--fullscreen-idle');
     expect(style).toContain('.video-player-shell :deep(.vjs-control-bar)');
     expect(style).toContain('display: none !important;');
   });

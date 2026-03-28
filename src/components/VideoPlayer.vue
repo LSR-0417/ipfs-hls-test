@@ -1341,6 +1341,7 @@ const showBigPlayOverlay = computed(
 const isControlBarHidden = computed(() => isControlSurfaceEnabled.value && !isCustomControlLayerVisible.value);
 const playerShellClasses = computed(() => ({
   'video-player-shell--controls-idle': isControlBarHidden.value,
+  'video-player-shell--fullscreen-idle': isPlayerFullscreen.value && isControlBarHidden.value,
 }));
 const qualityMenuItems = computed(() =>
   [...availableQualityLevels.value]
@@ -5304,11 +5305,9 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .video-player-shell--controls-idle,
-  .video-player-shell--controls-idle :deep(.video-js),
-  .video-player-shell--controls-idle .video-js,
-  .video-player-shell--controls-idle video {
-    cursor: none;
+  .video-player-shell--fullscreen-idle,
+  .video-player-shell--fullscreen-idle * {
+    cursor: none !important;
   }
 }
 
