@@ -21,6 +21,10 @@ const props = defineProps({
   cid: { type: String, default: '' },
   avatarUrl: { type: String, default: '' },
   ipfsBaseUrl: { type: String, default: '' },
+  isSaved: {
+    type: Boolean,
+    default: false,
+  },
   subtitles: {
     type: Array,
     default: () => [],
@@ -51,7 +55,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['subtitle-import', 'subtitle-remove', 'subtitle-selection-change']);
+const emit = defineEmits(['save-current-video', 'subtitle-import', 'subtitle-remove', 'subtitle-selection-change']);
 
 const shareDialogRef = ref(null);
 const shareUrlInputRef = ref(null);
@@ -74,6 +78,7 @@ const creatorTextMeasureRef = ref(null);
 const subscribeButtonRef = ref(null);
 const actionsRef = ref(null);
 const actionGroupRef = ref(null);
+const saveMeasureRef = ref(null);
 const shareMeasureRef = ref(null);
 const moreMenuRef = ref(null);
 const hiddenActionIds = ref([]);
@@ -86,11 +91,12 @@ let syncInProgress = false;
 let syncPending = false;
 let shareCopySuccessTimeout = 0;
 
+const saveActionId = 'save';
 const shareActionId = 'share';
 const subtitleActionId = 'subtitles';
 const downloadActionId = 'download';
-const responsiveActionOrder = [shareActionId];
-const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];
+const responsiveActionOrder = [saveActionId, shareActionId];
+const overflowActionOrder = [saveActionId, shareActionId, subtitleActionId, downloadActionId];
 
 const displayUploader = computed(() => props.videoInfo.uploader || 'IPFS Node');
 const displayChannelText = computed(() => {
@@ -119,6 +125,9 @@ const displayUploadDateTooltip = computed(() => formatUploadDateTooltip(props.vi
 const displayRelativeUploadTime = computed(() => {
   return formatRelativeUploadTime(props.videoInfo.uploadDate) || formatUploadDate(props.videoInfo.uploadDate);
 });
+const saveButtonLabel = computed(() => (props.isSaved ? 'Saved' : 'Save'));
+const saveButtonTitle = computed(() => (props.isSaved ? 'Remove from saved' : 'Save video'));
+const showSaveButton = computed(() => !hiddenActionIds.value.includes(saveActionId));
 const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));
 const downloadUrl = computed(() => buildSidecarAssetUrl(props.ipfsBaseUrl, 'index.m3u8'));
 const shareTimeLabel = computed(() => formatShareStartTime(sharePlaybackTime.value));
@@ -132,7 +141,7 @@ const overflowMenuItems = computed(() => {
     )
     .map((actionId) => ({
       id: actionId,
-      label: actionId === shareActionId ? '分享' : actionId === subtitleActionId ? '字幕' : '下載',
+      label: resolveOverflowActionLabel(actionId),
       disabled: actionId === downloadActionId && !downloadUrl.value,
     }));
 });
@@ -194,7 +203,7 @@ watch(
   { immediate: true }
 );
 
-watch([displayUploader, displayChannelText], () => {
+watch([displayUploader, displayChannelText, () => props.isSaved], () => {
   scheduleActionLayoutSync();
 });
 
@@ -259,6 +268,10 @@ function areActionIdsEqual(currentIds, nextIds) {
   return currentIds.every((id, index) => id === nextIds[index]);
 }
 
+function getResponsiveActionWidth(actionId, widthsByActionId) {
+  return widthsByActionId[actionId] || 0;
+}
+
 function resolveLayout() {
   const infoRowWidth = getElementWidth(infoRowRef.value);
   const creatorWidth = getElementWidth(creatorInfoRef.value);
@@ -269,9 +282,14 @@ function resolveLayout() {
   const creatorGap = getFlexGap(creatorInfoRef.value);
   const actionGroupWidth = getElementWidth(actionGroupRef.value);
   const moreActionsWidth = getElementWidth(moreMenuRef.value);
+  const saveWidth = getElementWidth(saveMeasureRef.value);
   const shareWidth = getElementWidth(shareMeasureRef.value);
   const infoGap = getFlexGap(infoRowRef.value);
   const actionsGap = getFlexGap(actionsRef.value);
+  const actionWidthsById = {
+    [saveActionId]: saveWidth,
+    [shareActionId]: shareWidth,
+  };
 
   if (!infoRowWidth || !creatorWidth || !actionGroupWidth || !moreActionsWidth) {
     return {
@@ -296,7 +314,7 @@ function resolveLayout() {
   const nextHiddenActionIds = [];
 
   for (const actionId of responsiveActionOrder) {
-    const actionWidth = actionId === shareActionId ? shareWidth : 0;
+    const actionWidth = getResponsiveActionWidth(actionId, actionWidthsById);
     const nextVisibleWidths = [...visibleActionWidths, actionWidth, moreActionsWidth];
 
     if (sumWidthsWithGap(nextVisibleWidths, actionsGap) <= availableActionsWidth + 1) {
@@ -310,7 +328,7 @@ function resolveLayout() {
   let totalVisibleWidth = actionGroupWidth;
   for (const actionId of responsiveActionOrder) {
     if (!nextHiddenActionIds.includes(actionId)) {
-      totalVisibleWidth += actionsGap + (actionId === shareActionId ? shareWidth : 0);
+      totalVisibleWidth += actionsGap + getResponsiveActionWidth(actionId, actionWidthsById);
     }
   }
   // The 'more' menu is always present because 'download' is always in the overflow menu
@@ -409,8 +427,29 @@ function downloadCurrentVideo() {
   document.body.removeChild(link);
 }
 
+function resolveOverflowActionLabel(actionId) {
+  if (actionId === saveActionId) {
+    return props.isSaved ? 'Remove' : saveButtonLabel.value;
+  }
+
+  if (actionId === shareActionId) {
+    return '分享';
+  }
+
+  if (actionId === subtitleActionId) {
+    return '字幕';
+  }
+
+  return '下載';
+}
+
 function handleOverflowAction(actionId) {
   closeMoreMenu();
+
+  if (actionId === saveActionId) {
+    handleSaveCurrentVideo();
+    return;
+  }
 
   if (actionId === shareActionId) {
     openShareDialog();
@@ -462,6 +501,14 @@ function openSubtitleDialog() {
   closeMoreMenu();
   closeShareDialog();
   isSubtitleDialogOpen.value = true;
+}
+
+function handleSaveCurrentVideo() {
+  if (!props.cid) {
+    return;
+  }
+
+  emit('save-current-video');
 }
 
 function handleSubtitleImport(importedTrack) {
@@ -762,10 +809,29 @@ onBeforeUnmount(() => {
           <button type="button" class="dislike-btn" title="Dislike" data-testid="video-info-dislike-button"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg></button>
         </div>
 
+        <div ref="saveMeasureRef" class="glass-btn action-btn action-measure" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+          <span class="btn-text">{{ saveButtonLabel }}</span>
+        </div>
+
         <div ref="shareMeasureRef" class="glass-btn action-btn action-measure" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
           <span class="btn-text">Share</span>
         </div>
+
+        <button
+          v-if="showSaveButton"
+          type="button"
+          class="glass-btn action-btn"
+          :class="{ 'is-active': props.isSaved }"
+          data-action-item
+          data-testid="video-info-save-button"
+          @click="handleSaveCurrentVideo"
+          :title="saveButtonTitle"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+          <span class="btn-text">{{ saveButtonLabel }}</span>
+        </button>
 
         <button
           v-if="showShareButton"
@@ -802,15 +868,16 @@ onBeforeUnmount(() => {
               type="button"
               class="action-menu-item"
               role="menuitem"
-              :disabled="item.disabled"
-              :data-testid="`video-info-overflow-item-${item.id}`"
-              @click="handleOverflowAction(item.id)"
-            >
-              <svg v-if="item.id === shareActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
-              <svg v-else-if="item.id === subtitleActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 5h16v10H7.17L4 18.17V5zm2 2v6.34L6.34 13H18V7H6zm2 1h8v2H8V8zm0 3h5v2H8v-2z"/></svg>
-              <svg v-else class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 6.83V16h2V6.83l3.09 3.08 1.41-1.41L12 2z"/></svg>
-              <span class="menu-item-label">{{ item.label }}</span>
-            </button>
+            :disabled="item.disabled"
+            :data-testid="`video-info-overflow-item-${item.id}`"
+            @click="handleOverflowAction(item.id)"
+          >
+            <svg v-if="item.id === saveActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+            <svg v-else-if="item.id === shareActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+            <svg v-else-if="item.id === subtitleActionId" class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 5h16v10H7.17L4 18.17V5zm2 2v6.34L6.34 13H18V7H6zm2 1h8v2H8V8zm0 3h5v2H8v-2z"/></svg>
+            <svg v-else class="menu-item-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 6.83V16h2V6.83l3.09 3.08 1.41-1.41L12 2z"/></svg>
+            <span class="menu-item-label">{{ item.label }}</span>
+          </button>
           </div>
         </div>
       </div>
@@ -1143,6 +1210,11 @@ onBeforeUnmount(() => {
 .action-btn,
 .overflow-trigger {
   white-space: nowrap;
+}
+
+.action-btn.is-active {
+  border-color: rgba(255, 213, 89, 0.32);
+  color: #ffe082;
 }
 
 .action-measure {

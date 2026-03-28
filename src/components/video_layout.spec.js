@@ -12,17 +12,21 @@ function getFirstStyleContent(descriptor) {
 }
 
 describe('App layout contract', () => {
-  it('renders watch with a conditional series playlist side panel and no longer uses the old status message slot', () => {
+  it('renders saved and history collection views alongside watch with a conditional series playlist side panel', () => {
     const descriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
     const appStyle = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
+    const historyPageIndex = template.indexOf('<HistoryPage');
+    const savedPageIndex = template.indexOf('<SavedVideosPage');
     const watchPageIndex = template.indexOf('<WatchPage');
     const seriesPlaylistIndex = template.indexOf('<SeriesPlaylistPage');
     const recommendationsPageIndex = template.indexOf('<RecommendationsPage v-else />');
 
     expect(template).toContain('<main class="main-content" data-testid="main-content">');
+    expect(historyPageIndex).toBeGreaterThan(-1);
+    expect(savedPageIndex).toBeGreaterThan(historyPageIndex);
     expect(watchPageIndex).toBeGreaterThan(-1);
     expect(seriesPlaylistIndex).toBeGreaterThan(watchPageIndex);
     expect(recommendationsPageIndex).toBeGreaterThan(seriesPlaylistIndex);
@@ -31,12 +35,16 @@ describe('App layout contract', () => {
     expect(template).not.toContain('data-testid="primary-column"');
     expect(template).not.toContain('data-testid="secondary-column"');
     expect(template).not.toContain('data-testid="page-shell"');
+    expect(template).toContain("v-else-if=\"activeView === 'saved'\"");
     expect(template).toContain('@gateway-fallback-request="onGatewayFallbackRequest"');
     expect(template).toContain('v-if="shouldShowSeriesPlaylist"');
     expect(template).toContain('@select="selectSeriesEpisode"');
     expect(script).toContain('defaultPublicGateway');
+    expect(script).toContain("import SavedVideosPage from './components/SavedVideosPage.vue';");
     expect(script).toContain("import SeriesPlaylistPage from './components/SeriesPlaylistPage.vue';");
+    expect(script).toContain("const isCurrentVideoSaved = computed(() => Boolean(findSavedEntry(currentCid.value)));");
     expect(script).toContain("const shouldShowSeriesPlaylist = computed(() => ['series', 'series-error'].includes(currentSourceMode.value));");
+    expect(script).toContain('function onSaveCurrentVideo() {');
     expect(script).toContain('function selectSeriesEpisode(episode) {');
     expect(script).toContain('function onGatewayFallbackRequest(payload = {}) {');
     expect(appStyle).toContain('.main-content');
@@ -133,11 +141,14 @@ describe('WatchPage layout contract', () => {
     expect(template).toContain('@playback-snapshot="handlePlaybackSnapshot"');
     expect(template).toContain(':remote-subtitles="remoteSubtitles"');
     expect(template).toContain(':imported-subtitles="importedSubtitles"');
+    expect(template).toContain(':is-saved="isSaved"');
+    expect(template).toContain('@save-current-video="handleSaveCurrentVideo"');
     expect(template).toContain('@subtitle-import="handleSubtitleImport"');
     expect(template).toContain('@subtitle-remove="handleSubtitleRemove"');
     expect(script).toContain("function handleGatewayFallbackRequest(payload) {");
     expect(template).toContain('@subtitle-selection-change="handleSubtitleSelectionChange"');
     expect(script).toContain("function handlePlaybackSnapshot(snapshot) {");
+    expect(script).toContain("function handleSaveCurrentVideo() {");
     expect(script).toContain("function handleSubtitleImport(importedTrack) {");
     expect(script).toContain("function handleSubtitleRemove(trackId) {");
     expect(script).toContain("function handleSubtitleSelectionChange(nextSelection) {");
@@ -434,6 +445,37 @@ describe('HistoryPage status contract', () => {
   });
 });
 
+describe('SavedVideosPage layout contract', () => {
+  it('renders a manual saved list with local-only messaging and remove actions', () => {
+    const descriptor = readDescriptor(new URL('./SavedVideosPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<section class="saved-page" data-testid="saved-page">');
+    expect(template).toContain('data-testid="saved-empty"');
+    expect(template).toContain('data-testid="saved-list"');
+    expect(template).toContain(':data-testid="`saved-item-${item.cid}`"');
+    expect(template).toContain('class="saved-status-badge"');
+    expect(template).toContain('class="saved-open-label"');
+    expect(template).toContain('你手動儲存的影片會保留在本機列表');
+    expect(template).toContain('@click="handleSelect(item)"');
+    expect(template).toContain('@click="handleRemove(item.cid)"');
+
+    expect(script).toContain("const emit = defineEmits(['select', 'remove']);");
+    expect(script).toContain('savedAtLabel: formatSavedAt(item.savedAt)');
+    expect(script).toContain('function formatSavedAt(value) {');
+    expect(script).toContain("return '剛剛儲存';");
+
+    expect(style).toContain('.saved-page');
+    expect(style).toContain('.saved-list');
+    expect(style).toContain('.saved-item');
+    expect(style).toContain('.saved-thumb');
+    expect(style).toContain('.saved-status-badge');
+    expect(style).toContain('.saved-remove');
+  });
+});
+
 describe('RecommendationsPage layout contract', () => {
   it('keeps the recommendations list inside its own page container', () => {
     const descriptor = readDescriptor(new URL('./RecommendationsPage.vue', import.meta.url));
@@ -516,7 +558,7 @@ describe('VideoInfo layout contract', () => {
     expect(script).toContain("{ label: 'Channel ID', value: props.videoInfo.channelId }");
   });
 
-  it('moves download into an overflow menu and lets share collapse before like or dislike', () => {
+  it('keeps save and share in the responsive action row while leaving download in the overflow menu', () => {
     const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
     const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
@@ -525,14 +567,25 @@ describe('VideoInfo layout contract', () => {
     expect(template).toContain('<div ref="moreMenuRef" class="more-actions" data-action-item data-testid="video-info-more-actions">');
     expect(template).toContain('class="actions-menu glass-panel" role="menu"');
     expect(template).toContain('v-for="item in overflowMenuItems"');
+    expect(template).toContain('data-testid="video-info-save-button"');
+    expect(template).toContain(':data-testid="`video-info-overflow-item-${item.id}`"');
+    expect(template).toContain('ref="saveMeasureRef"');
     expect(template).toContain("v-if=\"showShareButton\"");
+    expect(template).toContain("v-if=\"showSaveButton\"");
     expect(template).toContain('class="action-group glass-btn" data-action-item');
+    expect(template).toContain('item.id === saveActionId');
     expect(template).toContain('item.id === subtitleActionId');
     expect(template).toContain('<SubtitleDialog');
 
-    expect(script).toContain("const responsiveActionOrder = [shareActionId];");
-    expect(script).toContain("const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];");
+    expect(script).toContain("const saveActionId = 'save';");
+    expect(script).toContain("const responsiveActionOrder = [saveActionId, shareActionId];");
+    expect(script).toContain("const overflowActionOrder = [saveActionId, shareActionId, subtitleActionId, downloadActionId];");
+    expect(script).toContain("const saveButtonLabel = computed(() => (props.isSaved ? 'Saved' : 'Save'));");
+    expect(script).toContain("const showSaveButton = computed(() => !hiddenActionIds.value.includes(saveActionId));");
     expect(script).toContain("const showShareButton = computed(() => !hiddenActionIds.value.includes(shareActionId));");
+    expect(script).toContain('function getResponsiveActionWidth(actionId, widthsByActionId) {');
+    expect(script).toContain('function resolveOverflowActionLabel(actionId) {');
+    expect(script).toContain("emit('save-current-video');");
     expect(script).toContain('function resolveLayout()');
     expect(script).toContain('const nextCreatorTextHidden = fullCreatorWidth > infoRowWidth + 1;');
     expect(script).toContain('const nextCreatorWidth = nextCreatorTextHidden ? compactCreatorWidth : fullCreatorWidth;');
@@ -604,12 +657,11 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('.creator-info-compact .subscribe-btn');
   });
 
-  it('places dynamically collapsed items at the top of the overflow menu (e.g. share before download)', () => {
+  it('places dynamically collapsed items at the top of the overflow menu (save, then share, before subtitle or download)', () => {
     const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
     const script = descriptor.scriptSetup?.content || '';
 
-    // Verify the overflow action order array places share before subtitles and download
-    expect(script).toContain("const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];");
+    expect(script).toContain("const overflowActionOrder = [saveActionId, shareActionId, subtitleActionId, downloadActionId];");
   });
 
   it('collapses the description by default and exposes explicit expand and collapse controls', () => {
