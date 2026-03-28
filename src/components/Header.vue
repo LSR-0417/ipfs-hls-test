@@ -37,7 +37,7 @@ const props = defineProps({
   },
   sidebarOpen: { type: Boolean, default: false },
 });
-const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);
+const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar', 'home-click']);
 const { availableLocales, locale, setLocale, t } = useI18n();
 
 const searchQuery = ref('');
@@ -390,6 +390,14 @@ async function clearSearchQuery() {
 
 function toggleSidebar() {
   emit('toggle-sidebar');
+}
+
+function onLogoClick() {
+  closeLocaleMenu({ restoreFocus: false });
+  closeMobileActionsMenu({ restoreFocus: false });
+  closeSettings();
+  closeInfoJsonDialog();
+  emit('home-click');
 }
 
 function toggleLocaleMenu() {
@@ -1053,10 +1061,17 @@ onBeforeUnmount(() => {
       >
         <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
       </button>
-      <div class="logo">
+      <button
+        type="button"
+        class="logo"
+        :aria-label="t('sidebar.menu.home')"
+        :title="t('sidebar.menu.home')"
+        data-testid="header-home-button"
+        @click="onLogoClick"
+      >
         <span class="logo-icon">▲</span>
         <span class="logo-text">Astra<span class="neon-text">Stream</span></span>
-      </div>
+      </button>
     </div>
 
     <div class="search-area" data-testid="header-search-area">
@@ -1552,6 +1567,24 @@ onBeforeUnmount(() => {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: 0.5px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.logo:hover,
+.logo:focus-visible {
+  background: var(--interactive-hover);
+}
+
+.logo:focus-visible {
+  outline: none;
 }
 
 .logo-icon {

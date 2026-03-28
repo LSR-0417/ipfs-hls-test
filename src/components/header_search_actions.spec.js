@@ -18,6 +18,10 @@ describe('Header search action button', () => {
     const script = descriptor.scriptSetup?.content || '';
     const style = getStyleContent(descriptor);
 
+    expect(template).toContain('data-testid="header-home-button"');
+    expect(template).toContain('@click="onLogoClick"');
+    expect(template).toContain(":aria-label=\"t('sidebar.menu.home')\"");
+    expect(template).toContain(":title=\"t('sidebar.menu.home')\"");
     expect(template).toContain('ref="searchInputRef"');
     expect(template).toContain('@keyup.enter="onSearch"');
     expect(template).toContain('class="search-actions"');
@@ -46,6 +50,7 @@ describe('Header search action button', () => {
     expect(script).toContain("import InfoJsonDialog from './InfoJsonDialog.vue';");
     expect(script).toContain("import { useI18n } from '../i18n';");
     expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
+    expect(script).toContain("const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar', 'home-click']);");
     expect(script).toContain('const searchInputRef = ref(null);');
     expect(script).toContain('const isSearchQueryEmpty = computed(() => searchQuery.value.trim().length === 0);');
     expect(script).toContain('const shouldCompact = window.innerWidth <= 640;');
@@ -54,6 +59,8 @@ describe('Header search action button', () => {
     expect(script).toContain('const isInfoJsonDialogOpen = ref(false);');
     expect(script).toContain('function focusSearchInput() {');
     expect(script).toContain('async function clearSearchQuery() {');
+    expect(script).toContain('function onLogoClick() {');
+    expect(script).toContain("emit('home-click');");
     expect(script).toContain('function toggleLocaleMenu() {');
     expect(script).toContain('function toggleMobileActionsMenu() {');
     expect(script).toContain('function closeMobileActionsMenu(options = {}) {');
@@ -75,6 +82,8 @@ describe('Header search action button', () => {
     expect(style).toContain('.locale-action-shell');
     expect(style).toContain('.locale-btn');
     expect(style).toContain('.locale-menu');
+    expect(style).toContain('.logo:hover,');
+    expect(style).toContain('.logo:focus-visible {');
     expect(style).toContain('.info-json-btn');
     expect(style).toContain('.mobile-actions-shell');
     expect(style).toContain('.mobile-actions-menu');
@@ -116,13 +125,15 @@ describe('Sidebar toggle contract', () => {
     expect(appTemplate).toContain('class="sidebar-backdrop"');
     expect(appTemplate).toContain('data-testid="sidebar-backdrop"');
     expect(appTemplate).toContain(':sidebar-open="isSidebarOpen"');
+    expect(appTemplate).toContain("@home-click=\"onViewSelect('home')\"");
     expect(appTemplate).toContain('@toggle-sidebar="toggleSidebar"');
     expect(appTemplate).toContain('<Sidebar :active-view="activeView" :open="isSidebarOpen" @view-select="onViewSelect" />');
 
     expect(headerScript).toContain("sidebarOpen: { type: Boolean, default: false },");
-    expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar']);");
+    expect(headerScript).toContain("const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar', 'home-click']);");
     expect(headerScript).toContain('function toggleSidebar() {');
     expect(headerTemplate).toContain('aria-controls="app-sidebar"');
+    expect(headerTemplate).toContain('data-testid="header-home-button"');
     expect(headerTemplate).toContain('data-testid="header-sidebar-toggle"');
     expect(headerTemplate).toContain('@click="toggleSidebar"');
     expect(headerTemplate).toContain(":aria-expanded=\"sidebarOpen ? 'true' : 'false'\"");
