@@ -43,11 +43,13 @@ describe('Header search action button', () => {
     expect(template).toContain('data-testid="header-mobile-actions-menu"');
     expect(template).toContain('data-testid="header-mobile-language-button"');
     expect(template).toContain('data-testid="header-mobile-gateway-button"');
+    expect(template).toContain('<LocalEnvironmentPanel');
     expect(template).toContain('data-testid="info-json-button"');
     expect(template).toContain('data-testid="header-mobile-info-json-button"');
     expect(template).toContain('<InfoJsonDialog');
 
     expect(script).toContain("import InfoJsonDialog from './InfoJsonDialog.vue';");
+    expect(script).toContain("import LocalEnvironmentPanel from './LocalEnvironmentPanel.vue';");
     expect(script).toContain("import { useI18n } from '../i18n';");
     expect(script).toContain("const { availableLocales, locale, setLocale, t } = useI18n();");
     expect(script).toContain("const emit = defineEmits(['search', 'gateway-change', 'gateway-candidates-change', 'toggle-sidebar', 'home-click']);");
@@ -57,6 +59,11 @@ describe('Header search action button', () => {
     expect(script).toContain('const isMobileActionsMenuOpen = ref(false);');
     expect(script).toContain('const isMobileLocaleListOpen = ref(false);');
     expect(script).toContain('const isInfoJsonDialogOpen = ref(false);');
+    expect(script).toContain('const localEnvironmentCheckState = ref(createIdleEnvironmentCheckState());');
+    expect(script).toContain('const isLocalEnvironmentCheckRunning = ref(false);');
+    expect(script).toContain("const localEnvironmentApiHost = ref('');");
+    expect(script).toContain("const localEnvironmentApiPort = ref('');");
+    expect(script).toContain('const localEnvironmentApiBase = computed(() =>');
     expect(script).toContain('function focusSearchInput() {');
     expect(script).toContain('async function clearSearchQuery() {');
     expect(script).toContain('function onLogoClick() {');
@@ -69,6 +76,12 @@ describe('Header search action button', () => {
     expect(script).toContain('function changeLocale(nextLocale) {');
     expect(script).toContain('function openInfoJsonDialog() {');
     expect(script).toContain('function closeInfoJsonDialog() {');
+    expect(script).toContain('async function runLocalEnvironmentCheck() {');
+    expect(script).toContain('function persistLocalEnvironmentApi() {');
+    expect(script).toContain('function restoreLocalEnvironmentApi() {');
+    expect(script).toContain('function triggerLocalEnvironmentCheck() {');
+    expect(script).toContain('function updateLocalEnvironmentApiHost(value) {');
+    expect(script).toContain('function updateLocalEnvironmentApiPort(value) {');
     expect(script).toContain("searchQuery.value = '';");
     expect(script).toContain('await nextTick();');
     expect(script).toContain('focusSearchInput();');

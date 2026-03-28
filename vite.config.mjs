@@ -28,6 +28,12 @@ const worktreeName = path.basename(worktreeRoot);
 export default defineConfig({
   server: {
     host: true, // Listen on all local IPs
+    proxy: {
+      '/api': {
+        target: process.env.ENV_CHECK_PROXY_TARGET || 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+    },
   },
   plugins: [vue()],
   define: {
