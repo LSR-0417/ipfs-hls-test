@@ -192,7 +192,7 @@ export default Object.freeze({
     menu: {
       home: '首頁',
       explore: '探索',
-      library: '媒體庫',
+      library: '已儲存',
       history: '觀看紀錄',
     },
     build: {

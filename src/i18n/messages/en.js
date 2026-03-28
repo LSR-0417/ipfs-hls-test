@@ -192,7 +192,7 @@ export default Object.freeze({
     menu: {
       home: 'Home',
       explore: 'Explore',
-      library: 'Library',
+      library: 'Saved',
       history: 'History',
     },
     build: {

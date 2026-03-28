@@ -682,6 +682,7 @@ test.describe('Responsive Video Actions', () => {
     await expect(actions).not.toHaveClass(/actions-wrapped/);
     await expect(page.getByTestId('video-info-like-button')).toBeVisible();
     await expect(page.getByTestId('video-info-dislike-button')).toBeVisible();
+    await expect(page.getByTestId('video-info-save-button')).toBeVisible();
     await expect(page.getByTestId('video-info-share-button')).toBeVisible();
     await expect(page.getByTestId('video-info-creator-text')).toBeVisible();
 
@@ -691,6 +692,7 @@ test.describe('Responsive Video Actions', () => {
     await page.getByTestId('video-info-overflow-trigger').click();
     await expect(page.getByTestId('video-info-overflow-menu')).toBeVisible();
     await expect(page.getByTestId('video-info-overflow-item-download')).toBeVisible();
+    await expect(page.getByTestId('video-info-overflow-item-save')).toHaveCount(0);
     await expect(page.getByTestId('video-info-overflow-item-share')).toHaveCount(0);
   });
 
@@ -703,6 +705,7 @@ test.describe('Responsive Video Actions', () => {
     await expect(actions).toHaveClass(/actions-wrapped/);
     await expect(page.getByTestId('video-info-like-button')).toBeVisible();
     await expect(page.getByTestId('video-info-dislike-button')).toBeVisible();
+    await expect(page.getByTestId('video-info-save-button')).toHaveCount(0);
     await expect(page.getByTestId('video-info-share-button')).toHaveCount(0);
     await expect(page.getByTestId('video-info-creator-text')).toBeVisible();
     await expect(page.getByTestId('video-info-follow-button')).toBeVisible();
@@ -716,6 +719,7 @@ test.describe('Responsive Video Actions', () => {
 
     await page.getByTestId('video-info-overflow-trigger').click();
     await expect(page.getByTestId('video-info-overflow-menu')).toBeVisible();
+    await expect(page.getByTestId('video-info-overflow-item-save')).toBeVisible();
     await expect(page.getByTestId('video-info-overflow-item-share')).toBeVisible();
     await expect(page.getByTestId('video-info-overflow-item-download')).toBeVisible();
   });

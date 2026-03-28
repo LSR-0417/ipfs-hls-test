@@ -60,6 +60,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  isSaved: {
+    type: Boolean,
+    default: false,
+  },
   videoInfo: {
     type: Object,
     default: () => createDefaultVideoInfo(),
@@ -71,6 +75,7 @@ const emit = defineEmits([
   'gateway-fallback-request',
   'levels-loaded',
   'playback-snapshot',
+  'save-current-video',
   'subtitle-import',
   'subtitle-remove',
   'subtitle-selection-change',
@@ -90,6 +95,10 @@ function handleLevelsLoaded(levels) {
 
 function handlePlaybackSnapshot(snapshot) {
   emit('playback-snapshot', snapshot);
+}
+
+function handleSaveCurrentVideo() {
+  emit('save-current-video');
 }
 
 function handleSubtitleImport(importedTrack) {
@@ -131,12 +140,14 @@ function handleSubtitleSelectionChange(nextSelection) {
       :cid="cid"
       :avatar-url="avatarUrl"
       :ipfs-base-url="ipfsBaseUrl"
+      :is-saved="isSaved"
       :subtitles="subtitles"
       :subtitle-selection="subtitleSelection"
       :remote-subtitle-status="remoteSubtitleStatus"
       :video-info="videoInfo"
       :remote-subtitles="remoteSubtitles"
       :imported-subtitles="importedSubtitles"
+      @save-current-video="handleSaveCurrentVideo"
       @subtitle-import="handleSubtitleImport"
       @subtitle-remove="handleSubtitleRemove"
       @subtitle-selection-change="handleSubtitleSelectionChange"

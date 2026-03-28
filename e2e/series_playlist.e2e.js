@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
+const gatewayStorageKey = 'ipfs-hls-selected-gateway';
 const historyStorageKey = 'ipfs-hls-watch-history';
+const savedStorageKey = 'ipfs-hls-saved-videos';
 const localGatewayBase = 'http://127.0.0.1:8080/ipfs/';
 const tinyPosterPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
@@ -100,7 +102,7 @@ function buildSeriesRoutesFromEpisodes(seriesCid, episodes = [], title = 'Demo S
   return routeMap;
 }
 
-function buildSingleRoutes(singleCid) {
+function buildSingleRoutes(singleCid, overrides = {}) {
   return {
     [`${localGatewayBase}${singleCid}/playlist.json`]: {
       status: 404,
@@ -123,9 +125,9 @@ function buildSingleRoutes(singleCid) {
     [`${localGatewayBase}${singleCid}/info.json`]: {
       contentType: 'application/json',
       body: JSON.stringify({
-        title: 'Standalone Episode',
-        uploader: 'Single Team',
-        duration_string: '00:05',
+        title: overrides.title || 'Standalone Episode',
+        uploader: overrides.uploader || 'Single Team',
+        duration_string: overrides.durationString || '00:05',
       }),
     },
     [`${localGatewayBase}${singleCid}/subtitles.json`]: {
@@ -171,6 +173,12 @@ async function openApp(page, url) {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('app-header')).toBeVisible();
   await expect(page.getByTestId('main-content')).toBeVisible();
+}
+
+async function openSavedVideos(page) {
+  await page.getByTestId('header-sidebar-toggle').click();
+  await page.getByTestId('sidebar-item-library').click();
+  await expect(page.getByTestId('saved-page')).toBeVisible();
 }
 
 test.describe('Series playlist flow', () => {
@@ -272,5 +280,119 @@ test.describe('Series playlist flow', () => {
     await expect(page.getByTestId('series-playlist-item-ep05')).toHaveClass(/is-selected/);
     await expect(page.getByTestId('series-playlist-item-ep05')).toContainText('Series Episode 5');
     await expect(page.getByTestId('series-playlist-item-ep05')).not.toContainText('Wrong Sidecar Title 5');
+  });
+
+  test('keeps saved videos ordered by manual save time and lets the watch button toggle removal', async ({ page }) => {
+    const firstCid = 'bafy-save-first';
+    const secondCid = 'bafy-save-second';
+
+    await mountMockGateway(page, {
+      ...buildSingleRoutes(firstCid, {
+        title: 'Saved Video One',
+        uploader: 'Saved Team One',
+        durationString: '00:11',
+      }),
+      ...buildSingleRoutes(secondCid, {
+        title: 'Saved Video Two',
+        uploader: 'Saved Team Two',
+        durationString: '00:22',
+      }),
+    });
+    await page.addInitScript(({ historyKey, savedKey, gatewayKey, gatewayUrl, resetMarker }) => {
+      if (!window.sessionStorage.getItem(resetMarker)) {
+        window.localStorage.removeItem(historyKey);
+        window.localStorage.removeItem(savedKey);
+        window.sessionStorage.setItem(resetMarker, '1');
+      }
+
+      window.localStorage.setItem(gatewayKey, gatewayUrl);
+    }, {
+      historyKey: historyStorageKey,
+      savedKey: savedStorageKey,
+      gatewayKey: gatewayStorageKey,
+      gatewayUrl: localGatewayBase,
+      resetMarker: 'series-playlist-saved-videos-reset',
+    });
+    await page.setViewportSize({ width: 1366, height: 900 });
+
+    await openApp(page, `./?cid=${firstCid}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Saved Video One');
+    await page.getByTestId('video-info-save-button').click();
+    await expect(page.getByTestId('video-info-save-button')).toHaveClass(/is-active/);
+
+    await openApp(page, `./?cid=${secondCid}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Saved Video Two');
+    await page.getByTestId('video-info-save-button').click();
+    await expect(page.getByTestId('video-info-save-button')).toHaveClass(/is-active/);
+
+    await openSavedVideos(page);
+    await expect(page.locator('[data-testid^="saved-item-"]')).toHaveCount(2);
+
+    const savedBeforeRemoval = await page.locator('[data-testid^="saved-item-"]').evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-testid'))
+    );
+    expect(savedBeforeRemoval).toEqual([`saved-item-${secondCid}`, `saved-item-${firstCid}`]);
+
+    await openApp(page, `./?cid=${firstCid}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Saved Video One');
+    await expect(page.getByTestId('video-info-save-button')).toHaveClass(/is-active/);
+    await page.getByTestId('video-info-save-button').click();
+    await expect(page.getByTestId('video-info-save-button')).not.toHaveClass(/is-active/);
+
+    const savedAfterToggleRemove = await page.evaluate((storageKey) => {
+      const rawValue = window.localStorage.getItem(storageKey);
+      return rawValue ? JSON.parse(rawValue) : [];
+    }, savedStorageKey);
+    expect(savedAfterToggleRemove.map((item) => item.cid)).toEqual([secondCid]);
+    expect(savedAfterToggleRemove).toHaveLength(1);
+
+    await openSavedVideos(page);
+    await expect(page.locator('[data-testid^="saved-item-"]')).toHaveCount(1);
+    await expect(page.getByTestId(`saved-item-${firstCid}`)).toHaveCount(0);
+
+    await openApp(page, `./?cid=${secondCid}`);
+    await openSavedVideos(page);
+    await expect(page.locator('[data-testid^="saved-item-"]')).toHaveCount(1);
+    await expect(page.getByTestId(`saved-item-${secondCid}`)).toBeVisible();
+  });
+
+  test('saves the selected series episode instead of the playlist cid and keeps watch history untouched', async ({ page }) => {
+    const seriesCid = 'bafy-series-save-demo';
+
+    await mountMockGateway(page, buildSeriesRoutes(seriesCid));
+    await page.addInitScript(({ historyKey, savedKey, gatewayKey, gatewayUrl }) => {
+      window.localStorage.removeItem(historyKey);
+      window.localStorage.removeItem(savedKey);
+      window.localStorage.setItem(gatewayKey, gatewayUrl);
+    }, {
+      historyKey: historyStorageKey,
+      savedKey: savedStorageKey,
+      gatewayKey: gatewayStorageKey,
+      gatewayUrl: localGatewayBase,
+    });
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await openApp(page, `./?cid=${seriesCid}`);
+
+    await page.getByTestId('series-playlist-item-ep02').click();
+    await page.getByTestId('video-info-save-button').click();
+
+    const historyValue = await page.evaluate((storageKey) => window.localStorage.getItem(storageKey), historyStorageKey);
+    expect(historyValue).toBe(null);
+
+    const savedItems = await page.evaluate((storageKey) => {
+      const rawValue = window.localStorage.getItem(storageKey);
+      return rawValue ? JSON.parse(rawValue) : [];
+    }, savedStorageKey);
+
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0].cid).toBe('bafy-episode-02');
+    expect(savedItems[0].seriesCid).toBe(seriesCid);
+    expect(savedItems[0].episodePath).toBe('ep02');
+    expect(savedItems[0].gateway).toBe(localGatewayBase);
+
+    await openSavedVideos(page);
+    await page.getByTestId('saved-item-bafy-episode-02').getByRole('button').first().click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Series Episode 2');
+    await expect(page.getByTestId('series-playlist-item-ep02')).toHaveClass(/is-selected/);
   });
 });

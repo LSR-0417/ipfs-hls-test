@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Header from './components/Header.vue';
 import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
+import SavedVideosPage from './components/SavedVideosPage.vue';
 import SeriesPlaylistPage from './components/SeriesPlaylistPage.vue';
 import Sidebar from './components/Sidebar.vue';
 import WatchPage from './components/WatchPage.vue';
@@ -39,6 +40,11 @@ import {
   removeHistoryEntry,
   upsertHistoryEntry,
 } from './utils/history';
+import {
+  readStoredSavedVideos,
+  removeSavedVideoEntry,
+  upsertSavedVideoEntry,
+} from './utils/savedVideos';
 import {
   createDefaultSubtitlePreference,
   mergeSubtitleTracks,
@@ -80,15 +86,18 @@ const currentStartTime = ref(0);
 const currentShouldAutoplay = ref(false);
 const currentCid = ref('');
 const currentGateway = ref(DEFAULT_GATEWAY);
+const preferredGateway = ref(DEFAULT_GATEWAY);
 const currentLoadSequence = ref(0);
 const activeView = ref('home');
 const historyItems = ref([]);
+const savedItems = ref([]);
 const isSidebarOpen = ref(false);
 const sidecarGatewayCandidates = ref([]);
 const currentHistoryAllowsReadyState = ref(true);
 const hasCurrentPlaybackStarted = ref(false);
 const isSeriesMode = computed(() => currentSourceMode.value === 'series');
 const shouldShowSeriesPlaylist = computed(() => ['series', 'series-error'].includes(currentSourceMode.value));
+const isCurrentVideoSaved = computed(() => Boolean(findSavedEntry(currentCid.value)));
 const currentSelectedSeriesEpisode = computed(() => {
   if (currentEpisodeId.value) {
     const matchedEpisodeById = currentSeriesEpisodes.value.find((episode) => episode.id === currentEpisodeId.value);
@@ -366,6 +375,7 @@ async function loadSourceFromCid(sourceCid, gateway, startTime = 0, options = {}
     updateUrl = true,
     shouldAutoplay = false,
     preferredEpisodePath = '',
+    persistGatewaySelection = true,
   } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   const requestSeq = ++sourceRequestSeq;
@@ -374,7 +384,10 @@ async function loadSourceFromCid(sourceCid, gateway, startTime = 0, options = {}
   currentGateway.value = nextGateway;
   currentSeriesPlaylistLoading.value = true;
   currentSeriesError.value = '';
-  persistGateway(nextGateway, window);
+  if (persistGatewaySelection) {
+    preferredGateway.value = nextGateway;
+    persistGateway(nextGateway, window);
+  }
   status.value = '正在檢查內容入口...';
 
   const playlistResult = await fetchPlaylistManifest(normalizedSourceCid, nextGateway);
@@ -399,6 +412,7 @@ async function loadSourceFromCid(sourceCid, gateway, startTime = 0, options = {}
       updateUrl: false,
       shouldAutoplay,
       allowReadyStateHistory: false,
+      persistGatewaySelection,
       sourceCid: normalizedSourceCid,
       seriesEpisode: selectedEpisode,
     });
@@ -428,6 +442,7 @@ async function loadSourceFromCid(sourceCid, gateway, startTime = 0, options = {}
       updateUrl: false,
       shouldAutoplay,
       allowReadyStateHistory: true,
+      persistGatewaySelection,
       sourceCid: normalizedSourceCid,
     });
     if (updateUrl) {
@@ -456,7 +471,11 @@ function syncFromUrl() {
   const { cid, time } = parsePlayerParams(window.location.search);
   const prevGateway = currentGateway.value;
   const storedGateway = readConfiguredGateway();
-  const nextGateway = storedGateway || prevGateway || DEFAULT_GATEWAY;
+  const nextGateway = storedGateway || preferredGateway.value || prevGateway || DEFAULT_GATEWAY;
+
+  if (nextGateway !== preferredGateway.value) {
+    preferredGateway.value = nextGateway;
+  }
 
   if (nextGateway !== currentGateway.value) {
     currentGateway.value = nextGateway;
@@ -517,6 +536,7 @@ onMounted(() => {
   currentSubtitleSelection.value =
     typeof window === 'undefined' ? createDefaultSubtitlePreference() : readStoredSubtitlePreference(window);
   refreshHistory();
+  refreshSavedVideos();
   startUrlSync();
   syncFromUrl();
   startHistorySync();
@@ -542,11 +562,13 @@ function onGatewayChange(gateway) {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
       preferredEpisodePath: currentEpisodePath.value,
+      persistGatewaySelection: true,
     });
     return;
   }
 
   currentGateway.value = nextGateway;
+  preferredGateway.value = nextGateway;
   persistGateway(nextGateway, window);
 }
 
@@ -606,6 +628,7 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
     updateUrl = true,
     shouldAutoplay = false,
     allowReadyStateHistory = true,
+    persistGatewaySelection = true,
     sourceCid = cid,
     seriesEpisode = null,
   } = options;
@@ -626,7 +649,10 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentSourceCid.value = sourceCid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
-  persistGateway(nextGateway, window);
+  if (persistGatewaySelection) {
+    preferredGateway.value = nextGateway;
+    persistGateway(nextGateway, window);
+  }
   status.value = '正在連線至網關...';
 
   if (seriesEpisode) {
@@ -696,6 +722,7 @@ function selectSeriesEpisode(episode) {
     updateUrl: false,
     shouldAutoplay: false,
     allowReadyStateHistory: false,
+    persistGatewaySelection: false,
     sourceCid: currentSourceCid.value,
     seriesEpisode: episode,
   });
@@ -719,6 +746,7 @@ function onGatewayFallbackRequest(payload = {}) {
     updateUrl: false,
     shouldAutoplay: payload.shouldAutoplay === true,
     allowReadyStateHistory: currentSourceMode.value === 'single',
+    persistGatewaySelection: false,
     sourceCid: currentSourceCid.value || cid,
     seriesEpisode: currentSelectedSeriesEpisode.value,
   });
@@ -826,6 +854,10 @@ function refreshHistory() {
   historyItems.value = readStoredHistory(window);
 }
 
+function refreshSavedVideos() {
+  savedItems.value = readStoredSavedVideos(window);
+}
+
 function findHistoryEntry(cid) {
   const normalizedCid = typeof cid === 'string' ? cid.trim() : '';
   if (!normalizedCid) return null;
@@ -833,8 +865,19 @@ function findHistoryEntry(cid) {
   return historyItems.value.find((item) => item.cid === normalizedCid) || null;
 }
 
+function findSavedEntry(cid) {
+  const normalizedCid = typeof cid === 'string' ? cid.trim() : '';
+  if (!normalizedCid) return null;
+
+  return savedItems.value.find((item) => item.cid === normalizedCid) || null;
+}
+
 function persistHistoryEntry(entry) {
   historyItems.value = upsertHistoryEntry(entry, window);
+}
+
+function persistSavedVideoEntry(entry) {
+  savedItems.value = upsertSavedVideoEntry(entry, window);
 }
 
 function persistCurrentHistory(options = {}) {
@@ -889,15 +932,19 @@ function stopHistorySync() {
 }
 
 function onViewSelect(nextView) {
-  if (nextView === 'history') {
+  if (nextView === 'history' || nextView === 'saved') {
     persistCurrentHistory();
-    refreshHistory();
-    activeView.value = 'history';
+    if (nextView === 'history') {
+      refreshHistory();
+    } else {
+      refreshSavedVideos();
+    }
+    activeView.value = nextView;
     closeSidebar();
     return;
   }
 
-  if (activeView.value === 'history' && currentSourceCid.value) {
+  if ((activeView.value === 'history' || activeView.value === 'saved') && currentSourceCid.value) {
     const currentHistoryEntry = findHistoryEntry(currentCid.value);
     const resumeTime =
       Number.isFinite(currentHistoryEntry?.progressSeconds) && currentHistoryEntry.progressSeconds > 0
@@ -939,6 +986,52 @@ function onHistoryRemove(cid) {
 
 function onHistoryClear() {
   historyItems.value = clearStoredHistory(window);
+}
+
+function onSaveCurrentVideo() {
+  const cid = currentCid.value.trim();
+  if (!cid) return;
+
+  if (findSavedEntry(cid)) {
+    savedItems.value = removeSavedVideoEntry(cid, window);
+    return;
+  }
+
+  persistSavedVideoEntry({
+    cid,
+    ...buildCurrentHistoryContext(),
+    title: currentVideoInfo.value.title,
+    uploader: currentVideoInfo.value.uploader,
+    posterUrl: currentHistoryPosterUrl.value,
+    gateway: preferredGateway.value || currentGateway.value,
+    durationString: currentVideoInfo.value.durationString,
+    savedAt: Date.now(),
+  });
+}
+
+function onSavedSelect(item) {
+  if (!item?.cid) return;
+
+  const targetGateway = item.gateway || preferredGateway.value || currentGateway.value;
+
+  if (item.seriesCid && item.episodePath) {
+    void loadSourceFromCid(item.seriesCid, targetGateway, 0, {
+      updateUrl: true,
+      shouldAutoplay: false,
+      preferredEpisodePath: item.episodePath,
+    });
+  } else {
+    void loadSourceFromCid(item.cid, targetGateway, 0, {
+      updateUrl: true,
+      shouldAutoplay: false,
+    });
+  }
+
+  activeView.value = 'home';
+}
+
+function onSavedRemove(cid) {
+  savedItems.value = removeSavedVideoEntry(cid, window);
 }
 
 function onPlaybackSnapshot(snapshot) {
@@ -1004,6 +1097,13 @@ watch(
           @clear="onHistoryClear"
         />
       </template>
+      <template v-else-if="activeView === 'saved'">
+        <SavedVideosPage
+          :items="savedItems"
+          @select="onSavedSelect"
+          @remove="onSavedRemove"
+        />
+      </template>
       <template v-else>
         <WatchPage
           :cid="currentCid"
@@ -1019,11 +1119,13 @@ watch(
           :imported-subtitles="currentImportedSubtitleTracks"
           :start-time="currentStartTime"
           :should-autoplay="currentShouldAutoplay"
+          :is-saved="isCurrentVideoSaved"
           :video-info="currentVideoInfo"
           @status-update="onStatusUpdate"
           @gateway-fallback-request="onGatewayFallbackRequest"
           @levels-loaded="onLevelsLoaded"
           @playback-snapshot="onPlaybackSnapshot"
+          @save-current-video="onSaveCurrentVideo"
           @subtitle-import="onSubtitleImport"
           @subtitle-remove="onSubtitleRemove"
           @subtitle-selection-change="onSubtitleSelectionChange"

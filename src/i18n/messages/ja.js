@@ -192,7 +192,7 @@ export default Object.freeze({
     menu: {
       home: 'ホーム',
       explore: '探索',
-      library: 'ライブラリ',
+      library: '保存済み',
       history: '履歴',
     },
     build: {
