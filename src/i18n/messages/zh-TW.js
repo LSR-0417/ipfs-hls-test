@@ -204,4 +204,11 @@ export default Object.freeze({
   recommendations: {
     title: '接下來推薦',
   },
+  seriesPlaylist: {
+    title: '劇集清單',
+    loading: '正在讀取 playlist.json 與集數清單...',
+    empty: '這份播放清單目前沒有可播放集數。',
+    selected: '目前待播',
+    unavailable: '不可播放',
+  },
 });

@@ -204,4 +204,11 @@ export default Object.freeze({
   recommendations: {
     title: 'Recommended Next',
   },
+  seriesPlaylist: {
+    title: 'Episode Playlist',
+    loading: 'Loading playlist.json and episodes...',
+    empty: 'This playlist does not contain any playable episodes yet.',
+    selected: 'Ready',
+    unavailable: 'Unavailable',
+  },
 });
