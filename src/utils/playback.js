@@ -66,6 +66,7 @@ const defaultPlaybackHotkeyOptions = Object.freeze({
   frameRate: Number.NaN,
   frameStepFallbackFrameRate: 30,
   onToggleHelp: null,
+  onToggleFullscreen: null,
   onToggleSubtitles: null,
 });
 
@@ -408,6 +409,10 @@ export function applyPlaybackHotkey(event, player, optionsOrSeekStepSeconds = 5)
   }
 
   if (action.type === 'toggle-fullscreen') {
+    if (typeof options.onToggleFullscreen === 'function') {
+      return runPlaybackHotkeyCallback(event, options.onToggleFullscreen);
+    }
+
     return togglePlayerFullscreen(event, player);
   }
 
