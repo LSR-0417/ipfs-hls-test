@@ -70,20 +70,21 @@ describe('SeriesPlaylistPage layout contract', () => {
     expect(template).toContain('data-testid="series-playlist-empty"');
     expect(template).toContain('data-testid="series-playlist-list"');
     expect(template).toContain(':data-testid="`series-playlist-item-${episode.id}`"');
-    expect(template).toContain(':data-testid="`series-playlist-poster-${episode.id}`"');
-    expect(template).toContain(':data-testid="`series-playlist-duration-${episode.id}`"');
-    expect(template).toContain('data-testid="series-playlist-selected-badge"');
-    expect(template).toContain("'is-selected': isSelectedEpisode(episode)");
-    expect(template).toContain("'is-disabled': !episode.playable");
-    expect(template).toContain("v-if=\"episode.posterUrl\"");
-    expect(template).toContain('{{ resolveEpisodeTitle(episode) }}');
-    expect(template).toContain('{{ resolveEpisodeUploader(episode) }}');
-    expect(template).toContain('{{ resolveEpisodeDuration(episode) }}');
+    expect(template).toContain('<SidebarVideoListItem');
+    expect(template).toContain(':poster-test-id="`series-playlist-poster-${episode.id}`"');
+    expect(template).toContain(':duration-test-id="`series-playlist-duration-${episode.id}`"');
+    expect(template).toContain(":tertiary-test-id=\"isSelectedEpisode(episode) ? 'series-playlist-selected-badge' : ''\"");
+    expect(template).toContain(':selected="isSelectedEpisode(episode)"');
+    expect(template).toContain(':disabled="!episode.playable"');
+    expect(template).toContain(':poster-fallback="formatEpisodeNumber(episode)"');
+    expect(template).toContain(':secondary-text="resolveEpisodeSecondaryText(episode)"');
+    expect(template).toContain(':tertiary-text="resolveEpisodeBadgeText(episode)"');
+    expect(template).toContain('tertiary-variant="badge"');
     expect(template).toContain('@click="handleEpisodeSelect(episode)"');
-    expect(template).not.toContain('class="series-playlist-item glass-panel"');
 
     expect(script).toContain("const emit = defineEmits(['select']);");
     expect(script).toContain("const { t } = useI18n();");
+    expect(script).toContain("import SidebarVideoListItem from './SidebarVideoListItem.vue';");
     expect(script).toContain('const displayTitle = computed(() => props.title || t(\'seriesPlaylist.title\'));');
     expect(script).toContain('const showEmptyState = computed(() => !props.loading && !props.errorMessage && !hasEpisodes.value);');
     expect(script).toContain('function isSelectedEpisode(episode) {');
@@ -91,22 +92,15 @@ describe('SeriesPlaylistPage layout contract', () => {
     expect(script).toContain('function resolveEpisodeTitle(episode) {');
     expect(script).toContain('function resolveEpisodeUploader(episode) {');
     expect(script).toContain('function resolveEpisodeDuration(episode) {');
+    expect(script).toContain('function resolveEpisodeSecondaryText(episode) {');
+    expect(script).toContain('function resolveEpisodeBadgeText(episode) {');
+    expect(script).toContain('function resolveEpisodeBadgeTone(episode) {');
     expect(script).toContain('function handleEpisodeSelect(episode) {');
     expect(script).toContain("emit('select', episode);");
 
     expect(style).toContain('.series-playlist-page');
     expect(style).toContain('.series-playlist-header');
     expect(style).toContain('.series-playlist-list');
-    expect(style).toContain('.series-playlist-item');
-    expect(style).toContain('.series-playlist-item-poster-frame');
-    expect(style).toContain('.series-playlist-item-poster');
-    expect(style).toContain('.series-playlist-item-poster-fallback');
-    expect(style).toContain('.series-playlist-item-duration');
-    expect(style).toContain('.series-playlist-item-copy');
-    expect(style).toContain('.series-playlist-item-uploader');
-    expect(style).toContain('.series-playlist-item.is-selected');
-    expect(style).toContain('.series-playlist-item.is-disabled');
-    expect(style).toContain('.series-playlist-item-badge.is-disabled');
     expect(style).toContain('@media (min-width: 1024px)');
   });
 });
@@ -497,6 +491,61 @@ describe('RecommendationsPage layout contract', () => {
     expect(style).toContain('width: 100%;');
     expect(style).toContain('flex: 0 0 380px;');
     expect(style).toContain('.recommendations-title');
+  });
+});
+
+describe('VideoGrid layout contract', () => {
+  it('keeps recommendations in a stacked list rhythm instead of responsive card masonry', () => {
+    const descriptor = readDescriptor(new URL('./VideoGrid.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<div class="video-grid" data-testid="video-grid">');
+    expect(template).toContain('<SidebarVideoListItem');
+    expect(template).toContain('v-for="item in recommendationItems"');
+    expect(template).toContain(':secondary-text="item.creator"');
+    expect(template).toContain(':tertiary-text="item.meta"');
+    expect(script).toContain("import SidebarVideoListItem from './SidebarVideoListItem.vue';");
+    expect(script).toContain('const recommendationItems = Object.freeze([');
+    expect(style).toContain('.video-grid');
+    expect(style).toContain('display: grid;');
+    expect(style).toContain('gap: 2px;');
+    expect(style).not.toContain('repeat(auto-fill');
+  });
+});
+
+describe('SidebarVideoListItem layout contract', () => {
+  it('renders a shared sidebar list template with data-driven tag and tertiary variants', () => {
+    const descriptor = readDescriptor(new URL('./SidebarVideoListItem.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<component');
+    expect(template).toContain(':is="tag"');
+    expect(template).toContain('class="sidebar-video-list-item"');
+    expect(template).toContain(':data-testid="posterTestId || undefined"');
+    expect(template).toContain(':data-testid="durationTestId || undefined"');
+    expect(template).toContain(':is="tertiaryTag"');
+    expect(template).toContain('class="sidebar-video-list-item-tertiary"');
+
+    expect(script).toContain("const emit = defineEmits(['click']);");
+    expect(script).toContain("default: 'article'");
+    expect(script).toContain("default: 'meta'");
+    expect(script).toContain("const tertiaryTag = computed(() => (props.tertiaryVariant === 'badge' ? 'span' : 'p'));");
+    expect(script).toContain("if (props.disabled) {");
+    expect(script).toContain("emit('click', event);");
+
+    expect(style).toContain('.sidebar-video-list-item');
+    expect(style).toContain('grid-template-areas:');
+    expect(style).toContain('padding: 8px 0;');
+    expect(style).toContain('.sidebar-video-list-item-poster');
+    expect(style).toContain('.sidebar-video-list-item-duration');
+    expect(style).toContain('.sidebar-video-list-item-title');
+    expect(style).toContain('.sidebar-video-list-item-secondary');
+    expect(style).toContain('.sidebar-video-list-item-tertiary.is-meta');
+    expect(style).toContain('.sidebar-video-list-item-tertiary.is-badge');
   });
 });
 
