@@ -1,5 +1,6 @@
 export const gatewayStorageKey = 'ipfs-hls-selected-gateway';
 export const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
+export const localGatewayStorageKey = 'ipfs-hls-local-gateway';
 export const gatewayProbeTimeoutMs = 5000;
 export const gatewayRateLimitBackoffMs = 30 * 60 * 1000;
 export const gatewayProbeSegmentSampleCount = 3;
@@ -22,7 +23,9 @@ export const publicGatewayOptions = [
   },
 ];
 export const defaultPublicGateway = publicGatewayOptions[0].url;
-export const defaultLocalGateway = 'http://127.0.0.1:8080/ipfs/';
+export const defaultLocalGatewayHost = '127.0.0.1';
+export const defaultLocalGatewayPort = '8080';
+export const defaultLocalGateway = `http://${defaultLocalGatewayHost}:${defaultLocalGatewayPort}/ipfs/`;
 
 function resolveStorage(target) {
   if (target && typeof target.getItem === 'function') {
@@ -54,6 +57,71 @@ export function readStoredCustomGateway(target) {
 
 export function persistCustomGateway(gateway, target) {
   persistStoredValue(customGatewayStorageKey, gateway, target);
+}
+
+export function normalizeLocalGatewayHost(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '');
+
+  return normalized || defaultLocalGatewayHost;
+}
+
+export function normalizeLocalGatewayPort(value) {
+  const digits = String(value || '')
+    .trim()
+    .replace(/[^0-9]/g, '');
+
+  return digits || defaultLocalGatewayPort;
+}
+
+export function readStoredLocalGatewayConfig(target) {
+  const storage = resolveStorage(target);
+  if (!storage) {
+    return {
+      host: defaultLocalGatewayHost,
+      port: defaultLocalGatewayPort,
+    };
+  }
+
+  try {
+    const raw = storage.getItem(localGatewayStorageKey);
+    if (!raw) {
+      return {
+        host: defaultLocalGatewayHost,
+        port: defaultLocalGatewayPort,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    return {
+      host: normalizeLocalGatewayHost(parsed?.host),
+      port: normalizeLocalGatewayPort(parsed?.port),
+    };
+  } catch (_) {
+    return {
+      host: defaultLocalGatewayHost,
+      port: defaultLocalGatewayPort,
+    };
+  }
+}
+
+export function persistLocalGatewayConfig(config, target) {
+  const storage = resolveStorage(target);
+  if (!storage) return;
+
+  const payload = {
+    host: normalizeLocalGatewayHost(config?.host),
+    port: normalizeLocalGatewayPort(config?.port),
+  };
+
+  try {
+    storage.setItem(localGatewayStorageKey, JSON.stringify(payload));
+  } catch (_) {
+    // ignore storage errors
+  }
 }
 
 function readStoredValue(key, target) {

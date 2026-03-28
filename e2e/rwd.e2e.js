@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 const gatewayStorageKey = 'ipfs-hls-selected-gateway';
+const customGatewayStorageKey = 'ipfs-hls-custom-gateway';
+const localGatewayStorageKey = 'ipfs-hls-local-gateway';
 const localGatewayBase = 'http://127.0.0.1:8080/ipfs/';
 const testGatewayBase = 'https://dweb.link/ipfs/';
 const mirroredGatewayBases = [localGatewayBase, 'https://dweb.link/ipfs/', 'https://ipfs.io/ipfs/'];
@@ -128,6 +130,45 @@ async function openApp(page, url = './', options = {}) {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('app-header')).toBeVisible();
   await expect(page.getByTestId('main-content')).toBeVisible();
+}
+
+async function seedGatewaySettingsStorage(
+  page,
+  {
+    selectedGateway = testGatewayBase,
+    customGateway = '',
+    localGateway = null,
+  } = {}
+) {
+  await page.addInitScript(
+    ({ gatewayKey, customKey, localKey, nextSelectedGateway, nextCustomGateway, nextLocalGateway }) => {
+      if (nextSelectedGateway) {
+        window.localStorage.setItem(gatewayKey, nextSelectedGateway);
+      } else {
+        window.localStorage.removeItem(gatewayKey);
+      }
+
+      if (nextCustomGateway) {
+        window.localStorage.setItem(customKey, nextCustomGateway);
+      } else {
+        window.localStorage.removeItem(customKey);
+      }
+
+      if (nextLocalGateway) {
+        window.localStorage.setItem(localKey, JSON.stringify(nextLocalGateway));
+      } else {
+        window.localStorage.removeItem(localKey);
+      }
+    },
+    {
+      gatewayKey: gatewayStorageKey,
+      customKey: customGatewayStorageKey,
+      localKey: localGatewayStorageKey,
+      nextSelectedGateway: selectedGateway,
+      nextCustomGateway: customGateway,
+      nextLocalGateway: localGateway,
+    }
+  );
 }
 
 async function getBox(locator) {
@@ -963,7 +1004,7 @@ test.describe('Responsive Gateway Dialog', () => {
     await customOption.click();
     await expect(page.getByTestId('gateway-custom-config')).toBeVisible();
     await expect(page.getByTestId('gateway-local-config')).toHaveCount(0);
-    await expect(page.getByTestId('gateway-transition-note')).toBeVisible();
+    await expect(page.getByTestId('gateway-transition-note')).toHaveCount(0);
     await expect(localOption).toHaveClass(/current/);
     await expect(localOption).not.toHaveClass(/selected/);
     await expect(localOption).toContainText('Current');
@@ -986,5 +1027,117 @@ test.describe('Responsive Gateway Dialog', () => {
     await expect(localOption).toHaveClass(/current/);
     await expect(localOption).toHaveClass(/selected/);
     await expect(localOption).toContainText('Current Selection');
+  });
+});
+
+test.describe('Gateway draft restore defaults', () => {
+  const customGatewayUrl = 'https://friend.example/ipfs/';
+  const storedLocalGateway = {
+    host: '192.168.1.70',
+    port: '9999',
+  };
+
+  test('applies restored custom and local defaults after Apply even when a public gateway stays selected', async ({ page }) => {
+    await seedGatewaySettingsStorage(page, {
+      selectedGateway: testGatewayBase,
+      customGateway: customGatewayUrl,
+      localGateway: storedLocalGateway,
+    });
+    await openApp(page);
+
+    await openGatewayDialog(page);
+
+    await page.getByTestId('gateway-option-custom').click();
+    const customInput = page.locator('#customGateway');
+    await expect(customInput).toHaveValue(customGatewayUrl);
+    await page.getByTestId('gateway-custom-reset-button').click();
+    await expect(customInput).toHaveValue('');
+    await expect(page.getByTestId('gateway-transition-note')).toContainText('Restore Custom Gateway defaults');
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), customGatewayStorageKey)).toBe(customGatewayUrl);
+
+    await page.getByTestId('gateway-option-local').click();
+    const localHost = page.locator('#localHost');
+    const localPort = page.locator('#localPort');
+    await expect(localHost).toHaveValue(storedLocalGateway.host);
+    await expect(localPort).toHaveValue(storedLocalGateway.port);
+    await page.getByTestId('gateway-local-reset-button').click();
+    await expect(localHost).toHaveValue('127.0.0.1');
+    await expect(localPort).toHaveValue('8080');
+    await expect(page.getByTestId('gateway-transition-note')).toContainText('Restore Local Node defaults');
+    expect(JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key), localGatewayStorageKey))).toEqual(
+      storedLocalGateway
+    );
+
+    await page.getByTestId('gateway-option-dweb').click();
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByTestId('gateway-dialog')).toHaveCount(0);
+
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), gatewayStorageKey)).toBe(testGatewayBase);
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), customGatewayStorageKey)).toBeNull();
+    expect(JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key), localGatewayStorageKey))).toEqual({
+      host: '127.0.0.1',
+      port: '8080',
+    });
+
+    await openGatewayDialog(page);
+    await page.getByTestId('gateway-option-custom').click();
+    await expect(page.locator('#customGateway')).toHaveValue('');
+    await page.getByTestId('gateway-option-local').click();
+    await expect(page.locator('#localHost')).toHaveValue('127.0.0.1');
+    await expect(page.locator('#localPort')).toHaveValue('8080');
+  });
+
+  test('keeps restored defaults as draft-only changes until Apply', async ({ page }) => {
+    await seedGatewaySettingsStorage(page, {
+      selectedGateway: testGatewayBase,
+      customGateway: customGatewayUrl,
+      localGateway: storedLocalGateway,
+    });
+    await openApp(page);
+
+    await openGatewayDialog(page);
+    await page.getByTestId('gateway-option-custom').click();
+    await page.getByTestId('gateway-custom-reset-button').click();
+    await page.getByTestId('gateway-option-local').click();
+    await page.getByTestId('gateway-local-reset-button').click();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), customGatewayStorageKey)).toBe(customGatewayUrl);
+    expect(JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key), localGatewayStorageKey))).toEqual(
+      storedLocalGateway
+    );
+
+    await openGatewayDialog(page);
+    await page.getByTestId('gateway-option-custom').click();
+    await expect(page.locator('#customGateway')).toHaveValue(customGatewayUrl);
+    await page.getByTestId('gateway-option-local').click();
+    await expect(page.locator('#localHost')).toHaveValue(storedLocalGateway.host);
+    await expect(page.locator('#localPort')).toHaveValue(storedLocalGateway.port);
+  });
+
+  test('blocks Apply atomically when Custom Gateway is selected but has been reset to blank', async ({ page }) => {
+    await seedGatewaySettingsStorage(page, {
+      selectedGateway: customGatewayUrl,
+      customGateway: customGatewayUrl,
+      localGateway: storedLocalGateway,
+    });
+    await openApp(page);
+
+    await openGatewayDialog(page);
+    await page.getByTestId('gateway-option-local').click();
+    await page.getByTestId('gateway-local-reset-button').click();
+    await page.getByTestId('gateway-option-custom').click();
+    await page.getByTestId('gateway-custom-reset-button').click();
+    await page.getByRole('button', { name: 'Apply' }).click();
+
+    await expect(page.getByTestId('gateway-error')).toHaveText(
+      'Choose another gateway or enter a valid custom gateway before applying.'
+    );
+    await expect(page.getByTestId('gateway-dialog')).toBeVisible();
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), gatewayStorageKey)).toBe(customGatewayUrl);
+    expect(await page.evaluate((key) => window.localStorage.getItem(key), customGatewayStorageKey)).toBe(customGatewayUrl);
+    expect(JSON.parse(await page.evaluate((key) => window.localStorage.getItem(key), localGatewayStorageKey))).toEqual(
+      storedLocalGateway
+    );
   });
 });

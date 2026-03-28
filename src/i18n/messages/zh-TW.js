@@ -40,6 +40,7 @@ export default Object.freeze({
       gateway: {
         label: '網關',
         ariaLabel: '切換網關，目前為 {gateway}',
+        restoreDefaults: '恢復預設值',
       },
       infoJson: {
         label: '素材草稿',

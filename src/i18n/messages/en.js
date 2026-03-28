@@ -40,6 +40,7 @@ export default Object.freeze({
       gateway: {
         label: 'Gateway',
         ariaLabel: 'Switch gateway. Current gateway: {gateway}',
+        restoreDefaults: 'Restore defaults',
       },
       infoJson: {
         label: 'Drafts',

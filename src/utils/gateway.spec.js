@@ -3,6 +3,8 @@ import {
   buildGatewayAssetUrl,
   buildGatewayIndexUrl,
   customGatewayStorageKey,
+  defaultLocalGatewayHost,
+  defaultLocalGatewayPort,
   fetchGatewayVariantPlaylists,
   gatewayRateLimitBackoffMs,
   gatewayProbeSegmentSampleCount,
@@ -11,11 +13,16 @@ import {
   isLoopbackGatewayUrl,
   isLoopbackHostname,
   isPrivateHostname,
+  localGatewayStorageKey,
   normalizeGatewayUrl,
+  normalizeLocalGatewayHost,
+  normalizeLocalGatewayPort,
   persistCustomGateway,
   persistGateway,
+  persistLocalGatewayConfig,
   probeGatewayAvailability,
   readStoredCustomGateway,
+  readStoredLocalGatewayConfig,
   readStoredGateway,
   shouldAutoFallbackGateway,
 } from './gateway';
@@ -118,6 +125,51 @@ describe('custom gateway storage', () => {
 
     expect(storage.getItem(customGatewayStorageKey)).toBe('https://friend.example/ipfs/');
     expect(readStoredCustomGateway(storage)).toBe('https://friend.example/ipfs/');
+  });
+});
+
+describe('local gateway storage', () => {
+  it('returns default localhost settings when storage is missing', () => {
+    expect(readStoredLocalGatewayConfig(null)).toEqual({
+      host: defaultLocalGatewayHost,
+      port: defaultLocalGatewayPort,
+    });
+  });
+
+  it('stores and reads normalized local gateway settings', () => {
+    const storage = createStorage();
+
+    persistLocalGatewayConfig({ host: ' http://192.168.1.7/path ', port: '80abc80' }, storage);
+
+    expect(JSON.parse(storage.getItem(localGatewayStorageKey))).toEqual({
+      host: '192.168.1.7',
+      port: '8080',
+    });
+    expect(readStoredLocalGatewayConfig(storage)).toEqual({
+      host: '192.168.1.7',
+      port: '8080',
+    });
+  });
+});
+
+describe('normalizeLocalGatewayHost', () => {
+  it('normalizes protocol, path, and port segments', () => {
+    expect(normalizeLocalGatewayHost('http://localhost:8080/ipfs/')).toBe('localhost');
+    expect(normalizeLocalGatewayHost(' 192.168.1.5/path ')).toBe('192.168.1.5');
+  });
+
+  it('falls back to the default host when the value is blank', () => {
+    expect(normalizeLocalGatewayHost('   ')).toBe(defaultLocalGatewayHost);
+  });
+});
+
+describe('normalizeLocalGatewayPort', () => {
+  it('keeps digits only', () => {
+    expect(normalizeLocalGatewayPort('80abc80')).toBe('8080');
+  });
+
+  it('falls back to the default port when the value is blank', () => {
+    expect(normalizeLocalGatewayPort('   ')).toBe(defaultLocalGatewayPort);
   });
 });
 
