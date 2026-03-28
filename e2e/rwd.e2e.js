@@ -1,6 +1,15 @@
 import { test, expect } from '@playwright/test';
 
+const gatewayStorageKey = 'ipfs-hls-selected-gateway';
 const localGatewayBase = 'http://127.0.0.1:8080/ipfs/';
+const testGatewayBase = 'https://dweb.link/ipfs/';
+const mirroredGatewayBases = [localGatewayBase, 'https://dweb.link/ipfs/', 'https://ipfs.io/ipfs/'];
+const mockGatewayHeaders = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET,HEAD,OPTIONS',
+  'access-control-allow-headers': '*',
+  'cache-control': 'no-store',
+};
 
 const viewportMatrix = [
   { name: 'iphone-13-mini', width: 375, height: 812, mobile: true, desktop: false },
@@ -15,65 +24,93 @@ function buildDirectVideoRoutes(cid, overrides = {}) {
   const title = overrides.title || 'Standalone Episode';
   const uploader = overrides.uploader || 'Single Team';
   const durationString = overrides.durationString || '00:05';
+  const routeMap = {};
 
-  return {
-    [`${localGatewayBase}${cid}/playlist.json`]: {
+  mirroredGatewayBases.forEach((gatewayBase) => {
+    routeMap[`${gatewayBase}${cid}/playlist.json`] = {
       status: 404,
       contentType: 'application/json',
       body: '{}',
-    },
-    [`${localGatewayBase}${cid}/index.m3u8`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/index.m3u8`] = {
       contentType: 'application/vnd.apple.mpegurl',
       body: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\n360p/streaminglist-360p.m3u8\n',
-    },
-    [`${localGatewayBase}${cid}/360p/streaminglist-360p.m3u8`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/360p/streaminglist-360p.m3u8`] = {
       contentType: 'application/vnd.apple.mpegurl',
       body: '#EXTM3U\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\nsegment_000.ts\n#EXT-X-ENDLIST\n',
-    },
-    [`${localGatewayBase}${cid}/360p/segment_000.ts`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/360p/segment_000.ts`] = {
       contentType: 'video/mp2t',
       body: Buffer.alloc(188),
-    },
-    [`${localGatewayBase}${cid}/info.json`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/info.json`] = {
       contentType: 'application/json',
       body: JSON.stringify({
         title,
         uploader,
         duration_string: durationString,
       }),
-    },
-    [`${localGatewayBase}${cid}/subtitles.json`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/subtitles.json`] = {
       status: 404,
       contentType: 'application/json',
       body: '{}',
-    },
-    [`${localGatewayBase}${cid}/cover.webp`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/cover.webp`] = {
       status: 404,
       contentType: 'image/webp',
       body: '',
-    },
-    [`${localGatewayBase}${cid}/avatar.jpg`]: {
+    };
+    routeMap[`${gatewayBase}${cid}/avatar.jpg`] = {
       status: 404,
       contentType: 'image/jpeg',
       body: '',
-    },
-  };
+    };
+  });
+
+  return routeMap;
 }
 
 async function mountGatewayRoutes(page, routeMap = {}) {
-  await page.route('https://dweb.link/**', (route) => route.fulfill({ status: 404, body: '' }));
-  await page.route('https://ipfs.io/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.route('https://dweb.link/**', async (route) => {
+    const mock = routeMap[route.request().url()];
+    await route.fulfill(
+      mock
+        ? {
+            status: mock.status ?? 200,
+            contentType: mock.contentType,
+            headers: mockGatewayHeaders,
+            body: mock.body,
+          }
+        : { status: 404, headers: mockGatewayHeaders, body: '' }
+    );
+  });
+  await page.route('https://ipfs.io/**', async (route) => {
+    const mock = routeMap[route.request().url()];
+    await route.fulfill(
+      mock
+        ? {
+            status: mock.status ?? 200,
+            contentType: mock.contentType,
+            headers: mockGatewayHeaders,
+            body: mock.body,
+          }
+        : { status: 404, headers: mockGatewayHeaders, body: '' }
+    );
+  });
   await page.route('http://127.0.0.1:8080/ipfs/**', async (route) => {
     const mock = routeMap[route.request().url()];
 
     if (!mock) {
-      await route.fulfill({ status: 404, body: '' });
+      await route.fulfill({ status: 404, headers: mockGatewayHeaders, body: '' });
       return;
     }
 
     await route.fulfill({
       status: mock.status ?? 200,
       contentType: mock.contentType,
+      headers: mockGatewayHeaders,
       body: mock.body,
     });
   });
@@ -83,6 +120,9 @@ async function openApp(page, url = './', options = {}) {
   await page.route('https://images.unsplash.com/**', (route) => route.abort());
   await page.route('https://api.dicebear.com/**', (route) => route.abort());
   if (options.routeMap) {
+    await page.addInitScript(({ storageKey, gatewayUrl }) => {
+      window.localStorage.setItem(storageKey, gatewayUrl);
+    }, { storageKey: gatewayStorageKey, gatewayUrl: testGatewayBase });
     await mountGatewayRoutes(page, options.routeMap);
   }
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -405,8 +445,10 @@ test.describe('Custom Player Controls', () => {
   test('auto-hides the control bar on idle regardless of playback state and wakes it again on interaction', async ({
     page,
   }) => {
+    const cid = 'bafycustomcontrolsautohide123';
+
     await page.setViewportSize({ width: 1366, height: 768 });
-    await openApp(page, './?cid=bafycustomcontrolsautohide123');
+    await openApp(page, `./?cid=${cid}&t=1`, { routeMap: buildDirectVideoRoutes(cid) });
 
     const controls = page.getByTestId('video-player-controls');
     const playToggle = page.getByTestId('video-player-play-toggle');
@@ -538,8 +580,10 @@ test.describe('Custom Player Controls', () => {
   });
 
   test('expands the control bar for FHD fullscreen playback', async ({ page }) => {
+    const cid = 'bafyfullscreencontrols123';
+
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await openApp(page, './?cid=bafyfullscreencontrols123');
+    await openApp(page, `./?cid=${cid}&t=1`, { routeMap: buildDirectVideoRoutes(cid) });
 
     await page.evaluate(() => {
       const playerContainer = document.querySelector('[data-testid="player-container"]');
@@ -580,9 +624,11 @@ test.describe('Custom Player Controls', () => {
   });
 
   test('uses the shell fullscreen container and wakes controls on mouse move during fullscreen playback', async ({ page }) => {
+    const cid = 'bafyfullscreencontrolsawake123';
+
     await installFullscreenApiMock(page);
     await page.setViewportSize({ width: 1366, height: 768 });
-    await openApp(page, './?cid=bafyfullscreencontrolsawake123');
+    await openApp(page, `./?cid=${cid}&t=1`, { routeMap: buildDirectVideoRoutes(cid) });
 
     const controls = page.getByTestId('video-player-controls');
     const fullscreenToggle = page.getByTestId('video-player-fullscreen-toggle');
