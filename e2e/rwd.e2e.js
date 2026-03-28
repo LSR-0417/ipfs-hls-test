@@ -384,6 +384,27 @@ test.describe('Responsive Page Shell', () => {
     await expect(page.getByTestId('sidebar-backdrop')).toHaveCount(0);
     await expect.poll(readSidebarOpacity).toBeLessThanOrEqual(0.05);
   });
+
+  test('returns from history to home when the header logo button is activated', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page);
+
+    await page.getByTestId('header-sidebar-toggle').click();
+    await expect(page.getByTestId('sidebar-item-history')).toBeVisible();
+    await page.getByTestId('sidebar-item-history').click();
+
+    await expect(page.getByTestId('history-page')).toBeVisible();
+    await expect(page.getByTestId('history-empty')).toBeVisible();
+    await expect(page.getByTestId('watch-page')).toHaveCount(0);
+
+    const homeButton = page.getByTestId('header-home-button');
+    await expect(homeButton).toBeVisible();
+    await homeButton.focus();
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByTestId('history-page')).toHaveCount(0);
+    await expect(page.getByTestId('watch-page')).toBeVisible();
+  });
 });
 
 test.describe('Custom Player Controls', () => {

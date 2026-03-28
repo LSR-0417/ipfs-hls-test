@@ -976,6 +976,7 @@ watch(
 <template>
   <Header
     @search="onSearchCid"
+    @home-click="onViewSelect('home')"
     :current-gateway="currentGateway"
     :current-cid="currentCid"
     :current-load-sequence="currentLoadSequence"
