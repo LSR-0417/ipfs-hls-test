@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+const localGatewayBase = 'http://127.0.0.1:8080/ipfs/';
+
 const viewportMatrix = [
   { name: 'iphone-13-mini', width: 375, height: 812, mobile: true, desktop: false },
   { name: 'ipad-portrait', width: 768, height: 1024, mobile: true, desktop: false },
@@ -9,9 +11,80 @@ const viewportMatrix = [
   { name: '4k', width: 3840, height: 2160, mobile: false, desktop: true },
 ];
 
-async function openApp(page, url = './') {
+function buildDirectVideoRoutes(cid, overrides = {}) {
+  const title = overrides.title || 'Standalone Episode';
+  const uploader = overrides.uploader || 'Single Team';
+  const durationString = overrides.durationString || '00:05';
+
+  return {
+    [`${localGatewayBase}${cid}/playlist.json`]: {
+      status: 404,
+      contentType: 'application/json',
+      body: '{}',
+    },
+    [`${localGatewayBase}${cid}/index.m3u8`]: {
+      contentType: 'application/vnd.apple.mpegurl',
+      body: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\n360p/streaminglist-360p.m3u8\n',
+    },
+    [`${localGatewayBase}${cid}/360p/streaminglist-360p.m3u8`]: {
+      contentType: 'application/vnd.apple.mpegurl',
+      body: '#EXTM3U\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\nsegment_000.ts\n#EXT-X-ENDLIST\n',
+    },
+    [`${localGatewayBase}${cid}/360p/segment_000.ts`]: {
+      contentType: 'video/mp2t',
+      body: Buffer.alloc(188),
+    },
+    [`${localGatewayBase}${cid}/info.json`]: {
+      contentType: 'application/json',
+      body: JSON.stringify({
+        title,
+        uploader,
+        duration_string: durationString,
+      }),
+    },
+    [`${localGatewayBase}${cid}/subtitles.json`]: {
+      status: 404,
+      contentType: 'application/json',
+      body: '{}',
+    },
+    [`${localGatewayBase}${cid}/cover.webp`]: {
+      status: 404,
+      contentType: 'image/webp',
+      body: '',
+    },
+    [`${localGatewayBase}${cid}/avatar.jpg`]: {
+      status: 404,
+      contentType: 'image/jpeg',
+      body: '',
+    },
+  };
+}
+
+async function mountGatewayRoutes(page, routeMap = {}) {
+  await page.route('https://dweb.link/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.route('https://ipfs.io/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.route('http://127.0.0.1:8080/ipfs/**', async (route) => {
+    const mock = routeMap[route.request().url()];
+
+    if (!mock) {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+
+    await route.fulfill({
+      status: mock.status ?? 200,
+      contentType: mock.contentType,
+      body: mock.body,
+    });
+  });
+}
+
+async function openApp(page, url = './', options = {}) {
   await page.route('https://images.unsplash.com/**', (route) => route.abort());
   await page.route('https://api.dicebear.com/**', (route) => route.abort());
+  if (options.routeMap) {
+    await mountGatewayRoutes(page, options.routeMap);
+  }
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('app-header')).toBeVisible();
   await expect(page.getByTestId('main-content')).toBeVisible();
@@ -159,6 +232,20 @@ async function openGatewayDialog(page) {
   const mobileGatewayButton = page.getByTestId('header-mobile-gateway-button');
   await expect(mobileGatewayButton).toBeVisible();
   await mobileGatewayButton.click();
+}
+
+async function openShareDialog(page) {
+  const directShareButton = page.getByTestId('video-info-share-button');
+
+  if (await directShareButton.isVisible().catch(() => false)) {
+    await directShareButton.click();
+    return;
+  }
+
+  await page.getByTestId('video-info-overflow-trigger').click();
+  const overflowShareButton = page.getByTestId('video-info-overflow-item-share');
+  await expect(overflowShareButton).toBeVisible();
+  await overflowShareButton.click();
 }
 
 test.describe('Responsive Page Shell', () => {
@@ -567,6 +654,8 @@ test.describe('Responsive Video Actions', () => {
   });
 
   test('opens a YouTube-style share dialog, toggles the time parameter, and copies the generated URL', async ({ page }) => {
+    const cid = 'bafysharetest123';
+
     await page.addInitScript(() => {
       window.__copiedShareUrl = '';
       Object.defineProperty(window, 'isSecureContext', {
@@ -585,7 +674,7 @@ test.describe('Responsive Video Actions', () => {
     });
 
     await page.setViewportSize({ width: 1366, height: 768 });
-    await openApp(page, './?cid=bafysharetest123');
+    await openApp(page, `./?cid=${cid}`, { routeMap: buildDirectVideoRoutes(cid) });
 
     await page.evaluate(() => {
       const player = window.videojs?.getAllPlayers?.()?.[0] || null;
@@ -617,17 +706,17 @@ test.describe('Responsive Video Actions', () => {
     await expect(timePanel).toContainText('1:33');
     await expect(startAtToggle).toContainText('開始處');
     await expect(startAtToggle).toContainText('1:33');
-    await expect(urlInput).toHaveValue(/cid=bafysharetest123/);
+    await expect(urlInput).toHaveValue(new RegExp(`cid=${cid}`));
     await expect(urlInput).toHaveValue(/t=93/);
 
     const shareBaseUrl = new URL(page.url());
-    shareBaseUrl.search = '?cid=bafysharetest123';
+    shareBaseUrl.search = `?cid=${cid}`;
 
     await startAtToggle.click();
     await expect(urlInput).toHaveValue(shareBaseUrl.toString());
 
     await startAtToggle.click();
-    shareBaseUrl.search = '?cid=bafysharetest123&t=93';
+    shareBaseUrl.search = `?cid=${cid}&t=93`;
     await expect(urlInput).toHaveValue(shareBaseUrl.toString());
 
     await copyButton.click();
@@ -637,12 +726,13 @@ test.describe('Responsive Video Actions', () => {
     expect(copiedUrl).toBe(shareBaseUrl.toString());
   });
 
-  test('opens the share dialog from the overflow menu on iPhone 13 mini', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 });
-    await openApp(page, './?cid=bafysharemobile123');
+  test('opens the share dialog on iPhone 13 mini', async ({ page }) => {
+    const cid = 'bafysharemobile123';
 
-    await page.getByTestId('video-info-overflow-trigger').click();
-    await page.getByTestId('video-info-overflow-item-share').click();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openApp(page, `./?cid=${cid}`, { routeMap: buildDirectVideoRoutes(cid) });
+
+    await openShareDialog(page);
 
     const dialog = page.getByTestId('video-info-share-dialog');
     await expect(dialog).toBeVisible();
@@ -654,8 +744,10 @@ test.describe('Responsive Video Actions', () => {
   });
 
   test('opens the subtitle dialog from the overflow menu and configures primary and secondary subtitles from the subtitle list after multi-file import', async ({ page }) => {
+    const cid = 'bafysubtitleimport123';
+
     await page.setViewportSize({ width: 1366, height: 768 });
-    await openApp(page, './?cid=bafysubtitleimport123');
+    await openApp(page, `./?cid=${cid}`, { routeMap: buildDirectVideoRoutes(cid) });
 
     await page.getByTestId('video-info-overflow-trigger').click();
     await page.getByTestId('video-info-overflow-item-subtitles').click();

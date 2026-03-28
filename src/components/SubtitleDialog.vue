@@ -61,7 +61,7 @@ const selectionEmptyStateText = computed(() => {
     return '字幕清單載入失敗。你仍可匯入本機字幕。';
   }
 
-  return '這支影片目前沒有可用字幕。';
+  return '這支影片目前沒有可用字幕。你仍可匯入本機字幕。';
 });
 const importSessionSummary = computed(() => {
   if (isImportingSubtitle.value) {
