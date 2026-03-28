@@ -95,7 +95,7 @@ const overflowActionOrder = [shareActionId, subtitleActionId, downloadActionId];
 const displayUploader = computed(() => props.videoInfo.uploader || 'IPFS Node');
 const displayChannelText = computed(() => {
   if (props.videoInfo.channelId) {
-    return `Channel ID: ${props.videoInfo.channelId}`;
+    return props.videoInfo.channelId;
   }
 
   if (props.videoInfo.categories.length > 0) {
