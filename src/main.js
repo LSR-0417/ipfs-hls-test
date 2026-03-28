@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import { createI18n } from './i18n';
+import { lockTouchDeviceZoom } from './utils/touchZoomLock';
 
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
@@ -9,6 +10,12 @@ import 'video.js/dist/video-js.css';
 window.videojs = videojs;
 
 import 'videojs-hls-quality-selector';
+
+lockTouchDeviceZoom({
+  window,
+  document,
+  navigator,
+});
 
 const app = createApp(App);
 const i18n = createI18n({
