@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InfoJsonDialog from './InfoJsonDialog.vue';
+import LocalEnvironmentPanel from './LocalEnvironmentPanel.vue';
 import { useI18n } from '../i18n';
 import {
   isDisabledGatewayInput,
@@ -11,6 +12,13 @@ import {
   publicGatewayOptions,
   readStoredCustomGateway,
 } from '../utils/gateway';
+import {
+  createEnvironmentCheckStateFromPayload,
+  createFailureEnvironmentCheckState,
+  createIdleEnvironmentCheckState,
+  createRunningEnvironmentCheckState,
+  fetchEnvironmentCheck,
+} from '../utils/environmentCheck';
 import { formatGatewayPlaybackText } from '../utils/gatewayStatus';
 import { createDefaultVideoInfo } from '../utils/videoInfo';
 
@@ -18,6 +26,7 @@ const LOCAL_GATEWAY_ID = 'local';
 const CUSTOM_GATEWAY_ID = 'custom';
 const isDevMode = import.meta.env.DEV;
 const localStorageKey = 'ipfs-hls-local-gateway';
+const localEnvironmentApiStorageKey = 'ipfs-hls-local-environment-api';
 const localGatewayOption = {
   id: LOCAL_GATEWAY_ID,
   label: 'Local Node',
@@ -55,11 +64,15 @@ const gatewayDialogRef = ref(null);
 const selectedGatewayId = ref(builtInGateways[0].id);
 const localHost = ref('127.0.0.1');
 const localPort = ref('8080');
+const localEnvironmentApiHost = ref('');
+const localEnvironmentApiPort = ref('');
 const customGateway = ref('');
 const gatewayError = ref('');
 const gatewayProbeStates = ref({});
 const gatewayCooldownUntilByUrl = ref({});
 const isGatewayProbeRunning = ref(false);
+const localEnvironmentCheckState = ref(createIdleEnvironmentCheckState());
+const isLocalEnvironmentCheckRunning = ref(false);
 const isLocaleMenuOpen = ref(false);
 const isMobileActionsMenuOpen = ref(false);
 const isMobileLocaleListOpen = ref(false);
@@ -68,6 +81,19 @@ const lastFocusedGatewayTrigger = ref(null);
 const pendingGatewayFocusTarget = ref(null);
 
 const localGatewayUrl = computed(() => `http://${localHost.value}:${localPort.value}/ipfs/`);
+const normalizedLocalEnvironmentHost = computed(() => normalizeLocalHost(localHost.value) || '127.0.0.1');
+const normalizedLocalEnvironmentPort = computed(() => normalizeLocalPort(localPort.value));
+const hasCustomLocalEnvironmentApi = computed(
+  () => localEnvironmentApiHost.value.trim().length > 0 || localEnvironmentApiPort.value.trim().length > 0
+);
+const normalizedLocalEnvironmentApiHost = computed(() => normalizeLocalHost(localEnvironmentApiHost.value) || '127.0.0.1');
+const normalizedLocalEnvironmentApiPort = computed(() => normalizeEnvironmentApiPort(localEnvironmentApiPort.value));
+const localEnvironmentApiBase = computed(() =>
+  hasCustomLocalEnvironmentApi.value
+    ? `http://${normalizedLocalEnvironmentApiHost.value}:${normalizedLocalEnvironmentApiPort.value}/api`
+    : import.meta.env.VITE_ENV_CHECK_API_BASE || '/api'
+);
+const localEnvironmentApiModeLabel = computed(() => (hasCustomLocalEnvironmentApi.value ? '自訂連線' : '前端代理'));
 const customGatewayPreview = computed(() => normalizeGatewayUrl(customGateway.value));
 const currentGatewayValue = computed(
   () => normalizeGatewayUrl(props.currentGateway, { allowPrivateHosts: isDevMode }) || props.currentGateway
@@ -292,6 +318,7 @@ const currentGatewayIconPath = computed(() => {
 let gatewayProbeSeq = 0;
 let gatewayProbeTimer = null;
 let gatewayProbeInterval = null;
+let hasInitializedLocalEnvironmentCheck = false;
 
 watch(
   () => props.currentGateway,
@@ -369,6 +396,27 @@ watch(
     scheduleGatewayProbe(0);
   },
   { immediate: true }
+);
+
+watch(
+  () => [localHost.value, localPort.value, localEnvironmentApiHost.value, localEnvironmentApiPort.value],
+  ([host, port, apiHost, apiPort], [previousHost, previousPort, previousApiHost, previousApiPort] = []) => {
+    if (!hasInitializedLocalEnvironmentCheck) {
+      return;
+    }
+
+    if (host === previousHost && port === previousPort && apiHost === previousApiHost && apiPort === previousApiPort) {
+      return;
+    }
+
+    localEnvironmentCheckState.value = createIdleEnvironmentCheckState({
+      target: {
+        gatewayHost: normalizedLocalEnvironmentHost.value,
+        gatewayPort: normalizedLocalEnvironmentPort.value,
+      },
+      detail: '檢測設定已變更，請重新檢測',
+    });
+  }
 );
 
 function onSearch() {
@@ -510,8 +558,18 @@ function normalizeLocalHost(value) {
 }
 
 function normalizeLocalPort(value) {
-  const digits = value.trim().replace(/[^0-9]/g, '');
-  return digits || '8080';
+  return normalizePort(value, '8080');
+}
+
+function normalizeEnvironmentApiPort(value) {
+  return normalizePort(value, '8787');
+}
+
+function normalizePort(value, fallback = '8080') {
+  const digits = String(value ?? '')
+    .trim()
+    .replace(/[^0-9]/g, '');
+  return digits || fallback;
 }
 
 function gatewayUrl(gateway) {
@@ -985,6 +1043,18 @@ function persistLocalGateway() {
   }
 }
 
+function persistLocalEnvironmentApi() {
+  try {
+    const payload = {
+      host: localEnvironmentApiHost.value,
+      port: localEnvironmentApiPort.value,
+    };
+    localStorage.setItem(localEnvironmentApiStorageKey, JSON.stringify(payload));
+  } catch (_) {
+    // ignore storage errors
+  }
+}
+
 function restoreLocalGateway() {
   try {
     const raw = localStorage.getItem(localStorageKey);
@@ -997,6 +1067,66 @@ function restoreLocalGateway() {
   } catch (_) {
     // ignore storage errors
   }
+}
+
+function restoreLocalEnvironmentApi() {
+  try {
+    const raw = localStorage.getItem(localEnvironmentApiStorageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.host === 'string' && typeof parsed.port === 'string') {
+      localEnvironmentApiHost.value = parsed.host;
+      localEnvironmentApiPort.value = parsed.port;
+    }
+  } catch (_) {
+    // ignore storage errors
+  }
+}
+
+async function runLocalEnvironmentCheck() {
+  if (!isDevMode || isLocalEnvironmentCheckRunning.value) {
+    return;
+  }
+
+  const target = {
+    gatewayHost: normalizedLocalEnvironmentHost.value,
+    gatewayPort: normalizedLocalEnvironmentPort.value,
+  };
+
+  isLocalEnvironmentCheckRunning.value = true;
+  localEnvironmentCheckState.value = createRunningEnvironmentCheckState({
+    target,
+    previous: localEnvironmentCheckState.value,
+  });
+
+  try {
+    const payload = await fetchEnvironmentCheck({
+      target,
+      apiBase: localEnvironmentApiBase.value,
+    });
+    localEnvironmentCheckState.value = createEnvironmentCheckStateFromPayload(payload, { target });
+  } catch (error) {
+    localEnvironmentCheckState.value = createFailureEnvironmentCheckState(error?.message, {
+      target,
+      previous: localEnvironmentCheckState.value,
+    });
+  } finally {
+    isLocalEnvironmentCheckRunning.value = false;
+  }
+}
+
+function triggerLocalEnvironmentCheck() {
+  void runLocalEnvironmentCheck();
+}
+
+function updateLocalEnvironmentApiHost(value) {
+  localEnvironmentApiHost.value = value;
+  persistLocalEnvironmentApi();
+}
+
+function updateLocalEnvironmentApiPort(value) {
+  localEnvironmentApiPort.value = value;
+  persistLocalEnvironmentApi();
 }
 
 function syncCompactHeaderViewport() {
@@ -1021,6 +1151,17 @@ onMounted(() => {
   document.addEventListener('keydown', handleDocumentKeydown);
   if (isDevMode) {
     restoreLocalGateway();
+    restoreLocalEnvironmentApi();
+    localEnvironmentCheckState.value = createIdleEnvironmentCheckState({
+      target: {
+        gatewayHost: normalizedLocalEnvironmentHost.value,
+        gatewayPort: normalizedLocalEnvironmentPort.value,
+      },
+    });
+    void runLocalEnvironmentCheck();
+    queueMicrotask(() => {
+      hasInitializedLocalEnvironmentCheck = true;
+    });
   }
   customGateway.value = readStoredCustomGateway(window);
   if (isDisabledGatewayInput(customGateway.value)) {
@@ -1490,6 +1631,19 @@ onBeforeUnmount(() => {
               <span class="label">Preview</span>
               <span class="value">{{ localGatewayUrl }}</span>
             </div>
+            <LocalEnvironmentPanel
+              :state="localEnvironmentCheckState"
+              :target-host="normalizedLocalEnvironmentHost"
+              :target-port="normalizedLocalEnvironmentPort"
+              :api-host="localEnvironmentApiHost"
+              :api-port="localEnvironmentApiPort"
+              :api-base="localEnvironmentApiBase"
+              :api-mode-label="localEnvironmentApiModeLabel"
+              :is-running="isLocalEnvironmentCheckRunning"
+              @update:api-host="updateLocalEnvironmentApiHost"
+              @update:api-port="updateLocalEnvironmentApiPort"
+              @refresh="triggerLocalEnvironmentCheck"
+            />
           </div>
         </section>
 
