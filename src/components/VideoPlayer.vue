@@ -1599,6 +1599,7 @@ function handlePlayerUserActive() {
 }
 
 function handlePlayerUserInactive() {
+  isControlBarHovered.value = false;
   isPlayerUserActive.value = false;
   syncControlSurfaceState();
 }

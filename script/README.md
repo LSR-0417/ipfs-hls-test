@@ -1,9 +1,10 @@
 # Script 工具總覽
 
-`script/` 目前有 4 支 shell 腳本，分成三條用途：
+`script/` 目前有 5 支 shell 腳本，分成四條用途：
 
 - YouTube 來源素材下載與 sidecar 資產整理
 - 已有 CID / sidecar 目錄的字幕 manifest 生成
+- 系列目錄的播放清單 manifest 生成
 - 本地影片轉多解析度 HLS
 
 相關文件：
@@ -110,7 +111,44 @@ cd /path/to/cid-folder
 }
 ```
 
-## 4. `multi_resolution_hls.sh`
+## 4. `generate_playlist_manifest.sh`
+
+用途：
+
+- 掃描系列根目錄下的集數資料夾
+- 產生 root `playlist.json`
+- 把每集 `info.json` 的標題、上傳者、時長整合進 `playlist.json`
+- 若 `info.json` 內已有 `cid`，或集數資料夾下有 `cid.txt`，會一併寫入該集的 `cid`
+- 若某集缺少 `index.m3u8`，仍可列入清單，但會標記為 `playable: false`
+
+執行方式：
+
+```bash
+/Users/iskku/Project/ipfs-hls-test/script/generate_playlist_manifest.sh /path/to/show-root
+```
+
+例如：
+
+```bash
+cd /path/to/show-root
+/Users/iskku/Project/ipfs-hls-test/script/generate_playlist_manifest.sh .
+```
+
+可選參數：
+
+```bash
+/Users/iskku/Project/ipfs-hls-test/script/generate_playlist_manifest.sh /path/to/show-root "My Series Title"
+```
+
+腳本會：
+
+- 掃描 root 下一層的子資料夾
+- 只納入至少包含 `index.m3u8` 或 `info.json` 的資料夾
+- 依資料夾名稱中的數字排序，例如 `ep02` 會排在 `ep10` 前面
+- 生成包含 `title`、`uploader`、`durationString` 的 `playlist.json`
+- 若找到 `cid`，會優先寫入每集 manifest，讓前端可直接用 episode CID 播放
+
+## 5. `multi_resolution_hls.sh`
 
 用途：
 
@@ -143,6 +181,7 @@ cd /path/to/cid-folder
 1. 如果來源是 YouTube，先執行 `download_youtube_assets.sh`。
 2. 需要整理 metadata、字幕、封面與頭像時，在下載目錄執行 `package_youtube_assets.sh`。
 3. 如果只是補或重建字幕清單，直接對 sidecar 資料夾執行 `generate_subtitles_manifest.sh`。
-4. 需要 HLS 輸出時，對實際影片檔再執行 `multi_resolution_hls.sh`。
+4. 若要建立系列清單，對系列根目錄執行 `generate_playlist_manifest.sh`。
+5. 需要 HLS 輸出時，對實際影片檔再執行 `multi_resolution_hls.sh`。
 
 `multi_resolution_hls.sh` 的詳細輸出結構、命名規則與限制，請以 [`docs/MULTI_RESOLUTION_HLS_SPEC.md`](../docs/MULTI_RESOLUTION_HLS_SPEC.md) 為準。

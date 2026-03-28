@@ -84,6 +84,9 @@ describe('history storage', () => {
     expect(nextItems).toEqual([
       {
         cid: 'bafy-history',
+        seriesCid: '',
+        episodeId: '',
+        episodePath: '',
         title: 'Loaded title',
         uploader: 'Uploader',
         posterUrl: '',
@@ -148,5 +151,36 @@ describe('history storage', () => {
 
     expect(items[0].lastWatchedAt).toBe(Date.parse('2026-03-21T10:00:00Z'));
     vi.useRealTimers();
+  });
+
+  it('retains series episode context when present', () => {
+    const storage = createStorage();
+
+    const items = upsertHistoryEntry(
+      {
+        cid: 'bafy-series/ep02',
+        seriesCid: 'bafy-series',
+        episodeId: 'ep02',
+        episodePath: 'ep02',
+        title: 'Episode 2',
+        lastWatchedAt: 100,
+      },
+      storage
+    );
+
+    expect(items[0]).toEqual({
+      cid: 'bafy-series/ep02',
+      seriesCid: 'bafy-series',
+      episodeId: 'ep02',
+      episodePath: 'ep02',
+      title: 'Episode 2',
+      uploader: '',
+      posterUrl: '',
+      gateway: '',
+      durationString: '',
+      durationSeconds: 0,
+      progressSeconds: 0,
+      lastWatchedAt: 100,
+    });
   });
 });

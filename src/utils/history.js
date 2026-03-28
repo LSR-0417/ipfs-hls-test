@@ -56,6 +56,9 @@ function writeStoredHistory(items, target) {
 export function normalizeHistoryItem(payload = {}) {
   return {
     cid: normalizeString(payload.cid),
+    seriesCid: normalizeString(payload.seriesCid),
+    episodeId: normalizeString(payload.episodeId),
+    episodePath: normalizeString(payload.episodePath),
     title: normalizeString(payload.title),
     uploader: normalizeString(payload.uploader),
     posterUrl: normalizeString(payload.posterUrl),
@@ -91,6 +94,9 @@ export function readStoredHistory(target) {
 function mergeHistoryItem(existing, next) {
   return {
     cid: next.cid || existing.cid,
+    seriesCid: next.seriesCid || existing.seriesCid,
+    episodeId: next.episodeId || existing.episodeId,
+    episodePath: next.episodePath || existing.episodePath,
     title: next.title || existing.title,
     uploader: next.uploader || existing.uploader,
     posterUrl: next.posterUrl || existing.posterUrl,

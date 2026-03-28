@@ -1,10 +1,11 @@
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Header from './components/Header.vue';
-import Sidebar from './components/Sidebar.vue';
-import WatchPage from './components/WatchPage.vue';
 import HistoryPage from './components/HistoryPage.vue';
 import RecommendationsPage from './components/RecommendationsPage.vue';
+import SeriesPlaylistPage from './components/SeriesPlaylistPage.vue';
+import Sidebar from './components/Sidebar.vue';
+import WatchPage from './components/WatchPage.vue';
 import {
   defaultPublicGateway,
   getDefaultGateway,
@@ -13,16 +14,13 @@ import {
   persistGateway,
   readStoredGateway,
 } from './utils/gateway';
-import { createDefaultVideoInfo } from './utils/videoInfo';
 import {
-  createDefaultSubtitlePreference,
-  mergeSubtitleTracks,
-  persistSubtitlePreference,
-  readStoredSubtitlePreference,
-  reconcileSubtitlePreference,
-  revokeImportedSubtitleTracks,
-  subtitleCatalogStatus,
-} from './utils/subtitles';
+  buildPlayableEpisodeCid,
+  checkDirectVideoAvailability,
+  fetchPlaylistManifest,
+  resolveSelectedPlaylistEpisode,
+} from './utils/playlist';
+import { getPlaybackSnapshot } from './utils/playback';
 import {
   avatarAssetFileName,
   buildSidecarGatewayCandidates,
@@ -35,18 +33,36 @@ import {
   readCachedSubtitleCatalog,
   readCachedVideoInfo,
 } from './utils/sidecarAssets';
-import { parsePlayerParams } from './utils/url';
-import { getPlaybackSnapshot } from './utils/playback';
 import {
   clearHistory as clearStoredHistory,
   readStoredHistory,
   removeHistoryEntry,
   upsertHistoryEntry,
 } from './utils/history';
+import {
+  createDefaultSubtitlePreference,
+  mergeSubtitleTracks,
+  persistSubtitlePreference,
+  readStoredSubtitlePreference,
+  reconcileSubtitlePreference,
+  revokeImportedSubtitleTracks,
+  subtitleCatalogStatus,
+} from './utils/subtitles';
+import { parsePlayerParams } from './utils/url';
+import { createDefaultVideoInfo } from './utils/videoInfo';
 
 const allowPrivateGateways = import.meta.env.DEV;
 const DEFAULT_GATEWAY = getDefaultGateway({ allowPrivateHosts: allowPrivateGateways });
+
 const status = ref('準備就緒');
+const currentSourceCid = ref('');
+const currentSourceMode = ref('idle');
+const currentSeriesTitle = ref('');
+const currentSeriesEpisodes = ref([]);
+const currentSeriesError = ref('');
+const currentSeriesPlaylistLoading = ref(false);
+const currentEpisodeId = ref('');
+const currentEpisodePath = ref('');
 const currentM3u8Url = ref('');
 const currentIpfsBaseUrl = ref('');
 const currentPosterUrl = ref('');
@@ -69,12 +85,112 @@ const activeView = ref('home');
 const historyItems = ref([]);
 const isSidebarOpen = ref(false);
 const sidecarGatewayCandidates = ref([]);
+const currentHistoryAllowsReadyState = ref(true);
+const hasCurrentPlaybackStarted = ref(false);
+const isSeriesMode = computed(() => currentSourceMode.value === 'series');
+const shouldShowSeriesPlaylist = computed(() => ['series', 'series-error'].includes(currentSourceMode.value));
+const currentSelectedSeriesEpisode = computed(() => {
+  if (currentEpisodeId.value) {
+    const matchedEpisodeById = currentSeriesEpisodes.value.find((episode) => episode.id === currentEpisodeId.value);
+    if (matchedEpisodeById) {
+      return matchedEpisodeById;
+    }
+  }
+
+  if (!currentEpisodePath.value) {
+    return null;
+  }
+
+  return currentSeriesEpisodes.value.find((episode) => episode.path === currentEpisodePath.value) || null;
+});
 
 let originalPushState = null;
 let originalReplaceState = null;
 let metadataRequestSeq = 0;
+let sourceRequestSeq = 0;
 
-function resetPlaybackState() {
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildSeriesEpisodeVideoInfo(videoInfo = null, episode = null) {
+  const sourceVideoInfo = videoInfo && typeof videoInfo === 'object' ? videoInfo : createDefaultVideoInfo();
+  const sourceEpisode = episode && typeof episode === 'object' ? episode : {};
+
+  return {
+    ...createDefaultVideoInfo(),
+    ...sourceVideoInfo,
+    title: normalizeText(sourceEpisode.displayTitle || sourceEpisode.title || sourceVideoInfo.title),
+    uploader: normalizeText(sourceEpisode.displayUploader || sourceEpisode.uploader || sourceVideoInfo.uploader),
+    durationString: normalizeText(sourceEpisode.durationString || sourceVideoInfo.durationString),
+  };
+}
+
+function buildSeriesEpisodeDisplayState(seriesCid, episode = {}, overrides = {}) {
+  const episodeCid = buildPlayableEpisodeCid(seriesCid, episode);
+  const cachedPosterUrl = episodeCid ? readCachedSidecarObjectUrl(episodeCid, posterAssetFileName) : '';
+  const cachedVideoInfo = episodeCid ? readCachedVideoInfo(episodeCid) : null;
+  const displayTitle = normalizeText(episode.displayTitle || episode.title || overrides.displayTitle || cachedVideoInfo?.title);
+  const posterUrl = normalizeText(overrides.posterUrl ?? episode.posterUrl ?? cachedPosterUrl);
+  const displayUploader = normalizeText(
+    episode.displayUploader || episode.uploader || overrides.displayUploader || cachedVideoInfo?.uploader
+  );
+  const durationString = normalizeText(
+    episode.durationString || overrides.durationString || cachedVideoInfo?.durationString
+  );
+
+  return {
+    ...episode,
+    displayTitle: displayTitle || episode.title || episode.id || episode.path || '',
+    displayUploader,
+    durationString,
+    posterUrl,
+  };
+}
+
+function buildSeriesEpisodeDisplayList(seriesCid, episodes = []) {
+  return Array.isArray(episodes) ? episodes.map((episode) => buildSeriesEpisodeDisplayState(seriesCid, episode)) : [];
+}
+
+function patchSeriesEpisodeDisplayState(seriesCid, episodePath, overrides = {}) {
+  if (!seriesCid || !episodePath || currentSourceCid.value !== seriesCid) {
+    return;
+  }
+
+  let hasMatchedEpisode = false;
+  const nextEpisodes = currentSeriesEpisodes.value.map((episode) => {
+    if (episode?.path !== episodePath) {
+      return episode;
+    }
+
+    hasMatchedEpisode = true;
+    return buildSeriesEpisodeDisplayState(seriesCid, episode, overrides);
+  });
+
+  if (hasMatchedEpisode) {
+    currentSeriesEpisodes.value = nextEpisodes;
+  }
+}
+
+function resetSeriesState() {
+  currentSourceCid.value = '';
+  currentSourceMode.value = 'idle';
+  currentSeriesTitle.value = '';
+  currentSeriesEpisodes.value = [];
+  currentSeriesError.value = '';
+  currentSeriesPlaylistLoading.value = false;
+  currentEpisodeId.value = '';
+  currentEpisodePath.value = '';
+}
+
+function resetHistoryPersistenceTracking(allowReadyState = true) {
+  currentHistoryAllowsReadyState.value = allowReadyState;
+  hasCurrentPlaybackStarted.value = allowReadyState;
+}
+
+function resetLoadedMediaState(options = {}) {
+  const { clearImported = true } = options;
+
   metadataRequestSeq += 1;
   currentCid.value = '';
   currentM3u8Url.value = '';
@@ -83,11 +199,20 @@ function resetPlaybackState() {
   currentHistoryPosterUrl.value = '';
   currentAvatarUrl.value = '';
   currentVideoInfo.value = createDefaultVideoInfo();
-  clearImportedSubtitles();
+  if (clearImported) {
+    clearImportedSubtitles();
+  }
   currentRemoteSubtitleTracks.value = [];
   currentRemoteSubtitleStatus.value = subtitleCatalogStatus.idle;
   currentStartTime.value = 0;
   currentShouldAutoplay.value = false;
+  resetHistoryPersistenceTracking(true);
+}
+
+function resetPlaybackState() {
+  sourceRequestSeq += 1;
+  resetSeriesState();
+  resetLoadedMediaState();
   status.value = '準備就緒';
 }
 
@@ -154,7 +279,8 @@ function commitHistoryUrl(mode, url) {
   method.call(window.history, window.history.state, '', url);
 }
 
-function syncPlayerUrl(cid, time, mode = 'push') {
+function syncPlayerUrl(cid, time, mode = 'push', options = {}) {
+  const { includeTime = true } = options;
   const nextUrl = new URL(window.location.href);
   const currentHref = nextUrl.toString();
 
@@ -166,7 +292,7 @@ function syncPlayerUrl(cid, time, mode = 'push') {
 
   nextUrl.searchParams.delete('gateway');
 
-  if (cid && time > 0) {
+  if (cid && includeTime && time > 0) {
     nextUrl.searchParams.set('t', time);
   } else {
     nextUrl.searchParams.delete('t');
@@ -175,6 +301,155 @@ function syncPlayerUrl(cid, time, mode = 'push') {
   if (nextUrl.toString() === currentHref) return;
 
   commitHistoryUrl(mode, nextUrl);
+}
+
+function applySingleSourceState(sourceCid) {
+  currentSourceCid.value = sourceCid;
+  currentSourceMode.value = sourceCid ? 'single' : 'idle';
+  currentSeriesTitle.value = '';
+  currentSeriesEpisodes.value = [];
+  currentSeriesError.value = '';
+  currentSeriesPlaylistLoading.value = false;
+  currentEpisodeId.value = '';
+  currentEpisodePath.value = '';
+}
+
+function applySeriesState(sourceCid, playlist, selectedEpisode = null, errorMessage = '') {
+  currentSourceCid.value = sourceCid;
+  currentSourceMode.value = errorMessage ? 'series-error' : 'series';
+  currentSeriesTitle.value = playlist?.title || '';
+  currentSeriesEpisodes.value = buildSeriesEpisodeDisplayList(sourceCid, playlist?.episodes);
+  currentSeriesError.value = errorMessage;
+  currentSeriesPlaylistLoading.value = false;
+  currentEpisodeId.value = selectedEpisode?.id || '';
+  currentEpisodePath.value = selectedEpisode?.path || '';
+}
+
+function buildCurrentHistoryContext() {
+  if (!isSeriesMode.value) {
+    return {
+      seriesCid: '',
+      episodeId: '',
+      episodePath: '',
+    };
+  }
+
+  return {
+    seriesCid: currentSourceCid.value,
+    episodeId: currentEpisodeId.value,
+    episodePath: currentEpisodePath.value,
+  };
+}
+
+function canPersistCurrentHistory(snapshot = null) {
+  if (currentHistoryAllowsReadyState.value) {
+    return true;
+  }
+
+  if (hasCurrentPlaybackStarted.value) {
+    return true;
+  }
+
+  if (snapshot?.isPlaying === true || snapshot?.hasEnded === true) {
+    hasCurrentPlaybackStarted.value = true;
+    return true;
+  }
+
+  return false;
+}
+
+async function loadSourceFromCid(sourceCid, gateway, startTime = 0, options = {}) {
+  const normalizedSourceCid = typeof sourceCid === 'string' ? sourceCid.trim() : '';
+  if (!normalizedSourceCid) return;
+
+  const {
+    updateUrl = true,
+    shouldAutoplay = false,
+    preferredEpisodePath = '',
+  } = options;
+  const nextGateway = resolveGateway(gateway || readConfiguredGateway());
+  const requestSeq = ++sourceRequestSeq;
+
+  currentSourceCid.value = normalizedSourceCid;
+  currentGateway.value = nextGateway;
+  currentSeriesPlaylistLoading.value = true;
+  currentSeriesError.value = '';
+  persistGateway(nextGateway, window);
+  status.value = '正在檢查內容入口...';
+
+  const playlistResult = await fetchPlaylistManifest(normalizedSourceCid, nextGateway);
+  if (requestSeq !== sourceRequestSeq) return;
+
+  if (playlistResult.status === 'ok' && playlistResult.playlist) {
+    const selectedEpisode = resolveSelectedPlaylistEpisode(playlistResult.playlist, preferredEpisodePath);
+    if (!selectedEpisode) {
+      persistCurrentHistory();
+      applySeriesState(normalizedSourceCid, playlistResult.playlist, null, '這份 playlist.json 目前沒有可播放集數。');
+      resetLoadedMediaState();
+      status.value = '這份 playlist.json 目前沒有可播放集數。';
+      if (updateUrl) {
+        syncPlayerUrl(normalizedSourceCid, 0, 'push', { includeTime: false });
+      }
+      return;
+    }
+
+    applySeriesState(normalizedSourceCid, playlistResult.playlist, selectedEpisode);
+    void hydrateSeriesPlaylistEpisodes(normalizedSourceCid, playlistResult.playlist, nextGateway, requestSeq);
+    loadVideo(buildPlayableEpisodeCid(normalizedSourceCid, selectedEpisode), nextGateway, startTime, {
+      updateUrl: false,
+      shouldAutoplay,
+      allowReadyStateHistory: false,
+      sourceCid: normalizedSourceCid,
+      seriesEpisode: selectedEpisode,
+    });
+    if (updateUrl) {
+      syncPlayerUrl(normalizedSourceCid, 0, 'push', { includeTime: false });
+    }
+    return;
+  }
+
+  if (playlistResult.status === 'invalid') {
+    persistCurrentHistory();
+    applySeriesState(normalizedSourceCid, null, null, playlistResult.detail || 'playlist.json 格式不正確。');
+    resetLoadedMediaState();
+    status.value = currentSeriesError.value;
+    if (updateUrl) {
+      syncPlayerUrl(normalizedSourceCid, 0, 'push', { includeTime: false });
+    }
+    return;
+  }
+
+  const hasDirectVideo = await checkDirectVideoAvailability(normalizedSourceCid, nextGateway);
+  if (requestSeq !== sourceRequestSeq) return;
+
+  if (hasDirectVideo) {
+    applySingleSourceState(normalizedSourceCid);
+    loadVideo(normalizedSourceCid, nextGateway, startTime, {
+      updateUrl: false,
+      shouldAutoplay,
+      allowReadyStateHistory: true,
+      sourceCid: normalizedSourceCid,
+    });
+    if (updateUrl) {
+      syncPlayerUrl(normalizedSourceCid, startTime, 'push', { includeTime: true });
+    }
+    return;
+  }
+
+  persistCurrentHistory();
+  applySeriesState(
+    normalizedSourceCid,
+    null,
+    null,
+    playlistResult.status === 'missing'
+      ? '找不到 playlist.json，也找不到單片播放入口。'
+      : playlistResult.detail || '找不到可播放內容。'
+  );
+  resetLoadedMediaState();
+  status.value = currentSeriesError.value;
+  if (updateUrl) {
+    syncPlayerUrl(normalizedSourceCid, 0, 'push', { includeTime: false });
+  }
 }
 
 function syncFromUrl() {
@@ -189,18 +464,18 @@ function syncFromUrl() {
 
   if (cid) {
     const shouldReload =
-      cid !== currentCid.value ||
+      cid !== currentSourceCid.value ||
       nextGateway !== prevGateway ||
       time !== currentStartTime.value ||
       !currentM3u8Url.value;
     if (shouldReload) {
-      loadVideo(cid, nextGateway, time, { updateUrl: false });
+      void loadSourceFromCid(cid, nextGateway, time, { updateUrl: false, shouldAutoplay: false });
     }
     activeView.value = 'home';
     return;
   }
 
-  if (currentCid.value) {
+  if (currentSourceCid.value || currentCid.value) {
     resetPlaybackState();
   }
 }
@@ -255,17 +530,18 @@ onBeforeUnmount(() => {
 
 function onSearchCid(cid, time = 0) {
   if (!cid) return;
-  loadVideo(cid, currentGateway.value, time, { updateUrl: true });
   activeView.value = 'home';
+  void loadSourceFromCid(cid, currentGateway.value, time, { updateUrl: true, shouldAutoplay: false });
 }
 
 function onGatewayChange(gateway) {
   const nextGateway = resolveGateway(gateway);
-  if (currentCid.value && activeView.value === 'home') {
+  if (currentSourceCid.value && activeView.value === 'home') {
     const snapshot = getPlaybackSnapshot(window);
-    loadVideo(currentCid.value, nextGateway, snapshot.time, {
+    void loadSourceFromCid(currentSourceCid.value, nextGateway, snapshot.time, {
       updateUrl: true,
       shouldAutoplay: snapshot.isPlaying,
+      preferredEpisodePath: currentEpisodePath.value,
     });
     return;
   }
@@ -286,8 +562,53 @@ function resolveSidecarCandidates(primaryGateway) {
   return buildSidecarGatewayCandidates(primaryGateway, sidecarGatewayCandidates.value);
 }
 
+async function hydrateSeriesPlaylistEpisodes(sourceCid, playlist, gateway, requestSeq) {
+  const episodes = Array.isArray(playlist?.episodes) ? playlist.episodes : [];
+  if (episodes.length === 0) {
+    return;
+  }
+
+  const sidecarCandidates = resolveSidecarCandidates(gateway);
+  episodes.forEach((episode) => {
+    void hydrateSeriesPlaylistEpisode(sourceCid, episode, gateway, sidecarCandidates, requestSeq);
+  });
+}
+
+async function hydrateSeriesPlaylistEpisode(sourceCid, episode, gateway, sidecarCandidates, requestSeq) {
+  const episodeCid = buildPlayableEpisodeCid(sourceCid, episode);
+  if (!episodeCid) {
+    return;
+  }
+
+  const [posterUrl, videoInfo] = await Promise.all([
+    loadPosterUrlWithFallback(episodeCid, gateway, sidecarCandidates),
+    loadVideoInfoWithFallback(episodeCid, gateway, sidecarCandidates),
+  ]);
+
+  if (
+    requestSeq !== sourceRequestSeq ||
+    currentSourceCid.value !== sourceCid ||
+    !['series', 'series-error'].includes(currentSourceMode.value)
+  ) {
+    return;
+  }
+
+  patchSeriesEpisodeDisplayState(sourceCid, episode.path, {
+    displayTitle: videoInfo?.title,
+    displayUploader: videoInfo?.uploader,
+    durationString: videoInfo?.durationString,
+    posterUrl,
+  });
+}
+
 function loadVideo(cid, gateway, startTime = 0, options = {}) {
-  const { updateUrl = true, shouldAutoplay = false } = options;
+  const {
+    updateUrl = true,
+    shouldAutoplay = false,
+    allowReadyStateHistory = true,
+    sourceCid = cid,
+    seriesEpisode = null,
+  } = options;
   const nextGateway = resolveGateway(gateway || readConfiguredGateway());
   const requestSeq = ++metadataRequestSeq;
   const nextIpfsBaseUrl = `${nextGateway}${cid}/`;
@@ -297,21 +618,33 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   const cachedAvatarUrl = readCachedSidecarObjectUrl(cid, avatarAssetFileName);
   const cachedVideoInfo = readCachedVideoInfo(cid);
   const cachedSubtitleCatalog = readCachedSubtitleCatalog(cid, nextGateway, sidecarGatewayCandidates.value);
+  const seededSeriesVideoInfo = seriesEpisode ? buildSeriesEpisodeVideoInfo(cachedVideoInfo, seriesEpisode) : null;
 
   persistCurrentHistory();
   const shouldClearImportedSubtitles = currentCid.value && currentCid.value !== cid;
   currentCid.value = cid;
+  currentSourceCid.value = sourceCid;
   currentGateway.value = nextGateway;
   currentLoadSequence.value += 1;
   persistGateway(nextGateway, window);
   status.value = '正在連線至網關...';
-  
+
+  if (seriesEpisode) {
+    currentSourceMode.value = 'series';
+    currentSeriesError.value = '';
+    currentSeriesPlaylistLoading.value = false;
+    currentEpisodeId.value = seriesEpisode.id;
+    currentEpisodePath.value = seriesEpisode.path;
+  } else {
+    applySingleSourceState(sourceCid);
+  }
+
   currentIpfsBaseUrl.value = nextIpfsBaseUrl;
   currentM3u8Url.value = nextM3u8Url;
-  currentPosterUrl.value = cachedPosterUrl;
+  currentPosterUrl.value = cachedPosterUrl || seriesEpisode?.posterUrl || '';
   currentHistoryPosterUrl.value = historyPosterUrl;
   currentAvatarUrl.value = cachedAvatarUrl;
-  currentVideoInfo.value = cachedVideoInfo || createDefaultVideoInfo();
+  currentVideoInfo.value = seededSeriesVideoInfo || cachedVideoInfo || createDefaultVideoInfo();
   if (shouldClearImportedSubtitles) {
     clearImportedSubtitles();
   }
@@ -319,18 +652,53 @@ function loadVideo(cid, gateway, startTime = 0, options = {}) {
   currentRemoteSubtitleStatus.value = cachedSubtitleCatalog?.status || subtitleCatalogStatus.loading;
   currentStartTime.value = startTime;
   currentShouldAutoplay.value = shouldAutoplay;
-  persistHistoryEntry({
-    cid,
-    posterUrl: historyPosterUrl,
-    gateway: nextGateway,
-    progressSeconds: startTime,
-    lastWatchedAt: Date.now(),
+  resetHistoryPersistenceTracking(allowReadyStateHistory);
+
+  if (allowReadyStateHistory) {
+    persistHistoryEntry({
+      cid,
+      ...buildCurrentHistoryContext(),
+      posterUrl: historyPosterUrl,
+      gateway: nextGateway,
+      progressSeconds: startTime,
+      lastWatchedAt: Date.now(),
+    });
+  }
+
+  void loadSidecarAssets(cid, nextGateway, requestSeq, {
+    sourceCid,
+    seriesEpisode,
   });
-  void loadSidecarAssets(cid, nextGateway, requestSeq);
 
   if (updateUrl) {
-    syncPlayerUrl(cid, startTime, 'push');
+    syncPlayerUrl(sourceCid, startTime, 'push', { includeTime: !seriesEpisode });
   }
+}
+
+function selectSeriesEpisode(episode) {
+  if (!episode?.playable || !currentSourceCid.value) {
+    return;
+  }
+
+  if (episode.id === currentEpisodeId.value && episode.path === currentEpisodePath.value) {
+    return;
+  }
+
+  applySeriesState(
+    currentSourceCid.value,
+    {
+      title: currentSeriesTitle.value,
+      episodes: currentSeriesEpisodes.value,
+    },
+    episode
+  );
+  loadVideo(buildPlayableEpisodeCid(currentSourceCid.value, episode), currentGateway.value, 0, {
+    updateUrl: false,
+    shouldAutoplay: false,
+    allowReadyStateHistory: false,
+    sourceCid: currentSourceCid.value,
+    seriesEpisode: episode,
+  });
 }
 
 function onStatusUpdate(newStatus) {
@@ -350,6 +718,9 @@ function onGatewayFallbackRequest(payload = {}) {
   loadVideo(cid, defaultPublicGateway, payload.startTime || 0, {
     updateUrl: false,
     shouldAutoplay: payload.shouldAutoplay === true,
+    allowReadyStateHistory: currentSourceMode.value === 'single',
+    sourceCid: currentSourceCid.value || cid,
+    seriesEpisode: currentSelectedSeriesEpisode.value,
   });
 }
 
@@ -401,7 +772,8 @@ function onSubtitleSelectionChange(nextSelection) {
   setSubtitleSelection(nextSelection);
 }
 
-async function loadSidecarAssets(cid, gateway, requestSeq) {
+async function loadSidecarAssets(cid, gateway, requestSeq, options = {}) {
+  const { sourceCid = '', seriesEpisode = null } = options;
   const sidecarCandidates = resolveSidecarCandidates(gateway);
   const [nextPosterUrl, nextAvatarUrl, nextVideoInfo, subtitleCatalog] = await Promise.all([
     loadPosterUrlWithFallback(cid, gateway, sidecarCandidates),
@@ -414,22 +786,21 @@ async function loadSidecarAssets(cid, gateway, requestSeq) {
 
   currentPosterUrl.value = nextPosterUrl || currentPosterUrl.value;
   currentAvatarUrl.value = nextAvatarUrl || '';
-  currentVideoInfo.value = nextVideoInfo;
+  currentVideoInfo.value = seriesEpisode ? buildSeriesEpisodeVideoInfo(nextVideoInfo, seriesEpisode) : nextVideoInfo;
   currentRemoteSubtitleStatus.value = subtitleCatalog.status;
   currentRemoteSubtitleTracks.value = subtitleCatalog.tracks;
+
+  if (sourceCid && seriesEpisode?.path) {
+    patchSeriesEpisodeDisplayState(sourceCid, seriesEpisode.path, {
+      displayTitle: nextVideoInfo?.title,
+      displayUploader: nextVideoInfo?.uploader,
+      durationString: nextVideoInfo?.durationString,
+      posterUrl: nextPosterUrl,
+    });
+  }
+
   const snapshot = activeView.value === 'home' ? getPlaybackSnapshot(window) : null;
-  persistHistoryEntry({
-    cid: currentCid.value,
-    title: nextVideoInfo.title,
-    uploader: nextVideoInfo.uploader,
-    posterUrl: currentHistoryPosterUrl.value,
-    gateway: currentGateway.value,
-    durationString: nextVideoInfo.durationString,
-    durationSeconds: snapshot?.duration ?? 0,
-    progressSeconds: snapshot?.hasEnded && snapshot.duration > 0 ? snapshot.duration : snapshot?.time ?? 0,
-    lastWatchedAt: Date.now(),
-  });
-  persistCurrentHistory();
+  persistCurrentHistory({ snapshot });
 }
 
 function resolveGateway(candidate) {
@@ -474,11 +845,16 @@ function persistCurrentHistory(options = {}) {
   if (!cid) return;
 
   const currentSnapshot = snapshot || getPlaybackSnapshot(window);
+  if (!canPersistCurrentHistory(currentSnapshot)) {
+    return;
+  }
+
   const progressSeconds =
     currentSnapshot.hasEnded && currentSnapshot.duration > 0 ? currentSnapshot.duration : currentSnapshot.time;
 
   persistHistoryEntry({
     cid,
+    ...buildCurrentHistoryContext(),
     title: currentVideoInfo.value.title,
     uploader: currentVideoInfo.value.uploader,
     posterUrl: currentHistoryPosterUrl.value,
@@ -521,16 +897,17 @@ function onViewSelect(nextView) {
     return;
   }
 
-  if (activeView.value === 'history' && currentCid.value) {
+  if (activeView.value === 'history' && currentSourceCid.value) {
     const currentHistoryEntry = findHistoryEntry(currentCid.value);
     const resumeTime =
       Number.isFinite(currentHistoryEntry?.progressSeconds) && currentHistoryEntry.progressSeconds > 0
         ? currentHistoryEntry.progressSeconds
         : currentStartTime.value;
 
-    loadVideo(currentCid.value, currentGateway.value, resumeTime, {
+    void loadSourceFromCid(currentSourceCid.value, currentGateway.value, resumeTime, {
       updateUrl: false,
       shouldAutoplay: false,
+      preferredEpisodePath: currentHistoryEntry?.episodePath || currentEpisodePath.value,
     });
   }
 
@@ -540,7 +917,19 @@ function onViewSelect(nextView) {
 
 function onHistorySelect(item) {
   if (!item?.cid) return;
-  loadVideo(item.cid, currentGateway.value, item.progressSeconds || 0, { updateUrl: true });
+
+  if (item.seriesCid && item.episodePath) {
+    void loadSourceFromCid(item.seriesCid, currentGateway.value, item.progressSeconds || 0, {
+      updateUrl: true,
+      shouldAutoplay: false,
+      preferredEpisodePath: item.episodePath,
+    });
+  } else {
+    void loadSourceFromCid(item.cid, currentGateway.value, item.progressSeconds || 0, {
+      updateUrl: true,
+      shouldAutoplay: false,
+    });
+  }
   activeView.value = 'home';
 }
 
@@ -639,7 +1028,17 @@ watch(
           @subtitle-remove="onSubtitleRemove"
           @subtitle-selection-change="onSubtitleSelectionChange"
         />
-        <RecommendationsPage />
+        <SeriesPlaylistPage
+          v-if="shouldShowSeriesPlaylist"
+          :title="currentSeriesTitle"
+          :episodes="currentSeriesEpisodes"
+          :selected-episode-id="currentEpisodeId"
+          :selected-episode-path="currentEpisodePath"
+          :loading="currentSeriesPlaylistLoading"
+          :error-message="currentSeriesError"
+          @select="selectSeriesEpisode"
+        />
+        <RecommendationsPage v-else />
       </template>
     </main>
   </div>

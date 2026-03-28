@@ -12,25 +12,32 @@ function getFirstStyleContent(descriptor) {
 }
 
 describe('App layout contract', () => {
-  it('renders watch and recommendations directly inside main-content and no longer uses the old status message slot', () => {
+  it('renders watch with a conditional series playlist side panel and no longer uses the old status message slot', () => {
     const descriptor = readDescriptor(new URL('../App.vue', import.meta.url));
     const template = descriptor.template?.content || '';
     const script = descriptor.scriptSetup?.content || '';
     const appStyle = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
     const watchPageIndex = template.indexOf('<WatchPage');
-    const recommendationsPageIndex = template.indexOf('<RecommendationsPage');
+    const seriesPlaylistIndex = template.indexOf('<SeriesPlaylistPage');
+    const recommendationsPageIndex = template.indexOf('<RecommendationsPage v-else />');
 
     expect(template).toContain('<main class="main-content" data-testid="main-content">');
     expect(watchPageIndex).toBeGreaterThan(-1);
-    expect(recommendationsPageIndex).toBeGreaterThan(watchPageIndex);
+    expect(seriesPlaylistIndex).toBeGreaterThan(watchPageIndex);
+    expect(recommendationsPageIndex).toBeGreaterThan(seriesPlaylistIndex);
     expect(template).not.toContain('id="status"');
     expect(template).not.toContain('class="video-layout"');
     expect(template).not.toContain('data-testid="primary-column"');
     expect(template).not.toContain('data-testid="secondary-column"');
     expect(template).not.toContain('data-testid="page-shell"');
     expect(template).toContain('@gateway-fallback-request="onGatewayFallbackRequest"');
+    expect(template).toContain('v-if="shouldShowSeriesPlaylist"');
+    expect(template).toContain('@select="selectSeriesEpisode"');
     expect(script).toContain('defaultPublicGateway');
+    expect(script).toContain("import SeriesPlaylistPage from './components/SeriesPlaylistPage.vue';");
+    expect(script).toContain("const shouldShowSeriesPlaylist = computed(() => ['series', 'series-error'].includes(currentSourceMode.value));");
+    expect(script).toContain('function selectSeriesEpisode(episode) {');
     expect(script).toContain('function onGatewayFallbackRequest(payload = {}) {');
     expect(appStyle).toContain('.main-content');
     expect(appStyle).toContain('padding: 0;');
@@ -38,6 +45,61 @@ describe('App layout contract', () => {
     expect(appStyle).toContain('gap: 0;');
     expect(appStyle).toContain('@media (min-width: 1024px)');
     expect(appStyle).toContain('align-items: flex-start;');
+  });
+});
+
+describe('SeriesPlaylistPage layout contract', () => {
+  it('renders an episode playlist panel with loading, error, and selected states', () => {
+    const descriptor = readDescriptor(new URL('./SeriesPlaylistPage.vue', import.meta.url));
+    const template = descriptor.template?.content || '';
+    const script = descriptor.scriptSetup?.content || '';
+    const style = getFirstStyleContent(descriptor);
+
+    expect(template).toContain('<section class="series-playlist-page" data-testid="series-playlist-page">');
+    expect(template).toContain('data-testid="series-playlist-title"');
+    expect(template).toContain('data-testid="series-playlist-loading"');
+    expect(template).toContain('data-testid="series-playlist-error"');
+    expect(template).toContain('data-testid="series-playlist-empty"');
+    expect(template).toContain('data-testid="series-playlist-list"');
+    expect(template).toContain(':data-testid="`series-playlist-item-${episode.id}`"');
+    expect(template).toContain(':data-testid="`series-playlist-poster-${episode.id}`"');
+    expect(template).toContain(':data-testid="`series-playlist-duration-${episode.id}`"');
+    expect(template).toContain('data-testid="series-playlist-selected-badge"');
+    expect(template).toContain("'is-selected': isSelectedEpisode(episode)");
+    expect(template).toContain("'is-disabled': !episode.playable");
+    expect(template).toContain("v-if=\"episode.posterUrl\"");
+    expect(template).toContain('{{ resolveEpisodeTitle(episode) }}');
+    expect(template).toContain('{{ resolveEpisodeUploader(episode) }}');
+    expect(template).toContain('{{ resolveEpisodeDuration(episode) }}');
+    expect(template).toContain('@click="handleEpisodeSelect(episode)"');
+    expect(template).not.toContain('class="series-playlist-item glass-panel"');
+
+    expect(script).toContain("const emit = defineEmits(['select']);");
+    expect(script).toContain("const { t } = useI18n();");
+    expect(script).toContain('const displayTitle = computed(() => props.title || t(\'seriesPlaylist.title\'));');
+    expect(script).toContain('const showEmptyState = computed(() => !props.loading && !props.errorMessage && !hasEpisodes.value);');
+    expect(script).toContain('function isSelectedEpisode(episode) {');
+    expect(script).toContain('function formatEpisodeNumber(episode) {');
+    expect(script).toContain('function resolveEpisodeTitle(episode) {');
+    expect(script).toContain('function resolveEpisodeUploader(episode) {');
+    expect(script).toContain('function resolveEpisodeDuration(episode) {');
+    expect(script).toContain('function handleEpisodeSelect(episode) {');
+    expect(script).toContain("emit('select', episode);");
+
+    expect(style).toContain('.series-playlist-page');
+    expect(style).toContain('.series-playlist-header');
+    expect(style).toContain('.series-playlist-list');
+    expect(style).toContain('.series-playlist-item');
+    expect(style).toContain('.series-playlist-item-poster-frame');
+    expect(style).toContain('.series-playlist-item-poster');
+    expect(style).toContain('.series-playlist-item-poster-fallback');
+    expect(style).toContain('.series-playlist-item-duration');
+    expect(style).toContain('.series-playlist-item-copy');
+    expect(style).toContain('.series-playlist-item-uploader');
+    expect(style).toContain('.series-playlist-item.is-selected');
+    expect(style).toContain('.series-playlist-item.is-disabled');
+    expect(style).toContain('.series-playlist-item-badge.is-disabled');
+    expect(style).toContain('@media (min-width: 1024px)');
   });
 });
 

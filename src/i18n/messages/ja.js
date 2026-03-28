@@ -204,4 +204,11 @@ export default Object.freeze({
   recommendations: {
     title: '次のおすすめ',
   },
+  seriesPlaylist: {
+    title: 'エピソード一覧',
+    loading: 'playlist.json とエピソード一覧を読み込んでいます...',
+    empty: 'このプレイリストには再生できるエピソードがまだありません。',
+    selected: '待機中',
+    unavailable: '再生不可',
+  },
 });
