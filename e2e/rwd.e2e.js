@@ -23,6 +23,127 @@ async function getBox(locator) {
   return box;
 }
 
+async function mockPlayerActivity(page, { isPlaying, isUserActive }) {
+  const didApply = await page.evaluate(({ isPlaying: nextPlaying, isUserActive: nextUserActive }) => {
+    const player = window.videojs?.getAllPlayers?.()?.[0];
+    if (!player) {
+      return false;
+    }
+
+    player.__codexMockPaused = !nextPlaying;
+    player.__codexMockUserActive = nextUserActive;
+    player.paused = () => player.__codexMockPaused;
+    player.userActive = (value) => {
+      if (typeof value === 'boolean') {
+        player.__codexMockUserActive = value;
+      }
+
+      return player.__codexMockUserActive;
+    };
+
+    player.trigger(nextPlaying ? 'play' : 'pause');
+    player.trigger(nextUserActive ? 'useractive' : 'userinactive');
+    return true;
+  }, { isPlaying, isUserActive });
+
+  expect(didApply).toBe(true);
+}
+
+async function mockPlayerFullscreen(page, isFullscreen) {
+  const didApply = await page.evaluate((nextFullscreen) => {
+    const player = window.videojs?.getAllPlayers?.()?.[0];
+    if (!player) {
+      return false;
+    }
+
+    player.__codexMockFullscreen = nextFullscreen;
+    player.isFullscreen = () => player.__codexMockFullscreen;
+    player.trigger('fullscreenchange');
+    return true;
+  }, isFullscreen);
+
+  expect(didApply).toBe(true);
+}
+
+async function installFullscreenApiMock(page) {
+  await page.addInitScript(() => {
+    let fullscreenElement = null;
+
+    const setFullscreenElement = (nextElement) => {
+      fullscreenElement = nextElement;
+      Object.defineProperty(document, 'fullscreenElement', {
+        configurable: true,
+        get: () => fullscreenElement,
+      });
+      Object.defineProperty(document, 'webkitFullscreenElement', {
+        configurable: true,
+        get: () => fullscreenElement,
+      });
+    };
+
+    setFullscreenElement(null);
+    window.__codexFullscreenMock = {
+      requests: [],
+      exits: 0,
+    };
+
+    Element.prototype.requestFullscreen = function requestFullscreenMock() {
+      setFullscreenElement(this);
+      window.__codexFullscreenMock.requests.push({
+        tagName: this.tagName,
+        className: this.className,
+        testId: this.getAttribute?.('data-testid') || null,
+      });
+      document.dispatchEvent(new Event('fullscreenchange'));
+      document.dispatchEvent(new Event('webkitfullscreenchange'));
+      return Promise.resolve();
+    };
+
+    Document.prototype.exitFullscreen = function exitFullscreenMock() {
+      setFullscreenElement(null);
+      window.__codexFullscreenMock.exits += 1;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      document.dispatchEvent(new Event('webkitfullscreenchange'));
+      return Promise.resolve();
+    };
+  });
+}
+
+async function getInlineVolumeMetrics(locator) {
+  return locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const styles = window.getComputedStyle(node);
+    return {
+      width: rect.width,
+      opacity: parseFloat(styles.opacity || '1'),
+    };
+  });
+}
+
+async function getButtonSurface(locator) {
+  return locator.evaluate((node) => {
+    const styles = window.getComputedStyle(node);
+    const readAlpha = (value) => {
+      if (!value || value === 'transparent') {
+        return 0;
+      }
+
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      if (!match) {
+        return 1;
+      }
+
+      const parts = match[1].split(',').map((part) => Number.parseFloat(part.trim()));
+      return parts.length >= 4 && Number.isFinite(parts[3]) ? parts[3] : 1;
+    };
+
+    return {
+      backgroundAlpha: readAlpha(styles.backgroundColor),
+      borderAlpha: readAlpha(styles.borderTopColor),
+    };
+  });
+}
+
 async function openGatewayDialog(page) {
   const directGatewayButton = page.getByTestId('gateway-button');
 
@@ -135,6 +256,265 @@ test.describe('Responsive Page Shell', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(page.getByTestId('sidebar-backdrop')).toHaveCount(0);
     await expect.poll(readSidebarOpacity).toBeLessThanOrEqual(0.05);
+  });
+});
+
+test.describe('Custom Player Controls', () => {
+  test('shows the custom control layer and hides the user-visible video.js chrome', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page);
+
+    await expect(page.getByTestId('video-player-controls')).toBeVisible();
+    await expect(page.getByTestId('video-player-play-toggle')).toBeVisible();
+    await expect(page.getByTestId('video-player-progress-slider')).toBeVisible();
+    const muteToggle = page.getByTestId('video-player-mute-toggle');
+    await expect(muteToggle).toBeVisible();
+    await expect(page.getByTestId('video-player-fullscreen-toggle')).toBeVisible();
+
+    const volumeInline = page.getByTestId('video-player-volume-inline');
+    const volumeControl = page.getByTestId('video-player-volume-control');
+
+    const collapsedMetrics = await getInlineVolumeMetrics(volumeControl);
+    expect(collapsedMetrics.width).toBeLessThanOrEqual(4);
+
+    const idleButtonSurface = await getButtonSurface(muteToggle);
+    expect(idleButtonSurface.backgroundAlpha).toBeLessThanOrEqual(0.02);
+    expect(idleButtonSurface.borderAlpha).toBeLessThanOrEqual(0.02);
+
+    await muteToggle.hover();
+    await expect.poll(async () => (await getButtonSurface(muteToggle)).backgroundAlpha).toBeGreaterThan(0.08);
+    await expect.poll(async () => (await getButtonSurface(muteToggle)).borderAlpha).toBeGreaterThan(0.12);
+
+    await volumeInline.hover();
+    await expect.poll(async () => (await getInlineVolumeMetrics(volumeControl)).width).toBeGreaterThan(40);
+
+    const chromeState = await page.evaluate(() => {
+      const controlBar = document.querySelector('.vjs-control-bar');
+      const bigPlay = document.querySelector('.vjs-big-play-button');
+
+      const readDisplay = (node) => (node ? window.getComputedStyle(node).display : 'missing');
+
+      return {
+        controlBarDisplay: readDisplay(controlBar),
+        bigPlayDisplay: readDisplay(bigPlay),
+      };
+    });
+
+    expect(chromeState.controlBarDisplay).toBe('none');
+    expect(chromeState.bigPlayDisplay).toBe('none');
+
+    const subtitleSafeArea = await page.evaluate(() => {
+      const shell = document.querySelector('.video-player-shell');
+      const bar = document.querySelector('.player-control-bar');
+      const safeArea = parseFloat(getComputedStyle(shell).getPropertyValue('--player-control-safe-area')) || 0;
+      const barHeight = bar ? bar.getBoundingClientRect().height : 0;
+
+      return { safeArea, barHeight };
+    });
+
+    expect(subtitleSafeArea.safeArea).toBeGreaterThanOrEqual(subtitleSafeArea.barHeight + 20);
+  });
+
+  test('auto-hides the control bar on idle regardless of playback state and wakes it again on interaction', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page, './?cid=bafycustomcontrolsautohide123');
+
+    const controls = page.getByTestId('video-player-controls');
+    const playToggle = page.getByTestId('video-player-play-toggle');
+    const playerBox = await getBox(page.getByTestId('player-container'));
+
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+    await expect(playToggle).toBeVisible();
+
+    await mockPlayerActivity(page, { isPlaying: true, isUserActive: false });
+    await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+
+    await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+
+    await page.mouse.move(Math.max(1, playerBox.x - 24), Math.max(1, playerBox.y - 24));
+    await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+
+    await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+
+    await mockPlayerActivity(page, { isPlaying: false, isUserActive: false });
+    await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+
+    await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
+  });
+
+  test('keeps sub-Pro-Max phones on a two-tier compact bar and moves secondary controls into settings', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openApp(page);
+
+    const play = page.getByTestId('video-player-play-toggle');
+    const progress = page.getByTestId('video-player-progress-slider');
+    const time = page.getByTestId('video-player-time-display');
+    const settings = page.getByTestId('video-player-settings-trigger');
+
+    await expect(play).toBeVisible();
+    await expect(progress).toBeVisible();
+    await expect(time).toBeVisible();
+    await expect(settings).toBeVisible();
+    await expect(page.getByTestId('video-player-mute-toggle')).toHaveCount(0);
+    await expect(page.getByTestId('video-player-volume-control')).toHaveCount(0);
+    await expect(page.getByTestId('video-player-fullscreen-toggle')).toHaveCount(0);
+
+    const playBox = await getBox(play);
+    const progressBox = await getBox(progress);
+    const timeBox = await getBox(time);
+    const settingsBox = await getBox(settings);
+
+    expect(playBox.height).toBeGreaterThanOrEqual(34);
+    expect(progressBox.height).toBeGreaterThanOrEqual(4);
+    expect(timeBox.height).toBeGreaterThanOrEqual(30);
+    expect(settingsBox.height).toBeGreaterThanOrEqual(34);
+    expect(progressBox.y + progressBox.height).toBeLessThan(playBox.y - 4);
+    expect(Math.abs(playBox.y - timeBox.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(timeBox.y - settingsBox.y)).toBeLessThanOrEqual(2);
+    expect(progressBox.width).toBeGreaterThan(timeBox.width * 2);
+    expect(timeBox.width).toBeGreaterThanOrEqual(58);
+    expect(settingsBox.x).toBeGreaterThan(timeBox.x + timeBox.width - 4);
+
+    await settings.click();
+    await expect(page.getByTestId('video-player-settings-panel')).toBeVisible();
+    await expect(page.getByTestId('video-player-settings-backdrop')).toBeVisible();
+    await expect(page.getByTestId('video-player-mute-toggle')).toBeVisible();
+    await expect(page.getByTestId('video-player-volume-control')).toBeVisible();
+    await expect(page.getByTestId('video-player-subtitle-toggle')).toBeVisible();
+    await expect(page.getByTestId('video-player-quality-trigger')).toBeVisible();
+    await expect(page.getByTestId('video-player-fullscreen-toggle')).toBeVisible();
+
+    const volumeControlBox = await getBox(page.getByTestId('video-player-volume-control'));
+    expect(volumeControlBox.width).toBeGreaterThan(volumeControlBox.height);
+
+    await page.getByTestId('video-player-settings-backdrop').click({ position: { x: 8, y: 8 } });
+    await expect(page.getByTestId('video-player-settings-panel')).toHaveCount(0);
+  });
+
+  test('keeps Pro-Max-width mobile on a two-tier bar without collapsing into the settings trigger', async ({ page }) => {
+    await page.setViewportSize({ width: 430, height: 932 });
+    await openApp(page);
+
+    const play = page.getByTestId('video-player-play-toggle');
+    const progress = page.getByTestId('video-player-progress-slider');
+    const time = page.getByTestId('video-player-time-display');
+    const mute = page.getByTestId('video-player-mute-toggle');
+    const volumeControl = page.getByTestId('video-player-volume-control');
+    const fullscreen = page.getByTestId('video-player-fullscreen-toggle');
+    const actions = page.getByTestId('video-player-secondary-actions');
+
+    await expect(page.getByTestId('video-player-settings-trigger')).toHaveCount(0);
+    await expect(play).toBeVisible();
+    await expect(progress).toBeVisible();
+    await expect(mute).toBeVisible();
+    await expect(time).toBeVisible();
+    await expect(fullscreen).toBeVisible();
+
+    const collapsedVolumeMetrics = await getInlineVolumeMetrics(volumeControl);
+    expect(collapsedVolumeMetrics.width).toBeLessThanOrEqual(4);
+
+    await page.getByTestId('video-player-volume-inline').hover();
+    await expect.poll(async () => (await getInlineVolumeMetrics(volumeControl)).width).toBeGreaterThan(32);
+
+    const playBox = await getBox(play);
+    const progressBox = await getBox(progress);
+    const timeBox = await getBox(time);
+    const muteBox = await getBox(mute);
+    const volumeControlBox = await getBox(volumeControl);
+    const fullscreenBox = await getBox(fullscreen);
+
+    expect(progressBox.y + progressBox.height).toBeLessThan(playBox.y - 4);
+    expect(Math.abs(playBox.y - timeBox.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(timeBox.y - muteBox.y)).toBeLessThanOrEqual(3);
+    expect(Math.abs(muteBox.y - fullscreenBox.y)).toBeLessThanOrEqual(2);
+    expect(volumeControlBox.width).toBeGreaterThan(volumeControlBox.height);
+    expect(volumeControlBox.x).toBeGreaterThan(muteBox.x + muteBox.width - 2);
+    expect(fullscreenBox.x).toBeGreaterThan(volumeControlBox.x + volumeControlBox.width - 2);
+
+    const actionStyles = await actions.evaluate((node) => {
+      const styles = window.getComputedStyle(node);
+      return {
+        overflowX: styles.overflowX,
+        flexWrap: styles.flexWrap,
+      };
+    });
+
+    expect(actionStyles.overflowX).toBe('auto');
+    expect(actionStyles.flexWrap).toBe('nowrap');
+  });
+
+  test('expands the control bar for FHD fullscreen playback', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await openApp(page, './?cid=bafyfullscreencontrols123');
+
+    await page.evaluate(() => {
+      const playerContainer = document.querySelector('[data-testid="player-container"]');
+      if (!playerContainer) {
+        return;
+      }
+
+      playerContainer.style.position = 'fixed';
+      playerContainer.style.inset = '0';
+      playerContainer.style.width = '100vw';
+      playerContainer.style.height = '100vh';
+      playerContainer.style.aspectRatio = 'auto';
+      playerContainer.style.zIndex = '999';
+      playerContainer.style.margin = '0';
+      playerContainer.style.borderRadius = '0';
+    });
+
+    await mockPlayerFullscreen(page, true);
+
+    const controlBar = page.locator('.player-control-bar');
+    const progress = page.getByTestId('video-player-progress-slider');
+    const playerBox = await getBox(page.getByTestId('player-container'));
+    const controlBarBox = await getBox(controlBar);
+    const progressBox = await getBox(progress);
+
+    await expect(controlBar).toHaveClass(/player-control-bar--fullscreen/);
+    expect(controlBarBox.width).toBeGreaterThan(playerBox.width - 60);
+    expect(progressBox.width).toBeGreaterThan(controlBarBox.width - 40);
+
+    const fullscreenStyles = await controlBar.evaluate((node) => {
+      const styles = window.getComputedStyle(node);
+      return {
+        maxWidth: styles.maxWidth,
+      };
+    });
+
+    expect(fullscreenStyles.maxWidth).toBe('none');
+  });
+
+  test('uses the shell fullscreen container and wakes controls on mouse move during fullscreen playback', async ({ page }) => {
+    await installFullscreenApiMock(page);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await openApp(page, './?cid=bafyfullscreencontrolsawake123');
+
+    const controls = page.getByTestId('video-player-controls');
+    const fullscreenToggle = page.getByTestId('video-player-fullscreen-toggle');
+
+    await fullscreenToggle.click();
+
+    const fullscreenRequest = await page.evaluate(() => window.__codexFullscreenMock.requests[0] || null);
+    expect(fullscreenRequest).not.toBeNull();
+    expect(fullscreenRequest.className).toContain('video-player-shell');
+    await expect(page.locator('.player-control-bar')).toHaveClass(/player-control-bar--fullscreen/);
+
+    const playerBox = await getBox(page.getByTestId('player-container'));
+    await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
+
+    await mockPlayerActivity(page, { isPlaying: true, isUserActive: false });
+    await expect(controls).toHaveAttribute('data-controls-visible', 'false');
+
+    await page.mouse.move(playerBox.x + playerBox.width / 2, playerBox.y + playerBox.height / 2);
+    await expect(controls).toHaveAttribute('data-controls-visible', 'true');
   });
 });
 

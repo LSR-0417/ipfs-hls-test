@@ -414,6 +414,24 @@ describe('applyPlaybackHotkey', () => {
     expect(player.exitFullscreenCalls).toBe(1);
   });
 
+  it('uses the custom fullscreen callback on f when one is provided', () => {
+    const player = createPlayer(10, 120);
+    const keyboard = createKeyboardEvent({ key: 'f' });
+    let toggles = 0;
+
+    expect(
+      applyPlaybackHotkey(keyboard.event, player, {
+        onToggleFullscreen() {
+          toggles += 1;
+        },
+      })
+    ).toBe(true);
+    expect(toggles).toBe(1);
+    expect(player.requestFullscreenCalls).toBe(0);
+    expect(player.exitFullscreenCalls).toBe(0);
+    expect(keyboard.wasPrevented()).toBe(true);
+  });
+
   it('steps frames while paused using the provided frame rate', () => {
     const player = createPlayer(10, 120, { paused: true });
     const keyboard = createKeyboardEvent({ key: '.', code: 'Period' });
