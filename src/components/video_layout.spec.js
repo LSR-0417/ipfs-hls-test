@@ -445,6 +445,15 @@ describe('VideoInfo layout contract', () => {
     expect(style).toContain('.stats-panel:hover .stats-tooltip');
   });
 
+  it('shows the uploader secondary text without a Channel ID prefix while keeping metadata labels unchanged', () => {
+    const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
+    const script = descriptor.scriptSetup?.content || '';
+
+    expect(script).toContain('return props.videoInfo.channelId;');
+    expect(script).not.toContain('Channel ID: ${props.videoInfo.channelId}');
+    expect(script).toContain("{ label: 'Channel ID', value: props.videoInfo.channelId }");
+  });
+
   it('moves download into an overflow menu and lets share collapse before like or dislike', () => {
     const descriptor = readDescriptor(new URL('./VideoInfo.vue', import.meta.url));
     const template = descriptor.template?.content || '';

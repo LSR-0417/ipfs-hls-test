@@ -51,20 +51,6 @@ export default Object.freeze({
   infoJson: {
     title: '整理影片素材',
     subtitle: '依序填寫影片資訊、匯入字幕，再設定影片處理選項。準備完成後，可以下載 sidecar 檔案，或在之後和影片一起使用。',
-    panels: {
-      metadata: {
-        title: '影片資訊',
-        caption: '填寫標題、描述與標籤等內容，整理好後就能下載 info.json。',
-      },
-      subtitles: {
-        title: '字幕資訊',
-        caption: '匯入字幕檔並整理語言清單，完成後可直接下載 subtitles.json。',
-      },
-      video: {
-        title: '影片處理',
-        caption: '選取影片、勾選想保留的畫質，並決定是否附上已整理好的 sidecar 檔案。',
-      },
-    },
     tabs: {
       ariaLabel: 'sidecar 草稿分頁',
       metadata: {
@@ -78,26 +64,15 @@ export default Object.freeze({
       },
     },
     form: {
-      title: '影片資訊',
       caption: '若目前已有載入影片，表單會先帶入它的 metadata。你也可以清空後自行填寫。',
     },
     assets: {
-      title: '本地素材',
-      caption: '先在瀏覽器裡整理 sidecar 用到的 avatar、字幕與來源影片；尚未真正上傳到後端。',
       localOnly: '僅保留於目前瀏覽器 session',
-      none: '尚未選取任何本地素材',
       upload: '選取檔案',
       replace: '更換檔案',
       remove: '移除',
-      avatar: {
-        title: '大頭貼',
-        caption: '支援圖片檔，先作為本地 avatar 預覽。',
-        previewAlt: '本地大頭貼預覽',
-      },
       subtitles: {
-        title: '字幕',
         caption: '可一次匯入多個 .vtt / .srt 檔，整理好後就能下載 subtitles.json。',
-        listTitle: '已匯入字幕',
         empty: '尚未匯入字幕',
         count: '共 {count} 條字幕',
         uploadAction: '上傳字幕',
@@ -108,10 +83,6 @@ export default Object.freeze({
         title: '來源影片',
         caption: '先選取要處理的影片檔，後面就能沿用這份設定。',
         empty: '尚未選取影片',
-        draftTitle: '處理設定摘要',
-        draftCaption: '這裡會整理你目前選擇的影片與處理選項，方便檢查。',
-        pending: '先選取影片',
-        ready: '設定已準備完成',
       },
     },
     file: {
@@ -127,9 +98,6 @@ export default Object.freeze({
       ready: '目前已整理 {info} 項影片資訊、{subtitles} 條字幕與 {assets} 份本地素材',
       infoDownloaded: '已下載 info.json',
       subtitleManifestDownloaded: '已下載 subtitles.json',
-      avatarSelected: '已選取大頭貼：{name}',
-      avatarRejected: '請選擇圖片檔作為大頭貼',
-      avatarCleared: '已移除大頭貼',
       subtitlesImported: '已匯入 {count} 條本地字幕',
       subtitlesPartial: '已匯入 {count} 條字幕，另有部分檔案失敗：',
       subtitlesFailed: '字幕匯入失敗',
@@ -137,16 +105,12 @@ export default Object.freeze({
       videoSelected: '已選取影片：{name}',
       videoRejected: '請選擇影片檔',
       videoCleared: '已移除影片草稿',
-      localAssetsCleared: '已清空本地素材',
     },
     actions: {
       clear: '清空表單',
-      clearAssets: '清空本地素材',
       clearSubtitles: '清空字幕',
       clearVideo: '清空影片',
       close: '關閉',
-      previous: '上一頁',
-      next: '下一頁',
       download: '下載 info.json',
     },
     fields: {
@@ -196,11 +160,6 @@ export default Object.freeze({
       includeSubtitles: '附上 subtitles.json',
       includeSubtitlesHintReady: '會把字幕資訊分頁目前生成的 subtitles.json 一起附上。',
       includeSubtitlesHintUnavailable: '先匯入字幕後，才能附上 subtitles.json。',
-      draftTitle: '目前設定摘要',
-      draftCaption: '這裡會整理你目前的影片、解析度與附加檔案設定。',
-      draftBadge: '目前設定',
-      summaryAttachments: '會附上 {count} 份 sidecar',
-      summaryNoAttachments: '這次不附上 sidecar',
       resolutionOptions: {
         '4k': {
           label: '4K',
